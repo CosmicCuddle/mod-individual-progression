@@ -1,5 +1,12 @@
 # Individual Player Progression
 
+> **CosmicCuddle server fork — custom changes and preservation records**
+>
+> All proposed, tested, and implemented server-specific Individual Progression changes are tracked in the [Custom Modifications Register](docs/CUSTOM_MODIFICATIONS_REGISTER.md), including code locations, external dependencies, test status, owner decisions, and rollback notes. Review it before updating from Grimfeather upstream. A planned entry is **not** an implemented feature, and a passing build is **not** proof of live deployment.
+>
+> This fork preserves the original Individual Progression work and credits below; CosmicCuddle's custom additions are tracked separately.
+
+
 ## Azerothcore Playerbots Module
 
 This module simulates progress through expansions and expansion tiers for individual players.
