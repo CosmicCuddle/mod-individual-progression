@@ -130,6 +130,12 @@ On 30 October 2026 an **equivalent 17-case source-only check run against GitHub 
 
 The proposed feature and its protected dependencies are also recorded in the [component Custom Modifications Register](https://github.com/CosmicCuddle/mod-individual-progression/blob/fix/hunter-autocast-rank-continuity-20261030/docs/CUSTOM_MODIFICATIONS_REGISTER.md). The register is deliberately partial until CosmicCuddle's real installed module inventory is verified.
 
+## Draft-only GitHub source-check workflow
+
+The isolated branch now also contains [`.github/workflows/hunter-autocast-static.yml`](https://github.com/CosmicCuddle/mod-individual-progression/blob/fix/hunter-autocast-rank-continuity-20261030/.github/workflows/hunter-autocast-static.yml), which uses a temporary GitHub-hosted runner to execute the **read-only Python source-guard script** on the draft branch and on pull requests targeting `develop/cosmic-ip`. It requests **contents: read** only, has a five-minute job limit and does not use server credentials, a production host, a WoW client, SQL or deployment commands.
+
+**Evidence boundary:** The workflow file was committed, but GitHub execution and result **were not confirmed** through the available workflow/status results at the time of writing. Do **not** count this as a passed CI run. Even if it passes later, it proves source-text invariants only and is not a C++ compile.
+
 ## Test-readiness decision at this revision — NOT READY
 
 This draft has reached a **source-review candidate** state, not a compiled or accepted test release.
