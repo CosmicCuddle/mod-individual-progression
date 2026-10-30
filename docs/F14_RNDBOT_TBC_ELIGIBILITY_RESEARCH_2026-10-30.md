@@ -81,6 +81,23 @@ The separate [Naxxramas F14 P1 draft #197](https://github.com/CosmicCuddle/Mod-N
 
 **Important old-policy hazard:** the P1 prototype's `HideTbcRow` currently offers “hide all” and “hide all except human.” **Neither implements CosmicCuddle's newer approved scope**: hide only when race is 10/11 **and the target is positively `RandomBot`**; `Human`, `AltBot`, `SelfBot`, `Unknown` remain visible. The owning developer already recognised this in Issue #143; do not merge/enable either old policy unmodified, and don't create a duplicate implementation in IP without an owner-approved integration plan.
 
+## 3D. IMPORTANT: active-bot restores bypass the normal *new selection* gate
+
+A second historical code trace shows why adding only a guard in `RandomPlayerbotMgr::AddRandomBots::tryLoginBot` would leave a real design hole:
+
+| Historical Playerbots path | Confirmed behaviour | F14 gate requirement |
+| --- | --- | --- |
+| `src/Bot/RandomPlayerbotMgr.cpp:2331–2352` `GetBots()` | During setup it restores GUIDs already associated with saved `"add"` events into `currentBots` **without looking up race or IP stage**. It does not call `tryLoginBot`. | Restored scheduling state must not make a BE/Draenei rndbot eligible during Vanilla. No destructive deletion of saved event rows is authorised. |
+| `src/Bot/RandomPlayerbotMgr.cpp:1383–1425` `ProcessBot(bot)` | If the saved `"add"` event remains valid and the bot is not already loaded, it calls `AddPlayerBot(botGUID, 0)` directly, independent of the selection lambda. | A separately reviewed gate must cover the **restore/process** path before login, not only newly selected candidates. |
+| `src/Bot/PlayerbotMgr.cpp:88–156` `PlayerbotHolder::AddPlayerBot` | Shared bot-load entry accepts GUID and `masterAccountId`. It sets a local `isRndbot = !masterAccountId`, but this merely means *no controlling master passed* and is **not sufficient positive RandomBot identity**; code also supports owner-linked/account/Altbot use cases. | Do not treat `masterAccountId==0` as proof of a RandomBot. Use the manager's verified random-account and scheduled-GUID population records, with source/version and thread ownership reviewed. |
+| `src/Bot/PlayerbotMgr.cpp:736–754` `ProcessBotCommand` | Manual `add` / `addaccount` / `login` goes through `AddPlayerBot` after account-related permission checks. | Test manual bot additions to ensure they cannot bypass any mandatory **positive-rndbot** starting-stage invariant, without blocking legitimate Altbots or human commands. |
+| `src/Bot/PlayerbotMgr.cpp:252–282` bot login completion | The bot session calls `HandlePlayerLoginFromDB`, which reaches Core's `sScriptMgr->OnPlayerLogin` at `CharacterHandler.cpp:1126`, **before** the later `OnBotLoginOperation` attaches/reconciles Playerbot AI in `PlayerbotHolder::OnBotLogin`. | A Playerbots identity adapter that requires **AI already attached** may not work at the exact time IP's `OnPlayerLogin` runs. The manager's positive GUID/account classification could help **if** the bot was already registered; prove order and world-thread safety on the owner's installed versions. |
+| `src/Bot/RandomPlayerbotMgr.cpp:2262–2285` `IsRandomBot` | The Player overload excludes confirmed SelfBots if AI exists; otherwise falls back to GUID overload, which requires random account membership AND `currentBots.contains(guid)`. | This is a promising positive identity **for scheduled and appropriately typed bots**, not a blanket classifier for newly created but inactive characters or manually loaded bots. Avoid a default-to-true guess on unknown. |
+
+**Required safety model, not yet implemented:** establish a single documented *eligibility* decision for a positively identified race-10/11 rndbot and ensure it is respected at all relevant activation paths (new selection, restart restore, event processing, manual commands as appropriate) **and** all progression stage-write paths. Do not clear `"add"` events or change characters automatically as a workaround. A previously saved race-10/11 character might already have stage 0 from old IP logic; a non-destructive, owner-approved migration/first-eligible-login strategy is required rather than rewriting dormant characters unseen.
+
+**Why there is no quick global switch:** Vanilla and TBC individual-progression players could coexist on the same 3.3.5a server. Global race suppression is only safe if the owner explicitly chooses it for an entirely Vanilla eligible population; otherwise observer-specific identity/visibility controls remain necessary. No new Core/Playerbots hook was added here.
+
 ## 4. Required test matrix before code or production
 
 | Test | Expected |
