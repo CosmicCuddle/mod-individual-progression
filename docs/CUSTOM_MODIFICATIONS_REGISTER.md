@@ -85,6 +85,12 @@ On 2026-10-30 CosmicCuddle updated Core and Playerbots before the Hunter local b
 
 The protected `develop/cosmic-ip` baseline already contains individual progression rules and prior local behaviour. **Those changes are not yet individually enumerated here.** They must be recorded after comparing the owner-installed core/IP/Playerbots/module revisions and custom working-tree modifications. Do not treat this initial register as a licence to reset, overwrite, rebase, prune or upgrade them. See [coordination #4](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/4) for the evidence gate.
 
+## Upstream candidate checkpoint — 30 October 2026 (NO MERGE)
+
+The checked `Grimfeather/mod-individual-progression:master` / fork mirror `master` source was at `18999da65adcbb70c7f4b962afb3600534481ef6`, **29 commits beyond the historical IP baseline**; protected `develop/cosmic-ip@edd639b0a6eba858830876e987def510450f438a` diverges by one local docs-only merge. The exact comparison touches **11 files** (C++ Chromaggus script and loader plus nine SQL files), including **removal of the current protected Chromaggus Time Lapse extra-threat script**. This removal is an **explicit owner decision blocker** in [Coordination Issue #5](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/5); do not automatically merge it or its corresponding BWL SQL delete. Several upstream SQL deltas delete/update existing NPC, formation, quest and smart-script rows; compare on a restorable staging DB before any owner-approved application.
+
+**Complete path-by-path audit and preservation/rollback gate:** [UPSTREAM_PRESERVATION_REVIEW_2026-10-30.md](UPSTREAM_PRESERVATION_REVIEW_2026-10-30.md). This is **source review only**, NOT evidence of currently installed revision, a real-world DB migration, compiled compatibility, Chromaggus owner policy, or live deployment.
+
 ## Upstream integration checklist
 
 Before every proposed Grimfeather update: identify actual installed commits and dirty files; compare upstream paths and ABI; cross-check this register and live issue decisions; propose a conflict-preservation plan; compile in a separate environment; test game outcomes and custom regressions; document backup and rollback; and request CosmicCuddle's approval before merge or production change.
