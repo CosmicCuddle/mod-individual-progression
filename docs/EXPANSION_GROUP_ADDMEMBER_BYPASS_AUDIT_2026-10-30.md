@@ -5,6 +5,14 @@
 **Historical source pins:** Grimfeather Core `8daffdabe9202c228e45d833c9a1d399597a15cd`; Playerbots `e88cc4099e69f35126b28942a412ca702d20453b`. **These are not confirmed owner-host current SHAs.**  
 **Change ownership:** Any core or Playerbots edits require a distinct, approved reviewable branch/PR; this document does not authorise one. No production/DB/config changes.
 
+## Owner's observed baseline (important positive evidence)
+
+CosmicCuddle reports from their established server use that `EnforceGroupRules` **does already block bots being invited or joining through the ordinary invitation flow**. **Preserve this confirmed owner-observed behaviour** and do not describe the current running server's normal bot grouping as broken. This report is **not** a controlled demonstration of the direct-add code path or a determination of whether the specific source pin is installed on the running host.
+
+A more focused trace of the historical Playerbots source confirms `src/Bot/PlayerbotMgr.cpp:591–620` queues `GroupInviteOperation(masterGUID, botGUID)` from `PlayerbotHolder::OnBotLogin` when a bot has a master and needs to be added/re-added to a group (or a new group created). `GroupInviteOperation::Execute` subsequently calls `Group::AddMember` directly, so the potential gap is **bot-login/master rejoining**, *not* an ordinary invite from the client. `src/Ai/Base/Actions/InviteToGroupAction.cpp` and `AcceptInvitationAction.cpp` go through the standard packet handlers and are consistent with the owner's observed blocks.
+
+This proves that an alternative source path exists in that **historical Playerbots revision**, **not** that a cross-expansion bot actually joined the owner's live server. Verify installed Playerbots SHA and reproduce the bot-login rejoin sequence safely in a development environment before proposing any Core/Playerbots hook or claiming this is a live defect.
+
 ## Why the grouping draft is not complete
 
 The IP GroupScript/PlayerScript predicates currently apply in `OnPlayerCanGroupInvite` and `OnPlayerCanGroupAccept`. Those hooks run in the ordinary group-invite handler:
