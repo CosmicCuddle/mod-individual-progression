@@ -81,7 +81,12 @@ int main()
     Check(MayGroup(7, 11, 2, 1, 0), false, "human Draenei blocked from Vanilla group");
     Check(MayGroup(8, 10, 12, 1, 0), true, "Blood Elf allowed within TBC");
     Check(MayGroup(13, 11, 18, 1, 0), true, "Draenei allowed within Wrath");
-    Check(MayGroup(9, 1, 12, 1, 7), true, "effective cap changes both humans to Vanilla");
+    Check(MayGroup(9, 1, 12, 1, 7), false, "above-cap TBC players cannot masquerade as Vanilla");
+    Check(MayGroup(7, 1, 9, 1, 7), false, "Vanilla and above-cap TBC stay separate");
+    Check(MayGroup(8, 1, 12, 1, 12), true, "TBC players within TBC progression cap can group");
+    Check(MayGroup(0, 1, 7, 1, 7), true, "Vanilla players within Vanilla cap can group");
+    Check(MayGroup(8, 1, 12, 1, 8), false, "above-cap TBC tier must not be downcast");
+    Check(MayGroup(13, 1, 18, 1, 12), false, "Wrath players disallowed under TBC cap");
     Check(MayGroup(9, 10, 12, 1, 7), false, "effective Vanilla cap forbids Blood Elf grouping");
     Check(MayGroup(19, 1, 18, 1, 7), false, "invalid raw tier not fixed by a cap");
     Check(MayGroup(8, 1, 8, 1, 19), false, "invalid progression cap denied");
