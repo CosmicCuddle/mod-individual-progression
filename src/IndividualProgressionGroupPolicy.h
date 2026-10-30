@@ -53,6 +53,12 @@ namespace IndividualProgressionGroupPolicy
                             std::uint8_t secondStage, std::uint8_t secondRace,
                             std::uint8_t progressionLimit)
     {
+        // Invalid quest-stage data must not become valid merely because a
+        // lower server cap clamps its value.
+        if (firstStage > LastSupportedStage || secondStage > LastSupportedStage ||
+            progressionLimit > LastSupportedStage)
+            return false;
+
         Expansion const first = GetExpansion(EffectiveStage(firstStage, progressionLimit));
         Expansion const second = GetExpansion(EffectiveStage(secondStage, progressionLimit));
 
