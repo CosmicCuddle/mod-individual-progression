@@ -1,8 +1,7 @@
 name: IP group expansion pinned Worldserver compile - isolated only
 
 on:
-  push:
-    branches: [feature/expansion-group-rules-20261030]
+  pull_request:
     paths:
       - .github/workflows/ip-expansion-pinned-worldserver.yml
       - src/IndividualProgressionPlayer.cpp
