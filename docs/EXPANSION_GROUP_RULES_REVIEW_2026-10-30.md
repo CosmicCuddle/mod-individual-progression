@@ -22,7 +22,7 @@ Keep the **existing** `IndividualProgression.EnforceGroupRules = 0/1` option and
 
 `src/IndividualProgressionGroupPolicy.h`: small pure, constexpr stage/race/limit policy; invalid stages/cap rejected. Includes a **test-only** F14 starting-floor rule in `IsAllowedRandomBotStage`. It is **NOT YET CALLED** by active server code; do not mistake it for a completed Blood Elf/Draenei rndbot fix.
 
-`src/IndividualProgressionPlayer.cpp`: replace two existing complex grouping branches with consistent expansion predicate in `OnPlayerCanGroupInvite` and `OnPlayerCanGroupAccept`. OFF remains a separate original-behaviour route; when ON, same-era bots may still inherit the leader's detailed tier.
+`src/IndividualProgressionPlayer.cpp`: replace two existing complex grouping branches with consistent expansion predicate in `OnPlayerCanGroupInvite` and `OnPlayerCanGroupAccept`. OFF remains a separate original-behaviour route. **ON mode no longer rewrites bot quests during invitation acceptance**: historical Core calls this hook *before* final membership checks, so an unsuccessful accept could previously change progression. Instead, existing `GroupScript::OnAddMember` calls `SyncBotsProgressionToLeader` **after successful addition**; when ON, eligible bot members then inherit the human leader's detailed stage within their era. Verify both success and failure paths in real game.
 
 `src/IndividualProgression.cpp`: `SyncBotsProgressionToLeader` skips cross-era writes when enforcement is ON. It now **synchronises stage-0 pre-MC bots to a stage-0 human leader while ON** (the legacy unconditional tier-0 skip remains while OFF), and skips no-op IP quest removal/recreation when an ON-mode member is already at the leader's tier. Verify this behavioural change in game.
 
