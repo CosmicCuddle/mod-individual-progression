@@ -1,0 +1,157 @@
+name: Hunter IP owner-source-matched compile - isolated only
+
+on:
+  push:
+    branches: [fix/hunter-autocast-rank-continuity-20261030]
+    paths:
+      - .github/workflows/hunter-autocast-owner-source-build.yml
+      - src/IndividualProgressionSpells.cpp
+      - tests/check_hunter_autocast_source.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hunter-ip-owner-source-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source-matched-worldserver:
+    name: Owner reported Git SHAs + isolated local Playerbots fixes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - name: Checkout owner's reported AzerothCore source SHA
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          path: acore
+          persist-credentials: false
+
+      - name: Checkout owner's reported Playerbots source SHA
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: acore/modules/mod-playerbots
+          persist-credentials: false
+
+      - name: Checkout exact Hunter IP DRAFT source head
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: ${{ github.sha }}
+          path: acore/modules/mod-individual-progression
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout owner's reported Naxxramas module source SHA
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/Mod-Naxxramas-Core
+          ref: 80e9de1c39a6dc995188a80c31a5e785d0f2a6f9
+          path: acore/modules/mod-naxxramas-core
+          persist-credentials: false
+
+      - name: Verify all four exact source SHAs
+        run: |
+          set -euo pipefail
+          test "$(git -C acore rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
+          test "$(git -C acore/modules/mod-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          test "$(git -C acore/modules/mod-individual-progression rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C acore/modules/mod-naxxramas-core rev-parse HEAD)" = 80e9de1c39a6dc995188a80c31a5e785d0f2a6f9
+
+      - name: Reproduce ONLY two owner-reported local Playerbots header edits
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          module = Path("acore/modules/mod-playerbots")
+          replacements = {
+              "src/Db/PlayerbotsDatabase.h": (
+                  "MySQLConnection* CreateAsyncConnection(ProducerConsumerQueue<SQLOperation*>* queue,",
+                  "MySQLConnection* CreateConnection(ProducerConsumerQueue<SQLOperation*>* queue,"
+              ),
+              "src/Util/LocaleColumns.h": (
+                  "if (!IsLocaleRegistered(locale))",
+                  "if (!LocaleNames[locale])"
+              ),
+          }
+          for relative_path, (old, new) in replacements.items():
+              path = module / relative_path
+              source = path.read_text(encoding="utf-8")
+              assert source.count(old) == 1, f"Expected exact one-line origin not found: {relative_path}"
+              assert source.count(new) == 0, f"Unexpected pre-existing change: {relative_path}"
+              path.write_text(source.replace(old, new), encoding="utf-8")
+              print(f"Reproduced owner screenshot one-line change: {relative_path}")
+          PY
+          git -C acore/modules/mod-playerbots diff --check
+          python3 - <<'PY'
+          import subprocess
+          cwd = "acore/modules/mod-playerbots"
+          files = set(subprocess.check_output(
+              ["git", "diff", "--name-only"], cwd=cwd, text=True).splitlines())
+          assert files == {"src/Db/PlayerbotsDatabase.h", "src/Util/LocaleColumns.h"}, files
+          numstat = subprocess.check_output(
+              ["git", "diff", "--numstat"], cwd=cwd, text=True).splitlines()
+          assert len(numstat) == 2, numstat
+          for line in numstat:
+              added, removed, _ = line.split("\t", 2)
+              assert (added, removed) == ("1", "1"), line
+          print("PASS: exactly two 1-line Playerbots edits; no other file changes")
+          PY
+
+      - name: Verify IP source preservation against development baseline
+        run: python3 acore/modules/mod-individual-progression/tests/check_hunter_autocast_source.py
+
+      - name: Install compiler dependencies ONLY on disposable runner
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git cmake ninja-build g++ make pkg-config file \
+            libmysqlclient-dev libssl-dev libbz2-dev \
+            libreadline-dev libncurses-dev libboost-all-dev
+
+      - name: Configure full owner-source-matched Worldserver
+        run: |
+          cmake -S acore -B acore-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DMODULES=static -DSCRIPTS=static \
+            -DAPPS_BUILD=world-only -DTOOLS_BUILD=none \
+            -DUSE_COREPCH=ON -DUSE_SCRIPTPCH=ON
+
+      - name: Require exact Hunter translation unit in real compile graph
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          commands = json.loads(Path("acore-build/compile_commands.json").read_text())
+          found = [entry for entry in commands
+                   if entry.get("file", "").replace("\\", "/").endswith(
+                       "/mod-individual-progression/src/IndividualProgressionSpells.cpp")]
+          assert len(found) == 1, f"Hunter TU count {len(found)}"
+          print("PASS: real Worldserver build graph includes Hunter IP draft source")
+          PY
+
+      - name: Compile and link owner-source-matched Worldserver (NEVER LAUNCH)
+        run: cmake --build acore-build --target worldserver --parallel 2
+
+      - name: Verify linked executable without uploading or deploying
+        run: |
+          set -euo pipefail
+          binary=acore-build/src/server/apps/worldserver
+          test -s "$binary" && test -x "$binary"
+          sha256sum "$binary"
+          echo "PASS: isolated exact source pins with two owner Playerbots header edits"
+          echo "NOT an owner-installed live binary or gameplay acceptance result"
+
+      - name: Preserve safety boundary
+        if: always()
+        run: |
+          echo "This checkout is on a disposable GitHub runner, NOT CosmicCuddle's host."
+          echo "Two Playerbots edits reproduced from owner screenshot, NOT downloaded from host."
+          echo "No live Worldserver, SQL, config, DBC, client, backup, merge, or deployment."
+          echo "Other installed modules, effective configs, binary provenance and restore readiness remain unverified."
+          echo "Owner approval required before any production build, server restart or gameplay test."
