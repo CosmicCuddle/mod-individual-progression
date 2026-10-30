@@ -1,0 +1,19 @@
+name: Hunter autocast static checks
+on:
+  push:
+    branches: [fix/hunter-autocast-rank-continuity-20261030]
+  pull_request:
+    branches: [develop/cosmic-ip]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 tests/check_hunter_autocast_source.py
+      - run: echo "Source guards only. No C++ build, database or gameplay tests."
