@@ -2,7 +2,10 @@
 
 **Owner:** CosmicCuddle  
 **Date:** 2026-10-30  
-**State:** EXPERIMENTAL development-only candidate. **Not compiled, not gameplay-tested, not installed, not merged or released.**  
+**Latest status update — 2026-10-30:** Source/native full Worldserver build confirmed passing in GitHub Actions [41073281260](https://github.com/CosmicCuddle/mod-individual-progression/actions/runs/41073281260) and owner-source-matched build [41084770943](https://github.com/CosmicCuddle/mod-individual-progression/actions/runs/41084770943). CosmicCuddle reports a successful local rebuild after updating Core and Playerbots and positive initial in-game verification of pre-Molten-Core Wolf Bite Rank 8. The precise running binary has not been independently fingerprinted; distinct ON/OFF rank-replacement and stable/relog cases have not each been formally confirmed. **DRAFT PR #1 remains unmerged.** Owner locally used code commit f0044987cc2d6f0b73c1cd25d17012a26a764beb; later documentation-only commits do not change its C++ implementation. The [Custom Modifications Register](CUSTOM_MODIFICATIONS_REGISTER.md) is the current change/status index.  
+
+**Historical review status:** The original detailed analysis below was written **before** these builds and owner gameplay reports. Its statements such as 'not compiled' are **historical as-of-review notes, superseded by the update above**, not current results.  
+
 **Base:** `develop/cosmic-ip`, matching protected source baseline `dd96f2b77e3ebfa2a4726bf785525ba133f1ab61` when this work began.  
 **Authoritative policy:** [Coordination Issue #3 owner decision](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/3#issuecomment-6524119930).
 
