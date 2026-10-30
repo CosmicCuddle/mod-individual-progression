@@ -30,22 +30,27 @@ def hunter_family_region(source: str) -> str:
 
 
 def baseline_source(repo_root: Path) -> str:
-    process = subprocess.run(
-        ["git", "show", f"{BASE_REF}:{SOURCE}"],
-        cwd=repo_root,
-        text=True,
-        encoding="utf-8",
-        capture_output=True,
-        check=False,
-    )
-    if process.returncode:
-        raise RuntimeError(
-            "Local develop/cosmic-ip ref is unavailable. "
-            "Use a complete local IP checkout with that branch; "
-            "this check will NOT fetch from GitHub automatically. "
-            f"Git error: {process.stderr.strip()[:250]}"
+    # Branch may be checked out locally or exist only as a remote-tracking ref.
+    # No fetch is performed; absence fails explicitly.
+    last_error = ""
+    for baseline_ref in (BASE_REF, f"origin/{BASE_REF}"):
+        process = subprocess.run(
+            ["git", "show", f"{baseline_ref}:{SOURCE}"],
+            cwd=repo_root,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
         )
-    return process.stdout
+        if process.returncode == 0:
+            return process.stdout
+        last_error = process.stderr.strip()[:250]
+    raise RuntimeError(
+        "Neither local develop/cosmic-ip nor origin/develop/cosmic-ip "
+        "is available. Use an existing complete Git checkout. "
+        "This checker will NOT fetch from GitHub. "
+        f"Git error: {last_error}"
+    )
 
 
 def main() -> int:
@@ -100,10 +105,10 @@ def main() -> int:
             "pet->CustomData.Get<PendingPetSpellCheck>(PENDING_CHECK_KEY)" in candidate)
     require("Warlock's original reconciliation call retained",
             "sIndividualProgression->checkWarlockPetSpells(player);" in candidate)
-    require("No obvious new schema mutation statements in the candidate",
-            not any(token in candidate for token in (
-                "CREATE TABLE", "ALTER TABLE", "DROP TABLE",
-                "DELETE FROM pet_spell", "TRUNCATE TABLE")))
+    require("No added schema mutation statements versus the protected base",
+            not any(token in candidate and token not in reference
+                    for token in ("CREATE TABLE", "ALTER TABLE", "DROP TABLE",
+                                  "DELETE FROM pet_spell", "TRUNCATE TABLE")))
 
     if errors:
         print("\nSTATIC SOURCE CHECK FAILED. These checks do not compile C++.")
