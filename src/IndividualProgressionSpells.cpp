@@ -1411,18 +1411,53 @@ public:
     }
 };
 
-// Per-pet flag: a DelayedPetSpellCheck is already queued on this pet.
-// Lives in the Pet's CustomData, so it dies with the Pet object and never leaks.
+// Per-pet state: a spell check is queued or deferred until this pet's
+// asynchronous spell load finishes. It dies with the original Pet object.
+static constexpr char const* PENDING_CHECK_KEY = "ipp_PendingPetSpellCheck";
+
 class PendingPetSpellCheck : public DataMap::Base
 {
 public:
     bool pending = false;
+    bool afterLoad = false;
+};
+
+// The delayed event stops retrying after its existing time limit. If spell
+// loading is unusually slow, this Hunter-only hook completes the SAME pet's
+// pending check once the core reports that loading has finished. It does not
+// poll the database, schedule infinite events or copy another pet's settings.
+class IndividualPlayerProgression_HunterPetLoadRecoveryScript : public PlayerScript
+{
+public:
+    IndividualPlayerProgression_HunterPetLoadRecoveryScript()
+        : PlayerScript("IndividualProgression_HunterPetLoadRecoveryScript") { }
+
+    void OnPlayerAfterUpdate(Player* player, uint32 /*diff*/) override
+    {
+        if (!player || !player->IsInWorld() || player->getClass() != CLASS_HUNTER)
+            return;
+
+        Pet* pet = player->GetPet();
+        if (!pet || !pet->IsInWorld() || pet->isBeingLoaded())
+            return;
+
+        PendingPetSpellCheck* pending = pet->CustomData.GetDefault<PendingPetSpellCheck>(PENDING_CHECK_KEY);
+        if (!pending->pending || !pending->afterLoad)
+            return;
+
+        // Clear first: a second update cannot replay an already completed
+        // reconciliation, and an old Pet's flag never applies to a new Pet.
+        pending->pending = false;
+        pending->afterLoad = false;
+
+        if (sIndividualProgression->enabled && !sIndividualProgression->isBotAccount(player))
+            sIndividualProgression->checkHunterPetSpells(player);
+    }
 };
 
 class IndividualPlayerProgression_PetScript : public PetScript
 {
 private:
-    static constexpr char const* PENDING_CHECK_KEY = "ipp_PendingPetSpellCheck";
 
     static void ScheduleDelayedSpellCheck(Pet* pet)
     {
@@ -1503,10 +1538,21 @@ public:
                 return true;
             }
 
-            // The check runs now - allow the next pet load to queue a fresh one.
-            pet->CustomData.GetDefault<PendingPetSpellCheck>(PENDING_CHECK_KEY)->pending = false;
+            PendingPetSpellCheck* pending = pet->CustomData.GetDefault<PendingPetSpellCheck>(PENDING_CHECK_KEY);
+            if (player->getClass() == CLASS_HUNTER && pet->isBeingLoaded())
+            {
+                // The normal bounded retry window ended during DB loading.
+                // The Hunter-only player-update hook will reconcile this
+                // original Pet once loading finishes. Do not unlearn early.
+                pending->afterLoad = true;
+                return true;
+            }
 
-            if (player->getClass() == CLASS_HUNTER && !pet->isBeingLoaded())
+            // The check runs now - allow the next pet load to queue a fresh one.
+            pending->pending = false;
+            pending->afterLoad = false;
+
+            if (player->getClass() == CLASS_HUNTER && sIndividualProgression->enabled)
                 sIndividualProgression->checkHunterPetSpells(player);
             if (player->getClass() == CLASS_WARLOCK)
                 sIndividualProgression->checkWarlockPetSpells(player);
@@ -1661,6 +1707,7 @@ public:
 void AddSC_mod_individual_progression_spells()
 {
     new IndividualPlayerProgressionSpells();
+    new IndividualPlayerProgression_HunterPetLoadRecoveryScript();
     new IndividualPlayerProgression_PetScript();
     new IndividualPlayerProgression_UnitScript();
 }
