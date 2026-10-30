@@ -8,8 +8,6 @@ on:
       - src/IndividualProgression.cpp
       - src/IndividualProgressionGroupPolicy.h
       - tests/check_group_expansion_source.py
-      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
-      - docs/EXPANSION_GROUP_RULES_REVIEW_2026-10-30.md
   workflow_dispatch:
 
 permissions:
