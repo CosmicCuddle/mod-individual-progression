@@ -98,6 +98,30 @@ A second historical code trace shows why adding only a guard in `RandomPlayerbot
 
 **Why there is no quick global switch:** Vanilla and TBC individual-progression players could coexist on the same 3.3.5a server. Global race suppression is only safe if the owner explicitly chooses it for an entirely Vanilla eligible population; otherwise observer-specific identity/visibility controls remain necessary. No new Core/Playerbots hook was added here.
 
+## 3E. CONFIRMED: login's stage-0 force update can remove existing TBC progression markers
+
+**Source-pinned destructive-write hazard (NOT a reported live incident).** This refines the existing section 2 login finding, following [Information's F14 source addendum](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9#issuecomment-6535358991).
+
+- At IP DRAFT grouping source `e0cd785f6b2090c8f099c824811077d0ab2a9de5`, [`IndividualProgressionPlayer.cpp::OnPlayerLogin`](https://github.com/CosmicCuddle/mod-individual-progression/blob/e0cd785f6b2090c8f099c824811077d0ab2a9de5/src/IndividualProgressionPlayer.cpp#L37-L71) treats a low-level **non-normal-account** player (bot **or other excluded account**) as stage 0 when level is 60 or less and invokes `ForceUpdateProgressionState(player, 0)` regardless of race or existing recorded stage. There is **no positively verified RandomBot condition** in this branch.
+- [`IndividualProgression.cpp::ForceUpdateProgressionState`](https://github.com/CosmicCuddle/mod-individual-progression/blob/e0cd785f6b2090c8f099c824811077d0ab2a9de5/src/IndividualProgression.cpp#L76-L103) first iterates all rewarded hidden stage quests and calls `RemoveRewardedQuest`, then re-adds only through the requested stage. **If** a race-10/11 stage-8+ rndbot traverses the stage-0 login branch, previously rewarded stage markers can be removed. Merely returning a simulated stage-8 value on WHO/visibility cannot undo that write. The older owner-uploaded non-dist `individualProgression.conf` snapshot has `ProgressionLimit=0`; that file is **not verified effective today**, and the level-60 cap alone cannot prove a stage-7 cap.
+- A fix confined to *after* `OnPlayerLogin`, `OnBotLoginOperation`, or `OnGroupAddMember` is **too late** to guarantee original stage markers survived. Treat stage-quest write preservation as a **precondition** of any positively identified rndbot admission, with read-only source classification and a version-verified safe point *before the first reset*.
+- This does **not** license globally disabling existing login corrections for unrelated excluded-account characters, rewriting an already damaged saved character, changing the human BE/Draenei starting-tier setting, or granting stage 8 while Vanilla is ineligible. Ineligible genuine race-10/11 rndbots must remain **saved but dormant**, with event/character rows preserved. Other verified rndbots and Human/Altbot/Selfbot/Unknown are negative controls.
+- Exact integration remains an architectural blocker: at the IP `OnPlayerLogin` callback, normal bot AI may not yet be attached, while historical Playerbots manager identity combines random-account membership and `currentBots` active/scheduled GUID set. Confirm safe lifecycle/thread context, including `GetBots()` persisted restore, `ProcessBot()` and manual bot load, **before** relying on this identity.
+
+### Mandatory non-destructive progression preservation acceptance
+
+| Controlled case | Required observation and no-go outcome |
+| --- | --- |
+| Saved **verified** race-10/11 rndbot, level 60, rewarded stage 8/12 before relog | After reconnect, the same hidden rewarded stage markers remain; **no invocation** of `ForceUpdateProgressionState(..., 0)` for this eligible rndbot. Capture before/after non-secret stage-marker IDs in disposable test data. |
+| Saved race-10/11 rndbot in a genuinely **Vanilla-ineligible** environment | No activation into the Vanilla population and **no stage-8 auto-grant**; saved character and event rows unchanged, no forced stage-0 migration. |
+| New race-10/11 rndbot at first **TBC-eligible** login | Exactly one valid stage-8+ initialization, no transient destructive stage-0 reset and no invented class/account identity. |
+| Persisted `add` event survives server restart | `GetBots()` / `ProcessBot()` cannot bypass eligibility before the login callback, without deleting or consuming the pending record. |
+| Legitimate Vanilla-race RandomBot and existing excluded-account non-rndbot | Preserve established login progression behaviour unless separately approved; never infer protected identity solely from `!isNormalAccount` or `masterAccountId==0`. |
+| Human BE/Draenei, Altbot, Selfbot and Unknown at any level | No F14-only reset override, visibility suppression or tier-8 force-grant based simply on race or account prefix. |
+| Bot grouping toggled OFF/ON, manual tier update, group sync, relog | For **positively identified race-10/11 rndbots**, invalid downward writes **cannot remove already rewarded hidden quests**; OFF grouping remains stock otherwise. |
+
+**Testing boundary:** This table is a pre-implementation acceptance specification. It does **not** certify a fix, a real in-client test, installed source versions, verified backup/restore, or approval to rewrite old character data. Compare before/after stage-marker data only in a separately approved disposable database fixture; backups, schema compatibility and rollback come first.
+
 ## 4. Required test matrix before code or production
 
 | Test | Expected |
