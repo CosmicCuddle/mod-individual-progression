@@ -47,6 +47,23 @@ The upstream source contains a gameplay-significant **removal** of IP's Chromagg
 5. **In-game regression before release:** Chromaggus Time Lapse/BWL gating; Hunter ON/OFF same-pet stable/relog; cross-era bot invitation/rejoin and offline member handling; F14 stage write safety and rndbot-only observer visibility; NPC phase masks, Ironforge quest script, AV formations and any future TBC SQL selected. Document all failures and rollback.
 6. **Release gate:** CosmicCuddle explicitly approves exact merged code, SQL, config/DBC, restore-tested backups, feature toggles and deployment. Preserve known-good binaries and state, use staged rollback, then record actual live verification in the [Custom Modifications Register](CUSTOM_MODIFICATIONS_REGISTER.md).
 
-## 5. What was and was not done
+## 5. Review-only branch integration / collision map (30 October 2026)
+
+Verified GitHub PR changed-file lists and base branches; **this is NOT an instruction to merge them**.
+
+| Open DRAFT | Base | Executable or documentation scope | Reconciliation requirement |
+| --- | --- | --- | --- |
+| [Hunter #1](https://github.com/CosmicCuddle/mod-individual-progression/pull/1) | `develop/cosmic-ip` | `src/IndividualProgressionSpells.cpp`; Hunter checks, README, review and modifications register | Preserve exact owner-tested C++; reconcile README and shared register before a separately approved merge |
+| [Grouping #3](https://github.com/CosmicCuddle/mod-individual-progression/pull/3) | `develop/cosmic-ip` | `src/IndividualProgression.cpp`, `src/IndividualProgressionPlayer.cpp`, group policy, checks, register and audit | Keep exact-head compile frozen; direct Playerbots `Group::AddMember` bypass and offline party policy remain gated |
+| [Grouping audit #5](https://github.com/CosmicCuddle/mod-individual-progression/pull/5) | Grouping **feature branch** | Two Markdown files: pre-add bypass audit and shared register | This is a *stacked child*, not a separate implementation; do not merge before resolving/rebasing parent #3 |
+| [F14 research #4](https://github.com/CosmicCuddle/mod-individual-progression/pull/4) | `develop/cosmic-ip` | F14 source memo and shared register | Research only, no rndbot floor/visibility code; coordinate registered options without new core hook |
+| [F14 synthetic tests #6](https://github.com/CosmicCuddle/mod-individual-progression/pull/6) | F14 **research branch** | Pure model/tests + isolated CI + QA memo | Stacked child; synthetic green is not F14 runtime, do not mistake model for hook implementation |
+| [Upstream audit #7](https://github.com/CosmicCuddle/mod-individual-progression/pull/7) | `develop/cosmic-ip` | Two Markdown files only, including this ledger | Register update must be reconciled with any other draft; no executable source/SQL changed |
+
+**Concrete collision warning:** `docs/CUSTOM_MODIFICATIONS_REGISTER.md` is changed in **#1, #3, #4, #5 and #7**. The shared register is a **single authoritative list**; a blind merge/rebase of divergent draft copies can silently drop entries. Before any owner-approved merge, compare all five register revisions and retain each custom feature, owner decision, test state, rollback notes and upstream risk. The Hunter and grouping drafts do **not** both modify the same C++ file in their current PR diffs, but later F14 runtime work would need to touch the existing grouping/login paths and can create semantic and textual conflicts. Exact installed Core/Playerbots compatibility is still unknown.
+
+**Suggested later review sequence, not approved execution:** (a) freeze and verify each exact current draft, (b) approve individual game behaviour and restorable backup plans, (c) reconcile **all** register copies into one source-of-truth document, (d) integrate approved source changes into a fresh, reviewable candidate rather than overwrite either original branch, (e) run exact combined historical Worldserver link and owner-approved staging/gameplay/rollback, (f) only then consider any upstream SQL or Chromaggus decision. Keep each source branch intact for provenance.
+
+## 6. What was and was not done
 
 This audit is based on GitHub public source **commit comparison**, not remote-host files or a SQL SELECT. No source update, branch merge, script removal, SQL apply, config edit, game test, Worldserver build, backup claim, restart or deployment took place. All unmerged IP drafts remain isolated. The authorisation and recorded gameplay decisions are in Coordination [#4](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/4), [#5](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/5), [#9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9), and [#10](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/10).
