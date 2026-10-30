@@ -17,7 +17,11 @@ checks = {
     "policy rejects invalid raw stages": "firstStage > LastSupportedStage || secondStage > LastSupportedStage" in policy,
     "Vanilla TBC race restriction": "first == Expansion::Vanilla && (IsExpansionRace(firstRace) || IsExpansionRace(secondRace))" in policy,
     "on invite enforces same expansion": 'bool OnPlayerCanGroupInvite(' in player and player.count('IndividualProgressionGroupPolicy::MayGroup(') >= 3,
-    "on accept protects bot stage syncing": 'uint8 const permittedStage = IndividualProgressionGroupPolicy::EffectiveStage(leaderState, limit);' in player,
+    "on accept defers bot stage mutation until true membership": (
+        "GroupScript::OnAddMember performs the permitted" in player and
+        "void OnAddMember(Group* group, ObjectGuid guid) override" in player and
+        "sIndividualProgression->SyncBotsProgressionToLeader(group);" in player
+    ),
     "both invite/accept inspect persisted member slots": player.count('group->GetMemberSlots()') == 2 and player.count('ObjectAccessor::FindConnectedPlayer(slot.guid)') == 2,
     "offline member tiers fail closed under enforcement": player.count('if (!member || !member->IsInWorld())\n                    return false;') == 2,
     "leader sync guards expansion": 'if (!IndividualProgressionGroupPolicy::MayGroup(' in core and 'if (enforceGroupRules)' in core,
