@@ -51,4 +51,4 @@ For safety, this PR must remain **DRAFT and not be merged** until either the F14
 
 ## Source status log
 
-- **2026-10-30:** Code and tests proposed on isolated branch, no runtime production changes. Observe CI/workflow results independently before changing the status to PASS.
+- **2026-10-30:** Code and tests proposed on isolated branch. [Hosted standalone run 41129586089](https://github.com/CosmicCuddle/mod-individual-progression/actions/runs/41129586089) **PASS** after an independently inspected original job log: C++17 3,676/3,676; C++20 3,676/3,676; 11/11 static source-wiring checks. An earlier CI run failed because the **test's expected result omitted the second group member's race**; test fixed, then hosted CI passed. Also guarded negative/out-of-range `ProgressionLimit` from uint8 truncation and protected disabled-IP group updates. Historical pinned full Worldserver compile remains queued/unverified, no live game or deployment test. Source review and owner approval still required.
