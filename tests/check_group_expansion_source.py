@@ -13,7 +13,7 @@ policy = (root / "src/IndividualProgressionGroupPolicy.h").read_text()
 checks = {
     "player script uses shared policy": '#include "IndividualProgressionGroupPolicy.h"' in player,
     "IP grouping helper uses shared policy": '#include "IndividualProgressionGroupPolicy.h"' in core,
-    "policy uses effective cap": "EffectiveStage(firstStage, progressionLimit)" in policy,
+    "policy rejects above-cap recorded tiers": "firstStage > progressionLimit || secondStage > progressionLimit" in policy,
     "policy rejects invalid raw stages": "firstStage > LastSupportedStage || secondStage > LastSupportedStage" in policy,
     "Vanilla TBC race restriction": "first == Expansion::Vanilla && (IsExpansionRace(firstRace) || IsExpansionRace(secondRace))" in policy,
     "on invite enforces same expansion": 'bool OnPlayerCanGroupInvite(' in player and player.count('IndividualProgressionGroupPolicy::MayGroup(') >= 3,
