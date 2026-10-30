@@ -116,6 +116,20 @@ done
 - **Do not paste any private remote URL or unredacted `.conf`/database content into GitHub**. Share only the five fields above, plus an explanation if any directory differs.
 - This is **not** a backup, backup-restore exercise, build or gameplay test. The actual binary and active settings still require separate evidence under [coordination #4](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/4).
 
+## Repeatable source-only checks (draft, not a C++ build)
+
+The draft now includes [`tests/check_hunter_autocast_source.py`](https://github.com/CosmicCuddle/mod-individual-progression/blob/fix/hunter-autocast-rank-continuity-20261030/tests/check_hunter_autocast_source.py). In a **local IP source checkout** containing `develop/cosmic-ip` (or its `origin/` remote-tracking ref), it can be run later with:
+
+```bash
+python3 tests/check_hunter_autocast_source.py
+```
+
+The checker is **read-only**. It compares the full Hunter family-mapping region against the protected development base and checks critical code guards, loading recovery, ON/OFF handling, identity matching and SQL-schema-text changes. If the reference branch is absent, it stops with an explicit error; **it does not fetch from the network**. It does not need a running server, SQL, secrets or client.
+
+On 30 October 2026 an **equivalent 17-case source-only check run against GitHub fetched baseline/candidate contents** passed **17/17**; the committed Python script itself **has not yet been executed**. This establishes source-text agreement only, **NOT** C++ compilation, code-path correctness, gameplay, persistence or server compatibility.
+
+The proposed feature and its protected dependencies are also recorded in the [component Custom Modifications Register](https://github.com/CosmicCuddle/mod-individual-progression/blob/fix/hunter-autocast-rank-continuity-20261030/docs/CUSTOM_MODIFICATIONS_REGISTER.md). The register is deliberately partial until CosmicCuddle's real installed module inventory is verified.
+
 ## Test-readiness decision at this revision — NOT READY
 
 This draft has reached a **source-review candidate** state, not a compiled or accepted test release.
