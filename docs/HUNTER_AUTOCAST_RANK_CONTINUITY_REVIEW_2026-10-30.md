@@ -49,6 +49,9 @@ The pinned `PetScript.h` has `OnInitStatsForLevel` and `OnPetAddToWorld` but **n
 
 ## Source-only regression checks performed (not a compile)
 
+The current revision also statically verifies that `afterLoad` is set only at the bounded Hunter timeout, cleared before the recovery callback invokes reconciliation, and registered as a separate Hunter-only `PlayerScript`. The fallback uses `DataMap::Get` (not `GetDefault`) on ordinary player updates to avoid creating pet-local records each tick and reuses a static key. These are code-review checks, not observed runtime timing or performance tests.
+
+
 Compared the proposed branch against `develop/cosmic-ip` using GitHub file contents on 30 October 2026:
 
 - The entire Hunter **family-rule section** (from the Wolf condition through the next IP function) matched byte-for-byte; **111** existing `reconcile(...)` calls were preserved. Existing commented Cower mappings remained commented.
@@ -112,6 +115,23 @@ done
 - A `tracked-clean` state does **not** prove every installed custom modification is in Git: untracked files may exist; a built binary can differ from the checkout; local configs, DBC/client files and database migrations are not covered.
 - **Do not paste any private remote URL or unredacted `.conf`/database content into GitHub**. Share only the five fields above, plus an explanation if any directory differs.
 - This is **not** a backup, backup-restore exercise, build or gameplay test. The actual binary and active settings still require separate evidence under [coordination #4](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/4).
+
+## Test-readiness decision at this revision — NOT READY
+
+This draft has reached a **source-review candidate** state, not a compiled or accepted test release.
+
+| Gate | Current evidence | Status |
+| --- | --- | --- |
+| Owner gameplay rule | CosmicCuddle approved same-pet same-chain ON/OFF continuation in coordination #3 | Confirmed |
+| Protected source and IP family mappings | Draft based on `develop/cosmic-ip`; all 111 Hunter family `reconcile` entries compared unchanged | Source-checked |
+| Bounded delayed-load recovery | Hunter-only `OnPlayerAfterUpdate` continuation added; pinned core declares and dispatches hook; pet-local marker | Source-checked, **not runtime-tested** |
+| Actual installed core/IP/Playerbots and customisations | Host binary/source/config fingerprint not yet supplied | **BLOCKED** |
+| Isolated compile/link and automated test | No reported successful run for this exact PR head | **BLOCKED** |
+| Save/stable/relog + client action-bar/packet tests | No controlled WoW client/server test | **BLOCKED** |
+| Backup/restore and test rollback | No verified restore exercise or approved test environment | **BLOCKED** |
+| Merge and production deployment | Separate owner approval mandatory | **NOT AUTHORISED** |
+
+**First possible test:** an **isolated compile/link smoke test**, after installed-source fingerprint and compatibility planning. A live-world pet test is **later**, after backups, isolated gameplay setup and separate approval. Owner can use the read-only instructions above to supply the source fingerprints with minimal typing; no secrets or database dumps are needed.
 
 ## Engineering and release gates
 
