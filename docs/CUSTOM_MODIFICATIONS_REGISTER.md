@@ -18,14 +18,14 @@
 | Protected source ref | `baseline/installed-ip-dd96f2b-2026-10-30` at historical IP commit `dd96f2b77e3ebfa2a4726bf785525ba133f1ab61` (name is a historical snapshot; **actual running IP revision unverified**) |
 | Review PR | [DRAFT PR #1](https://github.com/CosmicCuddle/mod-individual-progression/pull/1), **OPEN / UNMERGED** as at this review |
 | Affected implementation file | `src/IndividualProgressionSpells.cpp`: Hunter `reconcile` path, bounded delayed-pet event identity check, Hunter-only post-loading recovery |
-| Supporting files | `docs/HUNTER_AUTOCAST_RANK_CONTINUITY_REVIEW_2026-10-30.md`; `tests/check_hunter_autocast_source.py` |
+| Supporting files | `docs/HUNTER_AUTOCAST_RANK_CONTINUITY_REVIEW_2026-10-30.md`; `tests/check_hunter_autocast_source.py`; `.github/workflows/hunter-autocast-static.yml` (source-only CI, run status unverified) |
 | Core APIs | `Pet::m_spells`, `m_autospells`, `ToggleAutocast`, `unlearnSpell`, `learnSpell`, `CharmInfo` action bar, pet GUID/CustomData, `PlayerScript::OnPlayerAfterUpdate`. Historical [core ref](https://github.com/Grimfeather/azerothcore-wotlk/tree/b7f06a16ac7120b5abc2e8d3f96a94265a363224) only; verify installed implementation |
 | Playerbots interactions | Existing `isBotAccount` exclusion is retained; verify exact installed Playerbots/core and that updates do not add bot regressions |
 | Config dependencies | Existing `IndividualProgression.Enable`, VanillaHunterPets and individual progression gates; **no new config key proposed** |
 | SQL / database | Existing native `pet_spell` autocast state and action bar persistence; **no SQL/schema changes proposed**. Real schema and loaded settings not inspected |
 | DBC / client-patch | No new patch proposed; actual installed spell-chain/DBC data and WotLK client response must be verified |
 | Risks | Unexpected rank chains; multiple/stale spell and autocast entries; action-bar ghost slot; packet timing; async pet-load races; prolonged loading; per-tick hook overhead; cross-module dependencies; owner core API drift |
-| Tests completed | Source-only review of pinned core APIs and family mapping preservation; equivalent 17 static invariant checks passed on 2026-10-30 via connector. **The committed Python checker has not itself been executed.** |
+| Tests completed | Source-only review of pinned core APIs and family mapping preservation; equivalent 17 static invariant checks passed on 2026-10-30 via connector. **The committed Python checker has not itself been verified executing in GitHub Actions; the workflow was added but no passing run has been confirmed.** |
 | Tests outstanding | Actual isolated C++ compile/link with installed-compatible core, controlled ON→ON / OFF→OFF higher/lower ranks, pet switch, slow/stuck loading, native pet save/relog/stable, client bar packets, Playerbots/Warlock regression |
 | Rollback prerequisites | Verified backup of source, binary, configuration and **test pet/character DB state** before gameplay tests; known-good version / restore exercise. Revert a draft branch before merge, or a separately approved release rollback if ever deployed |
 | Live status | **EXPERIMENTAL SOURCE ONLY. NOT COMPILED, NOT GAMEPLAY-TESTED, NOT MERGED, NOT DEPLOYED.** |
