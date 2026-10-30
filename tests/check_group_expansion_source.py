@@ -20,7 +20,9 @@ checks = {
     "on accept protects bot stage syncing": 'uint8 const permittedStage = IndividualProgressionGroupPolicy::EffectiveStage(leaderState, limit);' in player,
     "both invite/accept inspect persisted member slots": player.count('group->GetMemberSlots()') == 2 and player.count('ObjectAccessor::FindConnectedPlayer(slot.guid)') == 2,
     "offline member tiers fail closed under enforcement": player.count('if (!member || !member->IsInWorld())\n                    return false;') == 2,
-    "leader sync guards expansion": 'if (enforceGroupRules && !IndividualProgressionGroupPolicy::MayGroup(' in core,
+    "leader sync guards expansion": 'if (!IndividualProgressionGroupPolicy::MayGroup(' in core and 'if (enforceGroupRules)' in core,
+    "tier-0 bot sync only when enforcement ON": 'if (!refProgress && !enforceGroupRules)' in core,
+    "skip redundant bot quest resets when enforced": 'if (memberStage == permittedState)' in core,
     "stage/race drift guards": 'static_assert(RACE_BLOODELF ==' in player and 'static_assert(PROGRESSION_PRE_TBC ==' in player,
     "no old exact tier comparison": 'currentState == otherPlayerState' not in player and 'return (currentState == groupLeaderState)' not in player,
     "rndbot floor is NOT falsely wired before classifier review":
