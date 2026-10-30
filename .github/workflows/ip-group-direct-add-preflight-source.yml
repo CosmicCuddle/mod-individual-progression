@@ -1,0 +1,71 @@
+name: IP Playerbots group direct-add pinned source/preflight contract (NO RUNTIME)
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ip-group-direct-add-preflight-source.yml
+      - tests/test_group_direct_add_preflight_source.py
+      - docs/GROUP_DIRECT_ADD_PREFLIGHT_QA_2026-10-30.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-bypass-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout only IP contract / docs on disposable runner
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify exactly three tests-only changed paths on this child PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=858b2aafca7e76aacc4c4f6af2e514073d128caf
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
+          printf '%s\n' \
+            '.github/workflows/ip-group-direct-add-preflight-source.yml' \
+            'docs/GROUP_DIRECT_ADD_PREFLIGHT_QA_2026-10-30.md' \
+            'tests/test_group_direct_add_preflight_source.py' | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/actual.txt
+          echo 'PASS: no C++, Playerbots, Core, group policy, SQL, configuration or deploy changes'
+      - name: Checkout pinned historical Playerbots READ-ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: historical-playerbots
+          persist-credentials: false
+      - name: Checkout pinned historical Core READ-ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          path: historical-core
+          persist-credentials: false
+      - name: Verify historical source refs (NOT installed SHAs)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C historical-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          test "$(git -C historical-core rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
+          test -z "$(git -C historical-playerbots status --porcelain)"
+          test -z "$(git -C historical-core status --porcelain)"
+          echo 'PASS: unchanged historic pins; NOT evidence of owner installed versions'
+      - name: Execute source-order regression and synthetic preflight cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          PINNED_CORE_ROOT=historical-core PINNED_PLAYERBOTS_ROOT=historical-playerbots \
+            python3 -m unittest discover -s tests -p 'test_group_direct_add_preflight_source.py' -v
+      - name: Explicit no-production-action boundary
+        if: always()
+        run: |
+          echo "No executable mod/C++ change, SQL, DB, owner host, server launch or deployment."
+          echo "Source test detects historical bypass; it does NOT prevent or prove live bypass."
+          echo "Owner decides arena/BG/LFG exceptions, offline member handling and production changes."
