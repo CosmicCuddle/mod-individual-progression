@@ -16,7 +16,7 @@ Keep the **existing** `IndividualProgression.EnforceGroupRules = 0/1` option and
 - Blood Elves (race 10) and Draenei (race 11), **including human characters**, cannot join Vanilla groups **while enforcement is ON**. This never makes humans invisible.
 - A **valid** non-normal-account member can still sync from one detailed raid stage to its human group leader's stage *within the same expansion*; no human raid-tier rewrite.
 - Respect `ProgressionLimit`: **reject recorded stages above the cap** rather than relabeling TBC/Wrath progression as Vanilla. Classify valid stages from their actual IP tier, not raw character level; never force a bot to a stage beyond the limit when enforcement is ON.
-- When enforcement is ON, check the invitee against currently online members of the group and recheck on acceptance; unknown/offline target cannot be classified and invitation is rejected by this draft. Legacy mixed groups and offline members need a manual in-game regression.
+- When enforcement is ON, check all *persisted* group member slots (not only currently online members) on invitation and acceptance. If an existing member is offline or their stage cannot be safely read, conservatively **deny new invitations/acceptances**. This prevents an unverified mixed-expansion group from admitting another member but **may interrupt ordinary party invitations while one member is offline**. Requires owner gameplay review, exact Core API check, and manual in-game regression. OFF behaviour is unaffected.
 
 ## Specific changes and preservation
 
