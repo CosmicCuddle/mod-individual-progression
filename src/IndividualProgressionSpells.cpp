@@ -204,11 +204,17 @@ void IndividualProgression::checkHunterPetSpells(Player* player)
                     return;
                 }
 
+                // Do not send an old pet's spell bar to a newly selected pet.
+                if (player->GetPet() != pet || pet->isBeingLoaded())
+                    return;
+
                 auto const* bar = charm->GetActionBarEntry(oldSlot);
-                if (player->GetPet() != pet || pet->isBeingLoaded() ||
-                    !bar || !bar->IsActionBarForSpell() || bar->GetAction() != keepId)
+                if (!bar || !bar->IsActionBarForSpell() || bar->GetAction() != keepId)
                 {
-                    // Fail closed rather than force an uncertain ON state.
+                    // The native bar replacement did not validate. Clear a
+                    // possible ghost old-rank slot and leave the new spell OFF.
+                    if (bar && bar->GetAction() == oldId)
+                        charm->RemoveSpellFromActionBar(oldId);
                     charm->SetSpellAutocast(keepInfo, false);
                     player->PetSpellInitialize();
                     return;
