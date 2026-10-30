@@ -133,6 +133,30 @@ class F14StageContractTests(unittest.TestCase):
         decide(*request)
         self.assertEqual(request, expected)
 
+    def test_invalid_admin_or_group_sync_write_is_rejected_before_side_effects(self):
+        # Source audit: .ip set calls achievement cleanup before the actual
+        # stage writer; .ip setbots can force a leader's Vanilla tier.
+        # Future integration must use the decision BEFORE either side effect.
+        for race, route in itertools.product(
+            (10, 11), (Route.GM_STAGE_WRITE, Route.GROUP_SYNC, Route.GROUP_ACCEPT)
+        ):
+            effects = []
+            decision = decide(Identity.RANDOM_BOT, race, TbcEligibility.AVAILABLE,
+                              route, existing_stage=12, requested_stage=0)
+            if decision.permitted_stage_write:
+                effects.extend(("achievement_cleanup", "remove_hidden_markers",
+                                "update_phasing"))
+            self.assertEqual(decision.disposition, Disposition.REJECT_WRITE)
+            self.assertEqual(effects, [], "No side effect before rejecting stage downgrade")
+
+        for identity in (Identity.HUMAN, Identity.ALT_BOT, Identity.SELF_BOT,
+                         Identity.UNKNOWN):
+            decision = decide(identity, 10, TbcEligibility.AVAILABLE,
+                              Route.GM_STAGE_WRITE, existing_stage=12,
+                              requested_stage=0)
+            self.assertEqual(decision.disposition, Disposition.DEFER_TO_EXISTING)
+            self.assertIsNone(decision.may_activate)
+
     def test_positive_identity_required_not_race_or_bot_account_guess(self):
         for identity in (Identity.HUMAN, Identity.ALT_BOT, Identity.SELF_BOT,
                          Identity.UNKNOWN):
