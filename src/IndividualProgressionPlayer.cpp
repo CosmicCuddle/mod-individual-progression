@@ -504,7 +504,7 @@ public:
             return false; // Cannot establish the target's effective expansion safely.
 
         uint8 const targetState = sIndividualProgression->GetPlayerProgressionFromQuests(invitee);
-        uint8 const limit = sIndividualProgression->progressionLimit;
+        int32 const limit = sIndividualProgression->progressionLimit;
 
         // Validate against every currently loaded group member, not only the
         // inviter, to prevent joining an already mixed-expansion group.
@@ -546,7 +546,7 @@ public:
             if (!leader || !leader->IsInWorld())
                 return false;
 
-            uint8 const limit = sIndividualProgression->progressionLimit;
+            int32 const limit = sIndividualProgression->progressionLimit;
             if (!IndividualProgressionGroupPolicy::MayGroup(
                     joiningState, player->getRace(), leaderState, leader->getRace(), limit))
                 return false;
