@@ -33,6 +33,20 @@ Only `src/IndividualProgressionSpells.cpp` is modified.
 6. **P1/K1/D18 boundaries:** No persisted-setting replay, pet-to-pet copy, human click receipt, or protected in-combat action is implemented. The existing A02/NoWrite gates remain OFF.
 7. **Normal pet persistence:** The core already saves pet spells/active states in `pet_spell` and pet action-bar data in its native pet save. No secondary table or SQL is added. Still validate successful save/reload and ensure the new behaviour does not write settings to other pets.
 
+## Additional historical core compatibility cross-check
+
+At the **same historical commit** `b7f06a16ac7120b5abc2e8d3f96a94265a363224`, the following five files have **identical Git blob SHAs** in both `mod-playerbots/azerothcore-wotlk` and `Grimfeather/azerothcore-wotlk`:
+
+- `src/server/game/Entities/Pet/Pet.h`
+- `src/server/game/Entities/Pet/Pet.cpp`
+- `src/server/game/Entities/Unit/CharmInfo.h`
+- `src/server/game/Entities/Unit/CharmInfo.cpp`
+- `src/server/game/Scripting/ScriptDefines/PetScript.h`
+
+This reduces ambiguity **between those two references at the pinned revision**, but **does not establish that CosmicCuddle's running core matches that revision** or that the draft compiles. It also does not verify changed SQL/DBC/client data.
+
+The pinned `PetScript.h` has `OnInitStatsForLevel` and `OnPetAddToWorld` but **no dedicated post-async-spell-load completion callback**. The existing fixed retry window can expire while a pet still loads. The draft avoids editing incomplete Hunter spell data, but this can defer needed rank reconciliation with no guaranteed follow-up. **Treat this as an unresolved functional acceptance blocker**: test normal/slow/stuck loads against the owner's actual core, then design an owner-approved bounded recovery or verified completion trigger *before* merge. Do not silently make loading retries infinite or re-enable the unsafe early mutation.
+
 ## Source-only regression checks performed (not a compile)
 
 Compared the proposed branch against `develop/cosmic-ip` using GitHub file contents on 30 October 2026:
