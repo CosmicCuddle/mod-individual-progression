@@ -1,0 +1,47 @@
+name: "IP expansion grouping: standalone policy tests"
+
+on:
+  push:
+    branches:
+      - feature/expansion-group-rules-20261030
+    paths:
+      - "src/IndividualProgressionGroupPolicy.h"
+      - "src/IndividualProgression.cpp"
+      - "src/IndividualProgressionPlayer.cpp"
+      - "tests/group_expansion_policy.cpp"
+      - "tests/check_group_expansion_source.py"
+      - ".github/workflows/ip-expansion-group-policy.yml"
+  pull_request:
+    paths:
+      - "src/IndividualProgressionGroupPolicy.h"
+      - "src/IndividualProgression.cpp"
+      - "src/IndividualProgressionPlayer.cpp"
+      - "tests/group_expansion_policy.cpp"
+      - "tests/check_group_expansion_source.py"
+      - ".github/workflows/ip-expansion-group-policy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ip-expansion-group-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  standalone-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile and execute real policy in C++17 and C++20
+        run: |
+          for standard in c++17 c++20; do
+            g++ -std="${standard}" -Wall -Wextra -Werror -pedantic \
+              tests/group_expansion_policy.cpp -o "/tmp/ip-group-policy-${standard}"
+            "/tmp/ip-group-policy-${standard}"
+          done
+      - name: Guard source wiring (NOT a Worldserver integration compile)
+        run: python3 tests/check_group_expansion_source.py

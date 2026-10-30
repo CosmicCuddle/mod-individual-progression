@@ -3,6 +3,7 @@
 */
 
 #include "IndividualProgression.h"
+#include "IndividualProgressionGroupPolicy.h"
 #include "naxxramas_40.h"
 #include "ReputationMgr.h"
 #include "PetDefines.h"
@@ -430,7 +431,8 @@ bool IndividualProgression::isPlayerInDungeonOrRaid(Player* player)
 
 void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
 {
-    if (!group)
+    // Disabling Individual Progression must also disable its group-time quest writes.
+    if (!enabled || !group)
         return;
 
     ObjectGuid leaderGuid = group->GetLeaderGUID();
@@ -443,8 +445,19 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
 
     uint8 refProgress = GetPlayerProgressionFromQuests(leader);
 
-    if (!refProgress)
+    // Preserve the historical tier-0 skip with the switch OFF. When grouping
+    // enforcement is ON, Vanilla bots must also sync down to a stage-0 leader.
+    if (!refProgress && !enforceGroupRules)
         return;
+
+    int32 const limit = progressionLimit;
+    if (enforceGroupRules && (limit < 0 || limit > IndividualProgressionGroupPolicy::LastSupportedStage ||
+                              refProgress > IndividualProgressionGroupPolicy::LastSupportedStage ||
+                              (limit && refProgress > limit)))
+        return;
+    uint8 const permittedState = enforceGroupRules
+        ? IndividualProgressionGroupPolicy::EffectiveStage(refProgress, limit)
+        : refProgress;
 
     for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
     {
@@ -452,7 +465,23 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
         if (!member || isNormalAccount(member))
             continue;
 
-        ForceUpdateProgressionState(member, static_cast<ProgressionState>(refProgress));
+        // When group enforcement is enabled, never force a bot/excluded account
+        // across expansion boundaries or admit a TBC-race member to Vanilla.
+        // The global positive-RandomBot starting-floor rule is tracked
+        // separately under F14; do not implement it via account-regex guesses.
+        uint8 const memberStage = GetPlayerProgressionFromQuests(member);
+        if (enforceGroupRules)
+        {
+            if (!IndividualProgressionGroupPolicy::MayGroup(
+                    refProgress, leader->getRace(), memberStage, member->getRace(), limit))
+                continue;
+
+            // A no-op sync must not remove and re-add rewarded progression quests.
+            if (memberStage == permittedState)
+                continue;
+        }
+
+        ForceUpdateProgressionState(member, static_cast<ProgressionState>(permittedState));
     }
 }
 

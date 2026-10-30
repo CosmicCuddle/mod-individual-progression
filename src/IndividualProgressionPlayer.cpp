@@ -1,4 +1,16 @@
 #include "IndividualProgression.h"
+#include "IndividualProgressionGroupPolicy.h"
+
+static_assert(PROGRESSION_PRE_TBC == IndividualProgressionGroupPolicy::FirstTbcStage,
+              "Individual Progression TBC stage boundary changed");
+static_assert(PROGRESSION_TBC_TIER_5 == IndividualProgressionGroupPolicy::FirstWrathStage,
+              "Individual Progression WotLK stage boundary changed");
+static_assert(PROGRESSION_WOTLK_TIER_5 == IndividualProgressionGroupPolicy::LastSupportedStage,
+              "Individual Progression maximum stage changed");
+static_assert(RACE_BLOODELF == IndividualProgressionGroupPolicy::BloodElfRace &&
+              RACE_DRAENEI == IndividualProgressionGroupPolicy::DraeneiRace,
+              "TBC race identifiers changed");
+
 #include "naxxramas_40.h"
 // #include "Spell.h"
 
@@ -483,113 +495,39 @@ public:
         if (!player || !player->IsInWorld())
             return false;
 
-        if (!sIndividualProgression->enabled || sIndividualProgression->isBotAccount(player))
+        // Preserve the owner's existing 0=OFF behaviour and disabled-IP path.
+        if (!sIndividualProgression->enabled || !sIndividualProgression->enforceGroupRules)
             return true;
 
-        Player* otherPlayer = ObjectAccessor::FindPlayerByName(membername, false);
-        uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(player);
-        uint8 otherPlayerState = sIndividualProgression->GetPlayerProgressionFromQuests(otherPlayer);
+        Player* invitee = ObjectAccessor::FindPlayerByName(membername, false);
+        if (!invitee || !invitee->IsInWorld())
+            return false; // Cannot establish the target's effective expansion safely.
 
-        if (sIndividualProgression->enforceGroupRules) // enforceGroupRules enabled
+        uint8 const targetState = sIndividualProgression->GetPlayerProgressionFromQuests(invitee);
+        int32 const limit = sIndividualProgression->progressionLimit;
+
+        // Validate all stored group members, not just those online, to prevent
+        // adding a new member to an unknown or mixed-expansion group.
+        if (Group* group = player->GetGroup())
         {
-            if (sIndividualProgression->isNormalAccount(player))
+            // Offline members have no verified IP tier in this callback:
+            // fail closed instead of silently omitting them from era checks.
+            for (auto const& slot : group->GetMemberSlots())
             {
-                if (sIndividualProgression->isBotAccount(otherPlayer))
-                {
-                    if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_PRE_TBC)) // player is in vanilla
-                    {
-                        if (otherPlayer->GetLevel() <= 60)
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too high.|r");
-                            return false;
-                        }
-                    }
-                    else if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5)) // player is in TBC
-                    {
-                        if ((otherPlayer->GetLevel() > 60) && (otherPlayer->GetLevel() <= 70))
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too low or too high.|r");
-                            return false;
-                        }
-                    }
-                    else // player is in WotLK
-                    {
-                        if (otherPlayer->GetLevel() > 70)
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too low.|r");
-                            return false;
-                        }
-                    }
-                }
-                else // player or ALTbot
-                {
-                    return (currentState == otherPlayerState);
-                }
-            }
-            else // if (sIndividualProgression->isExcludedAccount(player))
-            {
-                if (!sIndividualProgression->isNormalAccount(otherPlayer)) // other player is either excluded or a RNDbot
-                {
-                    if (player->GetLevel() <= 60) // player is in vanilla
-                    {
-                        if (otherPlayer->GetLevel() <= 60)
-                        {
-                            return true;
-                        }
-                        else // excluded accounts in vanilla cannot group with TBC or WotLK accounts when enforceGroupRules is enabled, to avoid bypassing progression requirements
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too high.|r");
-                            return false;
-                        }
-                    }
-                    else if (player->GetLevel() <= 70) // player is in TBC
-                    {
-                        if ((otherPlayer->GetLevel() > 60) && (otherPlayer->GetLevel() <= 70))
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too low or too high.|r");
-                            return false;
-                        }
-                    }
-                    else // player is in WotLK
-                    {
-                        if (otherPlayer->GetLevel() > 70)
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too low.|r");
-                            return false;
-                        }
-                    }
-                }
-                else // player or ALTbot
-                {
-                    ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player is not a bot or does not have an excluded account.|r");
+                Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
+                if (!member || !member->IsInWorld())
                     return false;
-                }
+
+                uint8 const memberState = sIndividualProgression->GetPlayerProgressionFromQuests(member);
+                if (!IndividualProgressionGroupPolicy::MayGroup(
+                        memberState, member->getRace(), targetState, invitee->getRace(), limit))
+                    return false;
             }
         }
-        else // enforceGroupRules not enabled
-        {
-            return true;
-        }
+
+        return IndividualProgressionGroupPolicy::MayGroup(
+            sIndividualProgression->GetPlayerProgressionFromQuests(player),
+            player->getRace(), targetState, invitee->getRace(), limit);
     }
 
     bool OnPlayerCanGroupAccept(Player* player, Group* group) override
@@ -597,63 +535,54 @@ public:
         if (!player || !player->IsInWorld() || !group)
             return false;
 
-        Player* groupLeader = ObjectAccessor::FindPlayerByLowGUID(group->GetLeaderGUID().GetCounter());
-        uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(player);
-        uint8 groupLeaderState = sIndividualProgression->GetPlayerProgressionFromQuests(groupLeader);
-
         if (!sIndividualProgression->enabled)
             return true;
 
-        if (!sIndividualProgression->isNormalAccount(player)) // player is either a RNDbot or has an excluded account
-        {
-            if (sIndividualProgression->enforceGroupRules)
-            {
-                if (groupLeaderState < PROGRESSION_PRE_TBC) // Group leader is in Vanilla
-                {
-                    if (player->GetLevel() <= 60) // invited player is in Vanilla
-                    {
-                        sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(groupLeaderState));
-                        return true;
-                    }
-                    else
-                        return false;
-                }
-                else if (groupLeaderState >= PROGRESSION_PRE_TBC && groupLeaderState < PROGRESSION_TBC_TIER_5) // Group leader is in TBC
-                {
-                    if (player->GetLevel() > 60 && player->GetLevel() <= 70) // invited excluded player is in TBC
-                    {
-                        sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(groupLeaderState));
-                        return true;
-                    }
-                    else
-                        return false;
-                }
-                else // Group leader is in WotLK
-                {
-                    if (player->GetLevel() > 70) // invited excluded player is in WotLK
-                    {
-                        sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(groupLeaderState));
-                        return true;
-                    }
-                    else
-                        return false;
-                }
-            }
-            else // not enforcing Group Rules
-            {
-                if (currentState != groupLeaderState)
-                    sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(groupLeaderState));
+        Player* leader = ObjectAccessor::FindPlayerByLowGUID(group->GetLeaderGUID().GetCounter());
+        uint8 const joiningState = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+        uint8 const leaderState = sIndividualProgression->GetPlayerProgressionFromQuests(leader);
 
-                return true;
-            }
-        }
-        else // normal account
+        if (sIndividualProgression->enforceGroupRules)
         {
-            if (sIndividualProgression->enforceGroupRules)
-                return (currentState == groupLeaderState);
-            else
-                return true;
+            // No authoritative group era without an online leader.
+            if (!leader || !leader->IsInWorld())
+                return false;
+
+            int32 const limit = sIndividualProgression->progressionLimit;
+            if (!IndividualProgressionGroupPolicy::MayGroup(
+                    joiningState, player->getRace(), leaderState, leader->getRace(), limit))
+                return false;
+
+            // Offline members have no verified IP tier in this callback:
+            // fail closed instead of silently omitting them from era checks.
+            for (auto const& slot : group->GetMemberSlots())
+            {
+                Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
+                if (!member || !member->IsInWorld())
+                    return false;
+
+                uint8 const memberState = sIndividualProgression->GetPlayerProgressionFromQuests(member);
+                if (!IndividualProgressionGroupPolicy::MayGroup(
+                        joiningState, player->getRace(), memberState, member->getRace(), limit))
+                    return false;
+            }
+
+            // Do not mutate hidden progression quests while accepting an
+            // invitation. The Core can still fail to create/add the group
+            // AFTER this hook. GroupScript::OnAddMember performs the permitted
+            // same-expansion bot sync only after membership is established.
+            // Mandatory F14 rndbot tier-8 floor remains separate/unimplemented.
+            return true;
         }
+
+        // Preserve the existing OFF pathway: bots/excluded accounts sync to
+        // the leader's exact tier when accepting; human accounts do not.
+        // F14 will separately harden the RNDBOT TBC-race minimum for all paths.
+        if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState)
+            sIndividualProgression->ForceUpdateProgressionState(
+                player, static_cast<ProgressionState>(leaderState));
+
+        return true;
     }
 
     void OnPlayerCreatureKill(Player* killer, Creature* killed) override
