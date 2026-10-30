@@ -140,16 +140,43 @@ void IndividualProgression::checkHunterPetSpells(Player* player)
                             (oldItr->second.active == ACT_ENABLED ||
                              oldItr->second.active == ACT_DISABLED))
                         {
-                            oldActive = oldItr->second.active;
+                            // A stray rank outside IP's wipe list, or a
+                            // previously stranded rank in the autocast list,
+                            // makes the native ON/OFF state ambiguous.
+                            bool ambiguousChain = false;
+                            for (auto const& [spellId, state] : pet->m_spells)
+                            {
+                                if (spellId == oldId || state.state == PETSPELL_REMOVED)
+                                    continue;
+
+                                SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId);
+                                if (info && info->IsDifferentRankOf(oldInfo))
+                                {
+                                    ambiguousChain = true;
+                                    break;
+                                }
+                            }
 
                             uint32 listedCount = 0;
                             for (uint32 spellId : pet->m_autospells)
+                            {
                                 if (spellId == oldId)
+                                {
                                     ++listedCount;
+                                    continue;
+                                }
+
+                                SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId);
+                                if (info && info->IsDifferentRankOf(oldInfo))
+                                    ambiguousChain = true;
+                            }
+
+                            oldActive = oldItr->second.active;
 
                             // Spell map, autocast list and bar must agree.
                             // An observed OFF may be the native default.
-                            if (listedCount == (oldActive == ACT_ENABLED ? 1u : 0u))
+                            if (!ambiguousChain &&
+                                listedCount == (oldActive == ACT_ENABLED ? 1u : 0u))
                             {
                                 uint32 chainSlotCount = 0;
                                 for (uint8 i = 0; i < MAX_UNIT_ACTION_BAR_INDEX; ++i)
