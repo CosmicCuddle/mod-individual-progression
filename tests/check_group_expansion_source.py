@@ -18,6 +18,8 @@ checks = {
     "Vanilla TBC race restriction": "first == Expansion::Vanilla && (IsExpansionRace(firstRace) || IsExpansionRace(secondRace))" in policy,
     "on invite enforces same expansion": 'bool OnPlayerCanGroupInvite(' in player and player.count('IndividualProgressionGroupPolicy::MayGroup(') >= 3,
     "on accept protects bot stage syncing": 'uint8 const permittedStage = IndividualProgressionGroupPolicy::EffectiveStage(leaderState, limit);' in player,
+    "both invite/accept inspect persisted member slots": player.count('group->GetMemberSlots()') == 2 and player.count('ObjectAccessor::FindConnectedPlayer(slot.guid)') == 2,
+    "offline member tiers fail closed under enforcement": player.count('if (!member || !member->IsInWorld())\n                    return false;') == 2,
     "leader sync guards expansion": 'if (enforceGroupRules && !IndividualProgressionGroupPolicy::MayGroup(' in core,
     "stage/race drift guards": 'static_assert(RACE_BLOODELF ==' in player and 'static_assert(PROGRESSION_PRE_TBC ==' in player,
     "no old exact tier comparison": 'currentState == otherPlayerState' not in player and 'return (currentState == groupLeaderState)' not in player,
