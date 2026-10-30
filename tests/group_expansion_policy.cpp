@@ -85,6 +85,8 @@ int main()
     Check(MayGroup(9, 10, 12, 1, 7), false, "effective Vanilla cap forbids Blood Elf grouping");
     Check(MayGroup(19, 1, 18, 1, 7), false, "invalid raw tier not fixed by a cap");
     Check(MayGroup(8, 1, 8, 1, 19), false, "invalid progression cap denied");
+    Check(MayGroup(8, 1, 8, 1, -1), false, "negative progression cap denied");
+    Check(MayGroup(8, 1, 8, 1, 256), false, "oversized progression cap must not wrap to zero");
     Check(MayGroup(8, 1, 8, 1, 0), true, "zero cap disables clamping");
 
     std::cout << "Group expansion policy: " << (checks - failures) << "/" << checks
