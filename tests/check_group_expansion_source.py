@@ -15,6 +15,10 @@ accept = player.split("    bool OnPlayerCanGroupAccept(", 1)[1].split(
 enforced_accept = accept.split("if (sIndividualProgression->enforceGroupRules)", 1)[1].split(
     "// Preserve the existing OFF pathway", 1)[0]
 
+invite = player.split("    bool OnPlayerCanGroupInvite(", 1)[1].split(
+    "    bool OnPlayerCanGroupAccept(", 1)[0]
+off_accept = accept.split("// Preserve the existing OFF pathway", 1)[1]
+
 checks = {
     "player script uses shared policy": '#include "IndividualProgressionGroupPolicy.h"' in player,
     "IP grouping helper uses shared policy": '#include "IndividualProgressionGroupPolicy.h"' in core,
@@ -35,6 +39,18 @@ checks = {
     "skip redundant bot quest resets when enforced": 'if (memberStage == permittedState)' in core,
     "stage/race drift guards": 'static_assert(RACE_BLOODELF ==' in player and 'static_assert(PROGRESSION_PRE_TBC ==' in player,
     "no old exact tier comparison": 'currentState == otherPlayerState' not in player and 'return (currentState == groupLeaderState)' not in player,
+    "OFF invite remains normal stock/group semantics": (
+        'if (!sIndividualProgression->enabled || !sIndividualProgression->enforceGroupRules)' in invite and
+        'return true;' in invite
+    ),
+    "OFF accept still synchronizes excluded and bot accounts": (
+        'if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState)' in off_accept and
+        'sIndividualProgression->ForceUpdateProgressionState(' in off_accept
+    ),
+    "OFF group-add sync still skips tier zero": 'if (!refProgress && !enforceGroupRules)' in core,
+    "ON invited bot does not bypass group policy": (
+        'isBotAccount(player)' not in invite and 'IndividualProgressionGroupPolicy::MayGroup(' in invite
+    ),
     "rndbot floor is NOT falsely wired before classifier review":
         'IsAllowedRandomBotStage(' not in player and 'IsAllowedRandomBotStage(' not in core,
 }
