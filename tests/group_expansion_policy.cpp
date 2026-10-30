@@ -3,6 +3,7 @@
 #include "../src/IndividualProgressionGroupPolicy.h"
 
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 
 using namespace IndividualProgressionGroupPolicy;
