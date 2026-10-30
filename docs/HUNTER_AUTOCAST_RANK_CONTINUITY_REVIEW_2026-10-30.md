@@ -63,6 +63,41 @@ These are **static source comparisons only**. They neither compile C++ nor repro
 | Other families and Warlock pet | No unintended regressions |
 | Combat and P1/K1/D18 scenarios | No automatic replay of saved settings, no new combat-protected action |
 
+## Owner-run, read-only Git source fingerprint (prepared, not executed)
+
+This is a **first-pass version check only**. When CosmicCuddle separately authorises checking the host, open a terminal **in the existing server's AzerothCore source checkout**, not the production executable directory, and paste the block below as one unit. It reads Git source information. It does **not** pull, fetch, reset, compile, restart, edit files, query databases or inspect secrets.
+
+```bash
+for item in "core:." "Playerbots:modules/mod-playerbots" "IP:modules/mod-individual-progression" "NaxxramasModule:modules/Mod-Naxxramas-Core"; do
+  label=${item%%:*}; dir=${item#*:}
+  if [ ! -e "$dir/.git" ]; then
+    printf '%s: no separate Git checkout at expected path\n' "$label"
+    continue
+  fi
+  sha=$(git -C "$dir" rev-parse --verify HEAD 2>/dev/null) || continue
+  branch_name=$(git -C "$dir" symbolic-ref --short -q HEAD 2>/dev/null || printf 'DETACHED')
+  if git -C "$dir" diff --quiet --no-ext-diff && git -C "$dir" diff --cached --quiet --no-ext-diff; then
+    tracked="tracked-clean"
+  else
+    tracked="tracked-modifications-present"
+  fi
+  if [ -n "$(git -C "$dir" ls-files --others --exclude-standard | head -n 1)" ]; then
+    untracked="untracked-files-present"
+  else
+    untracked="no-untracked-files-seen"
+  fi
+  printf '%s | %s | %s | %s | %s\n' "$label" "$sha" "$branch_name" "$tracked" "$untracked"
+done
+```
+
+**Safety and interpretation:**
+
+- The four directories above are **examples**, not verified owner-host paths. "No separate Git checkout" means **this location did not match**; it does not prove the component is uninstalled. If modules are elsewhere, adjust the local paths with the owner's consent.
+- Run from the source checkout and only when the host inspection is authorised; these commands **do not install or deploy anything**. They do not output remote URLs, configuration contents, SQL credentials, account IDs or file diffs.
+- A `tracked-clean` state does **not** prove every installed custom modification is in Git: untracked files may exist; a built binary can differ from the checkout; local configs, DBC/client files and database migrations are not covered.
+- **Do not paste any private remote URL or unredacted `.conf`/database content into GitHub**. Share only the five fields above, plus an explanation if any directory differs.
+- This is **not** a backup, backup-restore exercise, build or gameplay test. The actual binary and active settings still require separate evidence under [coordination #4](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/4).
+
 ## Engineering and release gates
 
 1. **Read-only host inventory (consent required):** capture exact core/IP/Playerbots/custom-module HEADs, local modifications, effective config, actual DBC/SQL/client dependencies and running-binary provenance without exposing credentials. Compare against the candidate's APIs, particularly pet loading, spell rank reconciliation, CharmInfo, and event scheduling. [Coordination #4](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/4).
