@@ -450,7 +450,8 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
 
     int32 const limit = progressionLimit;
     if (enforceGroupRules && (limit < 0 || limit > IndividualProgressionGroupPolicy::LastSupportedStage ||
-                              refProgress > IndividualProgressionGroupPolicy::LastSupportedStage))
+                              refProgress > IndividualProgressionGroupPolicy::LastSupportedStage ||
+                              (limit && refProgress > limit)))
         return;
     uint8 const permittedState = enforceGroupRules
         ? IndividualProgressionGroupPolicy::EffectiveStage(refProgress, limit)
