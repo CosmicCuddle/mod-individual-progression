@@ -24,7 +24,7 @@ Keep the **existing** `IndividualProgression.EnforceGroupRules = 0/1` option and
 
 `src/IndividualProgressionPlayer.cpp`: replace two existing complex grouping branches with consistent expansion predicate in `OnPlayerCanGroupInvite` and `OnPlayerCanGroupAccept`. OFF remains a separate original-behaviour route; when ON, same-era bots may still inherit the leader's detailed tier.
 
-`src/IndividualProgression.cpp`: `SyncBotsProgressionToLeader` skips cross-era writes when enforcement is ON; when OFF its previous behaviour remains.
+`src/IndividualProgression.cpp`: `SyncBotsProgressionToLeader` skips cross-era writes when enforcement is ON. It now **synchronises stage-0 pre-MC bots to a stage-0 human leader while ON** (the legacy unconditional tier-0 skip remains while OFF), and skips no-op IP quest removal/recreation when an ON-mode member is already at the leader's tier. Verify this behavioural change in game.
 
 `tests/group_expansion_policy.cpp`: exhaustive checks of all 0–19 stage pairs across Vanilla/Blood Elf/Draenei race combinations, plus boundaries, caps and F14 tier-floor model.
 
