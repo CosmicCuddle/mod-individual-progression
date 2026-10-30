@@ -1441,8 +1441,9 @@ public:
         if (!pet || !pet->IsInWorld() || pet->isBeingLoaded())
             return;
 
-        PendingPetSpellCheck* pending = pet->CustomData.GetDefault<PendingPetSpellCheck>(PENDING_CHECK_KEY);
-        if (!pending->pending || !pending->afterLoad)
+        // Do not allocate CustomData on every normal Hunter update.
+        PendingPetSpellCheck* pending = pet->CustomData.Get<PendingPetSpellCheck>(PENDING_CHECK_KEY);
+        if (!pending || !pending->pending || !pending->afterLoad)
             return;
 
         // Clear first: a second update cannot replay an already completed
