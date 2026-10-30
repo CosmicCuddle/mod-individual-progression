@@ -15,7 +15,7 @@ When IP replaces an allowed spell rank with another rank in the **same ability c
 Only `src/IndividualProgressionSpells.cpp` is modified.
 
 - In `checkHunterPetSpells`, abort when the current pet is still loading or absent from the world.
-- Prior to a legal replacement, inspect the existing pet spell-map active state, autocast list, rank chain and action bar. Eligible transfer requires exactly one old known rank, a compatible target, matching ON/OFF across all representations, and exactly one valid bar slot.
+- Prior to a legal replacement, inspect the existing pet spell-map active state, autocast list, rank chain and action bar. Eligible transfer requires exactly one old known rank, a compatible target, matching ON/OFF across all representations, and exactly one valid bar slot. An additional active same-chain spell outside IP's intended list, or an orphaned same-chain ID in the autocast list, **blocks state transfer**.
 - For a validated old rank, disable the *old* autocast ID if ON, unlearn with the validated slot retained, learn the new rank, then synchronize native autocast and the bar. Native action bar replacement must be verified; if it fails, leave the new spell OFF and remove an old ghost slot where detectable.
 - For all other cases, use existing IP's remove/learn pattern. No transfer across separate pets, families/abilities, missing rank, multiple old ranks, `keepId=0`, passive spells or contradictory state.
 - The queued delayed pet event captures the originating pet GUID; Hunter checks verify the current pet matches before reconciliation. The existing retry cap remains in place, but a still-loading Hunter pet is **skipped**, not mutated.
@@ -32,6 +32,17 @@ Only `src/IndividualProgressionSpells.cpp` is modified.
 5. **Loading/identity:** After the 10-retry cap, a Hunter pet still loading will skip IP reconciliation; this is safer than writing during load, but could leave a legal-rank check deferred until another applicable hook. Test the owner host's load sequencing and define recovery before acceptance. A runtime pet GUID only identifies the original loaded object during one event; it is **not** a permanent pet birth identifier.
 6. **P1/K1/D18 boundaries:** No persisted-setting replay, pet-to-pet copy, human click receipt, or protected in-combat action is implemented. The existing A02/NoWrite gates remain OFF.
 7. **Normal pet persistence:** The core already saves pet spells/active states in `pet_spell` and pet action-bar data in its native pet save. No secondary table or SQL is added. Still validate successful save/reload and ensure the new behaviour does not write settings to other pets.
+
+## Source-only regression checks performed (not a compile)
+
+Compared the proposed branch against `develop/cosmic-ip` using GitHub file contents on 30 October 2026:
+
+- The entire Hunter **family-rule section** (from the Wolf condition through the next IP function) matched byte-for-byte; **111** existing `reconcile(...)` calls were preserved. Existing commented Cower mappings remained commented.
+- The candidate still has the same two delayed-event allocation sites; its constructor now also carries the originating pet's runtime GUID.
+- Reviewed the fail-closed checks for ambiguous ranks/autocast IDs and confirmed no new SQL/config mutation tokens appeared in the changed Hunter source.
+- The branch modifies one C++ file plus this review document.
+
+These are **static source comparisons only**. They neither compile C++ nor reproduce client/server gameplay. Actual installed-core API differences, spell database ranks, packet order and successful save/load still need approved build and in-game tests.
 
 ## Minimum acceptance matrix — test only after separate owner approval
 
