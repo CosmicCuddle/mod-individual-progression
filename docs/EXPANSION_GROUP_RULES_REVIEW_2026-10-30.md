@@ -32,6 +32,10 @@ Keep the **existing** `IndividualProgression.EnforceGroupRules = 0/1` option and
 
 **Unchanged by design:** original Hunter spell source, Warlock logic, Playerbots, Naxxramas module, character DB/quests, SQL, DBC, client patches, config default and server state.
 
+## BLOCKER: Playerbots can directly add group members
+
+The [Playerbots direct-AddMember bypass audit](EXPANSION_GROUP_ADDMEMBER_BYPASS_AUDIT_2026-10-30.md) found concrete operations in historical Playerbots `src/Script/WorldThr/PlayerbotOperations.h` (including `GroupInviteOperation`) and `src/Ai/Base/Actions/BattleGroundJoinAction.cpp` that call `Group::AddMember` directly. Those bypass both ordinary IP PlayerScript invitation/acceptance checks. Historical Core `Group::AddMember` invokes `OnGroupAddMember` **only after inserting**, so current IP-only checking is insufficient for a universal “same expansion only” guarantee. **Do not merge** without a source-reviewed and owner-approved safeguard for all required direct-add paths or explicit owner-selected narrower scope. No Playerbots/Core modifications are included in this PR.
+
 ## IMPORTANT: not yet implemented — F14 positive-rndbot starting floor
 
 Owner's separate rule: **Blood Elf/Draenei random Playerbots start in TBC stage 8 and can NEVER enter stage 0–7**, including on creation, login, level-change, group sync, manual stage change or after relog. During a Vanilla server cap they must be **ineligible for Vanilla population/grouping**, NOT forcibly lifted to stage 8 in a way that bypasses the cap.
