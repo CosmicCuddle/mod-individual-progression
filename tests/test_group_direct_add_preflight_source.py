@@ -34,7 +34,7 @@ def core_create(source: str) -> str:
 
 def core_add(source: str) -> str:
     return between(source, "bool Group::AddMember(Player* player, uint8 roles",
-                   "bool Group::")
+                   "void Group::AddMemberWithGuid(")
 
 
 def check_order(section: str, *tokens: str) -> bool:
