@@ -445,7 +445,9 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
 
     uint8 refProgress = GetPlayerProgressionFromQuests(leader);
 
-    if (!refProgress)
+    // Preserve the historical tier-0 skip with the switch OFF. When grouping
+    // enforcement is ON, Vanilla bots must also sync down to a stage-0 leader.
+    if (!refProgress && !enforceGroupRules)
         return;
 
     int32 const limit = progressionLimit;
@@ -467,10 +469,17 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
         // across expansion boundaries or admit a TBC-race member to Vanilla.
         // The global positive-RandomBot starting-floor rule is tracked
         // separately under F14; do not implement it via account-regex guesses.
-        if (enforceGroupRules && !IndividualProgressionGroupPolicy::MayGroup(
-                GetPlayerProgressionFromQuests(leader), leader->getRace(),
-                GetPlayerProgressionFromQuests(member), member->getRace(), limit))
-            continue;
+        uint8 const memberStage = GetPlayerProgressionFromQuests(member);
+        if (enforceGroupRules)
+        {
+            if (!IndividualProgressionGroupPolicy::MayGroup(
+                    refProgress, leader->getRace(), memberStage, member->getRace(), limit))
+                continue;
+
+            // A no-op sync must not remove and re-add rewarded progression quests.
+            if (memberStage == permittedState)
+                continue;
+        }
 
         ForceUpdateProgressionState(member, static_cast<ProgressionState>(permittedState));
     }
