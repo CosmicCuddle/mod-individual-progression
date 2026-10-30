@@ -3,6 +3,8 @@
 #include "DataMap.h"
 #include "EventProcessor.h"
 #include "ObjectAccessor.h"
+#include "CharmInfo.h"
+#include "SpellMgr.h"
 
 void IndividualProgression::UpdateRNDbotSpells(Player* player)
 {
@@ -68,7 +70,8 @@ void IndividualProgression::checkHunterPetSpells(Player* player)
         return;
 
     Pet* pet = player->GetPet();
-    if (!pet)
+    // The IP rank check must not race with asynchronous pet spell loading.
+    if (!pet || !pet->IsInWorld() || pet->isBeingLoaded())
         return;
 
     Creature* creature = pet->ToCreature();
@@ -100,15 +103,123 @@ void IndividualProgression::checkHunterPetSpells(Player* player)
                 }
             }
 
+            // Only the CURRENT pet's coherent native ON/OFF state may be
+            // transferred to a legal replacement rank of the same chain.
+            // This is not A02 saved-setting restoration or a human-choice receipt.
+            bool preserveAutocast = false;
+            uint32 oldId = 0;
+            uint8 oldSlot = MAX_UNIT_ACTION_BAR_INDEX;
+            ActiveStates oldActive = ACT_DISABLED;
+            SpellInfo const* oldInfo = nullptr;
+            SpellInfo const* keepInfo = nullptr;
+            CharmInfo* charm = pet->GetCharmInfo();
+
+            if (keepId && !pet->HasSpell(keepId) && charm)
+            {
+                keepInfo = sSpellMgr->GetSpellInfo(keepId);
+                if (keepInfo && keepInfo->IsAutocastable())
+                {
+                    uint32 existingRankCount = 0;
+                    for (uint32 id : wipeIds)
+                    {
+                        if (id != keepId && pet->HasSpell(id))
+                        {
+                            ++existingRankCount;
+                            oldId = id;
+                        }
+                    }
+
+                    if (existingRankCount == 1)
+                    {
+                        oldInfo = sSpellMgr->GetSpellInfo(oldId);
+                        auto const oldItr = pet->m_spells.find(oldId);
+                        if (oldInfo && oldInfo->IsAutocastable() &&
+                            keepInfo->IsDifferentRankOf(oldInfo) &&
+                            oldItr != pet->m_spells.end() &&
+                            oldItr->second.state != PETSPELL_REMOVED &&
+                            (oldItr->second.active == ACT_ENABLED ||
+                             oldItr->second.active == ACT_DISABLED))
+                        {
+                            oldActive = oldItr->second.active;
+
+                            uint32 listedCount = 0;
+                            for (uint32 spellId : pet->m_autospells)
+                                if (spellId == oldId)
+                                    ++listedCount;
+
+                            // Spell map, autocast list and bar must agree.
+                            // An observed OFF may be the native default.
+                            if (listedCount == (oldActive == ACT_ENABLED ? 1u : 0u))
+                            {
+                                uint32 chainSlotCount = 0;
+                                for (uint8 i = 0; i < MAX_UNIT_ACTION_BAR_INDEX; ++i)
+                                {
+                                    auto const* bar = charm->GetActionBarEntry(i);
+                                    if (!bar || !bar->IsActionBarForSpell() || !bar->GetAction())
+                                        continue;
+
+                                    SpellInfo const* barInfo = sSpellMgr->GetSpellInfo(bar->GetAction());
+                                    if (bar->GetAction() == oldId ||
+                                        (barInfo && barInfo->IsDifferentRankOf(oldInfo)))
+                                    {
+                                        ++chainSlotCount;
+                                        if (bar->GetAction() == oldId && bar->GetType() == oldActive)
+                                            oldSlot = i;
+                                    }
+                                }
+
+                                preserveAutocast = chainSlotCount == 1 &&
+                                    oldSlot != MAX_UNIT_ACTION_BAR_INDEX;
+                            }
+                        }
+                    }
+                }
+            }
+
             for (uint32 id : wipeIds)
             {
-                if (id != keepId && pet->HasSpell(id))
-                    pet->unlearnSpell(id, false, true);
+                if (id == keepId || !pet->HasSpell(id))
+                    continue;
+
+                bool const replacingOldRank = preserveAutocast && id == oldId;
+                if (replacingOldRank && oldActive == ACT_ENABLED)
+                    pet->ToggleAutocast(oldInfo, false); // Avoid stale old autocast ID.
+
+                // Keep the validated old bar entry for the core's native
+                // same-chain replacement rather than deleting its slot.
+                pet->unlearnSpell(id, false, !replacingOldRank);
             }
 
             if (keepId && !pet->HasSpell(keepId))
-                pet->learnSpell(keepId);
+            {
+                bool const learned = pet->learnSpell(keepId);
+                if (!preserveAutocast)
+                    return;
 
+                if (!learned)
+                {
+                    // Never leave an unlearned old spell on the pet bar.
+                    charm->RemoveSpellFromActionBar(oldId);
+                    player->PetSpellInitialize();
+                    return;
+                }
+
+                auto const* bar = charm->GetActionBarEntry(oldSlot);
+                if (player->GetPet() != pet || pet->isBeingLoaded() ||
+                    !bar || !bar->IsActionBarForSpell() || bar->GetAction() != keepId)
+                {
+                    // Fail closed rather than force an uncertain ON state.
+                    charm->SetSpellAutocast(keepInfo, false);
+                    player->PetSpellInitialize();
+                    return;
+                }
+
+                bool const enabled = oldActive == ACT_ENABLED;
+                pet->ToggleAutocast(keepInfo, enabled);
+                charm->SetSpellAutocast(keepInfo, enabled);
+                // learnSpell may have sent a packet before final state sync.
+                player->PetSpellInitialize();
+            }
         };
 
     if (familyName == "Wolf")
@@ -1302,7 +1413,7 @@ private:
         pending->pending = true;
 
         pet->m_Events.AddEvent(
-            new DelayedPetSpellCheck(owner->GetGUID()),
+            new DelayedPetSpellCheck(owner->GetGUID(), pet->GetGUID()),
             pet->m_Events.CalculateTime(200));
     }
 
@@ -1332,8 +1443,8 @@ public:
     class DelayedPetSpellCheck : public BasicEvent
     {
     public:
-        explicit DelayedPetSpellCheck(ObjectGuid ownerGuid, uint8 attempts = 0)
-            : _ownerGuid(ownerGuid), _attempts(attempts) {
+        explicit DelayedPetSpellCheck(ObjectGuid ownerGuid, ObjectGuid petGuid, uint8 attempts = 0)
+            : _ownerGuid(ownerGuid), _petGuid(petGuid), _attempts(attempts) {
         }
 
         bool Execute(uint64 /*e_time*/, uint32 /*p_time*/) override
@@ -1345,12 +1456,16 @@ public:
             if (!pet)
                 return true;
 
+            // A Hunter's queued event must never act on a different pet.
+            if (player->getClass() == CLASS_HUNTER && pet->GetGUID() != _petGuid)
+                return true;
+
             // If the LoadPetFromDB async callback hasn't completed yet, poll again.
             // Cap attempts so a stuck loading flag can't recurse forever.
             if (pet->isBeingLoaded() && _attempts < 10)
             {
                 pet->m_Events.AddEvent(
-                    new DelayedPetSpellCheck(_ownerGuid, _attempts + 1),
+                    new DelayedPetSpellCheck(_ownerGuid, _petGuid, _attempts + 1),
                     pet->m_Events.CalculateTime(200));
                 return true;
             }
@@ -1358,7 +1473,7 @@ public:
             // The check runs now - allow the next pet load to queue a fresh one.
             pet->CustomData.GetDefault<PendingPetSpellCheck>(PENDING_CHECK_KEY)->pending = false;
 
-            if (player->getClass() == CLASS_HUNTER)
+            if (player->getClass() == CLASS_HUNTER && !pet->isBeingLoaded())
                 sIndividualProgression->checkHunterPetSpells(player);
             if (player->getClass() == CLASS_WARLOCK)
                 sIndividualProgression->checkWarlockPetSpells(player);
@@ -1368,6 +1483,7 @@ public:
 
     private:
         ObjectGuid _ownerGuid;
+        ObjectGuid _petGuid;
         uint8      _attempts;
     };
 };
