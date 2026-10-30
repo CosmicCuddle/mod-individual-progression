@@ -50,6 +50,37 @@
 
 **Open policy question:** Vanilla **server** era vs **observer** era are distinct with individual progression. A TBC human and Vanilla human may coexist: globally suppressing all BE/Draenei rndbots would block legitimate TBC access. A fully observer-specific visibility solution therefore may still need world and WHO filtering even if pre-login suppression is used for the present all-Vanilla stage. Do not assume permanent global suppression is correct for the intended future multi-era server.
 
+## 3A. Why existing IP race settings do NOT solve the new rndbot rule
+
+Current fork [`conf/individualProgression.conf.dist`](https://github.com/CosmicCuddle/mod-individual-progression/blob/develop/cosmic-ip/conf/individualProgression.conf.dist) already defines three relevant controls:
+
+| Existing option | Source-backed meaning | Why it is insufficient alone |
+| --- | --- | --- |
+| `IndividualProgression.TbcRacesUnlockProgression` (default `0`) | Race creation unlocks for ordinary account characters when account progression reaches a configured stage | `IndividualPlayerProgression_AccountScript::OnPlayerCanCreateCharacter` explicitly **lets bot/excluded accounts bypass the human race-unlock check**, so configuring it does not establish a rndbot stage floor or activation block |
+| `IndividualProgression.tbcRacesStartingProgression` (default `0`; optional `8`) | `IndividualPlayerProgression::OnPlayerLogin` applies this only in the **normal-account** branch for human Blood Elf/Draenei starting progression | The **non-normal-account** branch above it still forces **any level <=60** character to IP stage **0**, and level 61–70 to stage 8, regardless of race. Changing this setting to 8 is **not** a solution for positively verified rndbots and might change established human gameplay if done globally |
+| `IndividualProgression.ProgressionLimit` (default `0`) | `0` means **no IP progression cap**, while `7` would limit recorded progression to the final Vanilla stage | Owner's current **character level 60 cap is NOT proof** this particular IP config setting is 7. Stage eligibility should be based on actual effective IP rules + era unlocks, not assume max level and IP cap are identical |
+
+**No settings change is proposed or performed here.** The owner already has functioning custom configuration and a working server. Test the real installed values read-only before coding against them.
+
+## 3B. Scheduling and login sequence: promising but unproven integration boundary
+
+Historical Playerbots [`RandomPlayerbotMgr.cpp:760–780`](https://github.com/mod-playerbots/mod-playerbots/blob/e88cc4099e69f35126b28942a412ca702d20453b/src/Bot/RandomPlayerbotMgr.cpp#L760-L780) schedules a selected stored rndbot and inserts its GUID into `currentBots` **before** later player loading. [`PlayerbotMgr.cpp:260–281`](https://github.com/mod-playerbots/mod-playerbots/blob/e88cc4099e69f35126b28942a412ca702d20453b/src/Bot/PlayerbotMgr.cpp#L260-L281) later calls `botSession->HandlePlayerLoginFromDB(holder)`, and invokes `sRandomPlayerbotMgr.OnPlayerLogin(bot)` before queueing the post-login operation.
+
+Consequences:
+
+- Positive identity **may** be available to World-thread callbacks for **already-scheduled** rndbots via the manager's verified account-list + active GUID checks. This is more robust than an IP regex, but **exact ScriptMgr OnPlayerLogin ordering, installed Playerbots version, optional module compilation and map-thread call safety remain unverified**. Never call a mutable manager set concurrently from map workers just because it appears in a pinned historical file.
+- For **candidate selection before login**, `IsRandomBot(Player*)` cannot be used because there is no loaded Player; the selection manager itself already has candidate race and account metadata, which is the appropriate place to consider a **non-destructive** pre-login eligibility test.
+- Newly pre-generated race-10/11 rndbot characters may exist in the database while TBC is locked, but **must not become active Vanilla rndbots**. Do not pre-emptively set or grant TBC rewarded progression quests while the Vanilla cap is active. The first **eligible activation** should start with a verified tier-8 or higher effective stage; safely handling dormant pre-existing characters requires a separate migration/test plan, not a character delete.
+- The world may contain Vanilla and TBC individual-progression players simultaneously later. A hard global suppress-all-BE/Draenei switch would then wrongly hide eligible rndbots from TBC players; keep observer-specific visibility and activation eligibility as separate concerns.
+
+**Implementation gate:** identify the verified positive RandomBot classification at every stage-writing entry point, prove the effective server/IP cap and cross-thread lifecycle, and confirm precise owner gameplay behaviour before any executable change.
+
+## 3C. Reuse the existing F14 identity work; avoid duplicating it
+
+The separate [Naxxramas F14 P1 draft #197](https://github.com/CosmicCuddle/Mod-Naxxramas-Core/pull/197) has a **pure positively separated** `Human` / `RandomBot` / `AltBot` / `SelfBot` / `Unknown` classifier; [P5 draft #202](https://github.com/CosmicCuddle/Mod-Naxxramas-Core/pull/202) samples facts through a not-yet-wired world-thread adapter/snapshot. This was explicitly acknowledged in [the existing Naxx F14 development Issue #143](https://github.com/CosmicCuddle/Mod-Naxxramas-Core/issues/143). These are useful inputs for a future approved solution, **but neither is a running identity service for IP right now**.
+
+**Important old-policy hazard:** the P1 prototype's `HideTbcRow` currently offers “hide all” and “hide all except human.” **Neither implements CosmicCuddle's newer approved scope**: hide only when race is 10/11 **and the target is positively `RandomBot`**; `Human`, `AltBot`, `SelfBot`, `Unknown` remain visible. The owning developer already recognised this in Issue #143; do not merge/enable either old policy unmodified, and don't create a duplicate implementation in IP without an owner-approved integration plan.
+
 ## 4. Required test matrix before code or production
 
 | Test | Expected |
