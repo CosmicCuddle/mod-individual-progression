@@ -55,7 +55,7 @@ int main()
                     Expansion const a = ExpectedEra(static_cast<std::uint8_t>(stageA));
                     Expansion const b = ExpectedEra(static_cast<std::uint8_t>(stageB));
                     bool const expected = a != Expansion::Invalid && a == b &&
-                        !(a == Expansion::Vanilla && (raceA == 10 || raceA == 11));
+                        !(a == Expansion::Vanilla && (raceA == 10 || raceA == 11 || raceB == 10 || raceB == 11));
                     Check(MayGroup(static_cast<std::uint8_t>(stageA),
                                    static_cast<std::uint8_t>(raceA),
                                    static_cast<std::uint8_t>(stageB),
