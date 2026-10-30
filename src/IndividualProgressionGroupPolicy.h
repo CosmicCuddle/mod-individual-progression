@@ -36,7 +36,7 @@ namespace IndividualProgressionGroupPolicy
     }
 
     // A 0 limit means "no progression cap" in Individual Progression.
-    constexpr std::uint8_t EffectiveStage(std::uint8_t stage, std::uint8_t limit)
+    constexpr std::uint8_t EffectiveStage(std::uint8_t stage, std::int32_t limit)
     {
         return limit && stage > limit ? limit : stage;
     }
@@ -51,12 +51,12 @@ namespace IndividualProgressionGroupPolicy
     // When enforcement is OFF, callers keep the established stock/group logic.
     constexpr bool MayGroup(std::uint8_t firstStage, std::uint8_t firstRace,
                             std::uint8_t secondStage, std::uint8_t secondRace,
-                            std::uint8_t progressionLimit)
+                            std::int32_t progressionLimit)
     {
         // Invalid quest-stage data must not become valid merely because a
-        // lower server cap clamps its value.
+        // lower server cap clamps its value. Negative/oversized caps fail closed.
         if (firstStage > LastSupportedStage || secondStage > LastSupportedStage ||
-            progressionLimit > LastSupportedStage)
+            progressionLimit < 0 || progressionLimit > LastSupportedStage)
             return false;
 
         Expansion const first = GetExpansion(EffectiveStage(firstStage, progressionLimit));
