@@ -59,8 +59,15 @@ namespace IndividualProgressionGroupPolicy
             progressionLimit < 0 || progressionLimit > LastSupportedStage)
             return false;
 
-        Expansion const first = GetExpansion(EffectiveStage(firstStage, progressionLimit));
-        Expansion const second = GetExpansion(EffectiveStage(secondStage, progressionLimit));
+        // A tier above the configured cap is invalid for grouping, NOT a
+        // Vanilla tier just because the cap is Vanilla. Do not turn a TBC/
+        // Wrath character into a Vanilla member by clamping its recorded tier.
+        if (progressionLimit &&
+            (firstStage > progressionLimit || secondStage > progressionLimit))
+            return false;
+
+        Expansion const first = GetExpansion(firstStage);
+        Expansion const second = GetExpansion(secondStage);
 
         if (first == Expansion::Invalid || first != second)
             return false;
