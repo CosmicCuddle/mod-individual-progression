@@ -3,6 +3,7 @@
 */
 
 #include "IndividualProgression.h"
+#include "IndividualProgressionGroupPolicy.h"
 #include "naxxramas_40.h"
 #include "ReputationMgr.h"
 #include "PetDefines.h"
@@ -446,13 +447,27 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
     if (!refProgress)
         return;
 
+    uint8 const limit = progressionLimit;
+    uint8 const permittedState = enforceGroupRules
+        ? IndividualProgressionGroupPolicy::EffectiveStage(refProgress, limit)
+        : refProgress;
+
     for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
     {
         Player* member = itr->GetSource();
         if (!member || isNormalAccount(member))
             continue;
 
-        ForceUpdateProgressionState(member, static_cast<ProgressionState>(refProgress));
+        // When group enforcement is enabled, never force a bot/excluded account
+        // across expansion boundaries or admit a TBC-race member to Vanilla.
+        // The global positive-RandomBot starting-floor rule is tracked
+        // separately under F14; do not implement it via account-regex guesses.
+        if (enforceGroupRules && !IndividualProgressionGroupPolicy::MayGroup(
+                GetPlayerProgressionFromQuests(leader), leader->getRace(),
+                GetPlayerProgressionFromQuests(member), member->getRace(), limit))
+            continue;
+
+        ForceUpdateProgressionState(member, static_cast<ProgressionState>(permittedState));
     }
 }
 
