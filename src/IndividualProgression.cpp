@@ -431,7 +431,8 @@ bool IndividualProgression::isPlayerInDungeonOrRaid(Player* player)
 
 void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
 {
-    if (!group)
+    // Disabling Individual Progression must also disable its group-time quest writes.
+    if (!enabled || !group)
         return;
 
     ObjectGuid leaderGuid = group->GetLeaderGUID();
