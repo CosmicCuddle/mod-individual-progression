@@ -144,7 +144,7 @@ class PinnedSourceAudit(unittest.TestCase):
         section = direct_operation(self.bot)
         mutated = section.replace("group->ConvertToRaid();", "GROUP_CONVERT_MARKER;")
         mutated = mutated.replace("group->AddMember(target)",
-                                  "group->ConvertToRaid(); group->AddMember(target)")
+                                  "group->AddMember(target); group->ConvertToRaid()")
         self.assertFalse(check_order(mutated, "group->ConvertToRaid()",
                                      "group->AddMember(target)"))
 
