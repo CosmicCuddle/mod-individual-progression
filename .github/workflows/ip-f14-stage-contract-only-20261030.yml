@@ -1,0 +1,59 @@
+name: F14 rndbot stage-write contract (tests ONLY, no game code)
+
+on:
+  push:
+    branches:
+      - tests/f14-stage-write-contract-20261030
+  pull_request:
+    paths:
+      - tests/f14_rndbot_stage_contract.py
+      - tests/test_f14_rndbot_stage_contract.py
+      - docs/F14_RNDBOT_STAGE_CONTRACT_QA_2026-10-30.md
+      - .github/workflows/ip-f14-stage-contract-only-20261030.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  f14-offline-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout disposable test source only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Guard exact four review-only changed paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=bf09eccfc757fd8aaa7b034e3422787825040b9a
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD | sort > /tmp/actual-f14-paths.txt
+          printf '%s\n' \
+            '.github/workflows/ip-f14-stage-contract-only-20261030.yml' \
+            'docs/F14_RNDBOT_STAGE_CONTRACT_QA_2026-10-30.md' \
+            'tests/f14_rndbot_stage_contract.py' \
+            'tests/test_f14_rndbot_stage_contract.py' | sort > /tmp/allowed-f14-paths.txt
+          diff -u /tmp/allowed-f14-paths.txt /tmp/actual-f14-paths.txt
+          echo 'Protected IP runtime source, configuration, SQL and previous docs unmodified.'
+      - name: Verify synthetic policy suite (no Worldserver or DB)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_f14_rndbot_stage_contract.py' -v
+      - name: Verify no runtime imports in F14 contract model
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('tests/f14_rndbot_stage_contract.py').read_text()
+          for forbidden in ('subprocess', 'sqlite3', 'pymysql', 'mysql.connector',
+                            'socket', 'requests', 'urllib', 'os.system', 'ctypes'):
+              assert forbidden not in text, f'Unexpected external/host dependency: {forbidden}'
+          assert 'def decide(' in text
+          print('PASS: F14 model is standalone and contains no host I/O adapter.')
+          PY
