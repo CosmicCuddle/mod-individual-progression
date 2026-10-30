@@ -76,7 +76,7 @@ jobs:
               ),
               "src/Util/LocaleColumns.h": (
                   "if (!IsLocaleRegistered(locale))",
-                  "if (!LocaleNames[locale])"
+                  "if (!localeNames[locale])"
               ),
           }
           for relative_path, (old, new) in replacements.items():
