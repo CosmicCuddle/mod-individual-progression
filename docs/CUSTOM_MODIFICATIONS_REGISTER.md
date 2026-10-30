@@ -40,18 +40,21 @@
 - Existing commented Cower and other `keepId=0` removal-only lines are not granted or transformed into learned spells.
 
 
-## IP-GROUP-001 — Expansion-based EnforceGroupRules (PLANNED, NO CODE)
+## IP-GROUP-001 — Expansion-based EnforceGroupRules (EXPERIMENTAL DRAFT CODE)
 
 | Field | Record |
 | --- | --- |
-| Intended behaviour | Keep the existing config switch: **0 = OFF** (normal grouping); **1 = ON** (same **expansion** required, not exact raid tier). Vanilla IP stages **0–7**, TBC **8–12**, WotLK **13–18**. Different raid tiers in the same expansion can group. Do not change human players' progression merely to make grouping pass. |
-| Race exception | When enforcement is ON, Blood Elves and Draenei must not group with Vanilla members, including human characters; they remain visible. Whether this grouping prohibition must also apply with enforcement OFF is not yet explicitly settled. |
-| Owner decision / reference | CosmicCuddle's 2026-10-30 instruction, recorded in [Coordination #10](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/10). Keep this separate from rndbot-only **visibility**. |
-| Owning code and affected paths | IP fork. Existing code in src/IndividualProgressionPlayer.cpp (OnPlayerCanGroupInvite, OnPlayerCanGroupAccept, GroupScript::OnAddMember); src/IndividualProgression.cpp (SyncBotsProgressionToLeader, ForceUpdateProgressionState); src/IndividualProgression.h (enum). **No files changed yet.** |
-| Source ref / dependencies | Reviewed IP Hunter candidate f0044987cc2d6f0b73c1cd25d17012a26a764beb. Existing code compares exact tiers for some players and bot **level bands** for others, and may sync a bot to its leader's exact stage. Bot classification and effective progression cap need care. Updated owner Core/Playerbots commits unverified. |
-| Config / SQL / DBC / client | Retain IndividualProgression.EnforceGroupRules existing 0/1 option. No new setting, SQL/schema, DBC or client patch approved. |
-| Risk / tests | Vanilla 0–7 vs TBC 8–12 vs WotLK 13–18; distinct tiers within an expansion must pass; cross-expansion invitations/acceptances must fail when ON; human/Altbot/rndbot differences, race exception, group-leader changes and IP stage-cap or disabled modes; preserve OFF behaviour. |
-| Status / rollback | **OWNER REQUEST ONLY. NOT IMPLEMENTED, COMPILED, GAMEPLAY-TESTED OR DEPLOYED.** Later make isolated PR, run source/build/actual group tests, record rollback before merge. |
+| Intended behaviour | Keep the existing config switch: **0 = OFF** (original grouping and bot sync); **1 = ON** (same **effective expansion**, not exact raid tier). Vanilla stages **0–7**, TBC **8–12**, WotLK **13–18**; distinct raid tiers within a single expansion can group. Do not alter human characters' stages to make them eligible. |
+| Race exception | When enforcement is ON, Blood Elves and Draenei cannot join Vanilla groups, including human characters; **humans are never concealed**. Whether this must also apply with enforcement OFF has not been separately selected. |
+| Owner rule | CosmicCuddle's 2026-10-30 instruction, recorded in [Coordination #10](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/10). Separate from **rndbot-only visibility and starting tier floor** in #9. |
+| Branch / owning component | Isolated **`feature/expansion-group-rules-20261030`** development branch from `develop/cosmic-ip`, preserving Hunter DRAFT PR #1 separately. IP fork only. |
+| Changed implementation files | **`src/IndividualProgressionGroupPolicy.h`** new pure policy; **`src/IndividualProgressionPlayer.cpp`** invitation and acceptance paths; **`src/IndividualProgression.cpp`** group-add sync eligibility and effective stage. No Hunter spell files changed. |
+| Source/test documentation | [Detailed review](EXPANSION_GROUP_RULES_REVIEW_2026-10-30.md), `tests/group_expansion_policy.cpp`, `tests/check_group_expansion_source.py`, `.github/workflows/ip-expansion-group-policy.yml`. Draft branch created after the documentation-only PR #2 merged into protected develop. |
+| Source ref / dependencies | Effective progression is derived from current rewarded-quest stage and `ProgressionLimit`. Existing stage/race enum values are static-asserted. Group lookups use existing Core script hooks. Updated owner Core/Playerbots commits and worldserver compile compatibility are not independently verified. |
+| Config / SQL / DBC / client | **Existing** `IndividualProgression.EnforceGroupRules` only, 0/1; no added config key or config value changed. No SQL/schema, DBC, client patch or production modifications. |
+| Known incomplete dependency | F14 positive rndbot race-10/11 **tier-8 starting floor is NOT enforced by this grouping patch**. Its pure predicate is intentionally **unwired** pending verified RandomBot identity, spawn/login handling and cap safety. With enforcement OFF, legacy group sync remains. DO NOT MERGE until this interaction is resolved or separately authorised. |
+| Tests required | Standalone actual policy compiled in C++17/20 plus wiring checks are **defined but results unverified at this checkpoint**. Native Worldserver compile/link and real game acceptance still required: same expansion/different tiers, cross-expansion, race exception, bots, OFF regression, group leadership, cap and disabled IP, online/offline group members. |
+| Status / rollback | **CODE COMMITTED ON ISOLATED DRAFT BRANCH, NOT MERGED, NOT DEPLOYED.** Not yet proven compiled or tested in game; do not run on production. Retain original protected develop/source and binary/config/character-data backups and plan branch-revert rollback before any later live test. |
 
 ## IP-F14-001 — Blood Elf/Draenei rndbots start in TBC (PLANNED, NO CODE)
 
