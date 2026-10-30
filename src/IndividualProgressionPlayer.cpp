@@ -506,15 +506,17 @@ public:
         uint8 const targetState = sIndividualProgression->GetPlayerProgressionFromQuests(invitee);
         int32 const limit = sIndividualProgression->progressionLimit;
 
-        // Validate against every currently loaded group member, not only the
-        // inviter, to prevent joining an already mixed-expansion group.
+        // Validate all stored group members, not just those online, to prevent
+        // adding a new member to an unknown or mixed-expansion group.
         if (Group* group = player->GetGroup())
         {
-            for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
+            // Offline members have no verified IP tier in this callback:
+            // fail closed instead of silently omitting them from era checks.
+            for (auto const& slot : group->GetMemberSlots())
             {
-                Player* member = itr->GetSource();
+                Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
                 if (!member || !member->IsInWorld())
-                    continue;
+                    return false;
 
                 uint8 const memberState = sIndividualProgression->GetPlayerProgressionFromQuests(member);
                 if (!IndividualProgressionGroupPolicy::MayGroup(
@@ -551,11 +553,13 @@ public:
                     joiningState, player->getRace(), leaderState, leader->getRace(), limit))
                 return false;
 
-            for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
+            // Offline members have no verified IP tier in this callback:
+            // fail closed instead of silently omitting them from era checks.
+            for (auto const& slot : group->GetMemberSlots())
             {
-                Player* member = itr->GetSource();
+                Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
                 if (!member || !member->IsInWorld())
-                    continue;
+                    return false;
 
                 uint8 const memberState = sIndividualProgression->GetPlayerProgressionFromQuests(member);
                 if (!IndividualProgressionGroupPolicy::MayGroup(
