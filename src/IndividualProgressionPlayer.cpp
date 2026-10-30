@@ -567,17 +567,11 @@ public:
                     return false;
             }
 
-            // Maintain same-expansion bot/excluded-account tier syncing, but do
-            // not grant hidden quest stages beyond the effective server limit.
-            // The stricter race-10/11 RNDBOT starting floor is a separate F14
-            // change and MUST be verified before merging this draft.
-            if (!sIndividualProgression->isNormalAccount(player))
-            {
-                uint8 const permittedStage = IndividualProgressionGroupPolicy::EffectiveStage(leaderState, limit);
-                if (joiningState != permittedStage)
-                    sIndividualProgression->ForceUpdateProgressionState(
-                        player, static_cast<ProgressionState>(permittedStage));
-            }
+            // Do not mutate hidden progression quests while accepting an
+            // invitation. The Core can still fail to create/add the group
+            // AFTER this hook. GroupScript::OnAddMember performs the permitted
+            // same-expansion bot sync only after membership is established.
+            // Mandatory F14 rndbot tier-8 floor remains separate/unimplemented.
             return true;
         }
 
