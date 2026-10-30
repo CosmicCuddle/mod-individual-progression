@@ -1413,7 +1413,7 @@ public:
 
 // Per-pet state: a spell check is queued or deferred until this pet's
 // asynchronous spell load finishes. It dies with the original Pet object.
-static constexpr char const* PENDING_CHECK_KEY = "ipp_PendingPetSpellCheck";
+static std::string const PENDING_CHECK_KEY = "ipp_PendingPetSpellCheck";
 
 class PendingPetSpellCheck : public DataMap::Base
 {
