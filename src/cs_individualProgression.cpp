@@ -136,8 +136,24 @@ public:
             return false;
         }
 
-        player = PlayerIdentifier::FromTargetOrSelf(handler);
+        // An explicit online target/name must take precedence over the
+        // command issuer's selected target. Console has no player session.
+        if (!player)
+            player = PlayerIdentifier::FromTargetOrSelf(handler);
+
+        if (!player)
+        {
+            handler->SendSysMessage("Player not found. Specify an online player or target.");
+            return false;
+        }
+
         Player* target = player->GetConnectedPlayer();
+        if (!target || !target->IsInWorld())
+        {
+            handler->PSendSysMessage("Player |cff00ffff{}|r is not online.", player->GetName());
+            return false;
+        }
+
         std::string playername = target->GetName();
         uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(target);
         uint32 currentArea = target->GetAreaId();
@@ -156,11 +172,19 @@ public:
 
     static bool HandleSetBotIndividualProgressionCommand(ChatHandler* handler)
     {
-        Player* player = handler->GetSession()->GetPlayer();
-
-        if (!player)
+        // This command is intentionally an in-game group operation even
+        // though its historical registration also permits console parsing.
+        WorldSession* session = handler->GetSession();
+        if (!session)
         {
-            handler->SendSysMessage("Player not found.");
+            handler->SendSysMessage(".ip setbot requires an in-game player session.");
+            return false;
+        }
+
+        Player* player = session->GetPlayer();
+        if (!player || !player->IsInWorld())
+        {
+            handler->SendSysMessage("Player not found or not in world.");
             return false;
         }
 
@@ -193,11 +217,21 @@ public:
 
     static bool HandleSetRepIndividualProgressionCommand(ChatHandler* handler)
     {
-        Player* player = handler->GetSession()->GetPlayer();
-        uint32 accountId = handler->GetSession()->GetAccountId();
-        
-        if (!player || !accountId)
+        WorldSession* session = handler->GetSession();
+        if (!session)
+        {
+            handler->SendSysMessage(".ip setrep requires an in-game player session.");
             return false;
+        }
+
+        Player* player = session->GetPlayer();
+        uint32 accountId = session->GetAccountId();
+
+        if (!player || !player->IsInWorld() || !accountId)
+        {
+            handler->SendSysMessage("Player not found or not in world.");
+            return false;
+        }
 
         Group* group = player->GetGroup();
         
@@ -597,8 +631,24 @@ public:
             return false;
         }
 
-        player = PlayerIdentifier::FromTargetOrSelf(handler);
+        // Preserve an explicit name/GUID; console or missing target must
+        // not dereference an empty identifier or an offline player.
+        if (!player)
+            player = PlayerIdentifier::FromTargetOrSelf(handler);
+
+        if (!player)
+        {
+            handler->SendSysMessage("Player not found. Specify an online player or target.");
+            return false;
+        }
+
         Player* target = player->GetConnectedPlayer();
+        if (!target || !target->IsInWorld())
+        {
+            handler->PSendSysMessage("Player |cff00ffff{}|r is not online.", player->GetName());
+            return false;
+        }
+
         uint32 progressionLevel = sIndividualProgression->GetPlayerProgressionFromQuests(target);
         std::string playername = target->GetName();
 
@@ -664,11 +714,17 @@ public:
 
     static bool HandleAttuneIndividualProgressionCommand(ChatHandler* handler, std::string location)
     {
-        Player* player = handler->GetSession()->GetPlayer();
-
-        if (!player)
+        WorldSession* session = handler->GetSession();
+        if (!session)
         {
-            handler->SendSysMessage("Player not found.");
+            handler->SendSysMessage(".ip attune requires an in-game player session.");
+            return false;
+        }
+
+        Player* player = session->GetPlayer();
+        if (!player || !player->IsInWorld())
+        {
+            handler->SendSysMessage("Player not found or not in world.");
             return false;
         }
 
