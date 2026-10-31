@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ip-combined-hunter-group-no-offline-leader-current-review
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -45,9 +45,23 @@ jobs:
             'src/IndividualProgressionPlayer.cpp' \
             'tests/test_ip_combined_offline_leader_guard.py' | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/actual.txt
-          # Exact five-file parent guard still runs only on its own PR.
-          grep -F "github.head_ref == 'integration/hunter-grouping-candidate-20261031'" .github/workflows/ip-hunter-group-integration-review-20261031.yml
-          grep -F "github.ref == 'refs/heads/integration/hunter-grouping-candidate-20261031'" .github/workflows/ip-hunter-group-integration-review-20261031.yml
+          # Verify the old exact-path freeze step, not the complete Hunter job,
+          # is scoped to #10; all normal Hunter/group regressions must still run.
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path('.github/workflows/ip-hunter-group-integration-review-20261031.yml').read_text()
+          freeze="""      - name: Assert source equality and exact five-file review delta
+        if: >-
+          (github.event_name == 'pull_request' && github.head_ref == 'integration/hunter-grouping-candidate-20261031') ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/hunter-grouping-candidate-20261031')
+        shell: bash"""
+          assert src.count(freeze)==1, 'Frozen parent step must be scoped to #10'
+          start=src.index('  integration-source-and-policy:')
+          end=src.index('    steps:', start)
+          assert '    if:' not in src[start:end], 'Do not skip all Hunter regressions'
+          assert 'python3 tests/check_hunter_autocast_source.py' in src
+          assert 'python3 tests/check_group_expansion_source.py' in src
+          PY
           for file in src/cs_individualProgression.cpp src/IndividualProgressionGroupPolicy.h src/IndividualProgression.cpp src/IndividualProgressionSpells.cpp; do
             test "$(git rev-parse "HEAD:$file")" = "$(git rev-parse "$BASE:$file")"
           done

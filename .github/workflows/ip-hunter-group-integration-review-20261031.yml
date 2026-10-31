@@ -15,12 +15,8 @@ permissions:
 
 jobs:
   integration-source-and-policy:
-    # This original five-file freeze contract applies ONLY to combined PR #10.
-    # Child PR #16 intentionally changes IndividualProgressionPlayer.cpp; its
-    # dedicated six-file CI checks the modified source without weakening #10.
-    if: >-
-      (github.event_name == 'pull_request' && github.head_ref == 'integration/hunter-grouping-candidate-20261031') ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/hunter-grouping-candidate-20261031')
+    # Every relevant PR retains Hunter and grouping regression tests.
+    # Only the original immutable five-file/delta assertion is PR #10-specific.
     name: Exact committed Hunter C++ plus protected grouping source checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -31,6 +27,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Assert source equality and exact five-file review delta
+        if: >-
+          (github.event_name == 'pull_request' && github.head_ref == 'integration/hunter-grouping-candidate-20261031') ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/hunter-grouping-candidate-20261031')
         shell: bash
         run: |
           set -euo pipefail
