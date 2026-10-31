@@ -137,3 +137,13 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | SQL gate | Whole-tree cross-statement and cross-file dependency analysis (fail closed). `SET ID = <stage literal or expression>`, MySQL `/*! … */` comments and stored or dynamic SQL naming a marker table are findings. Real-baseline mutable non-chain columns (`RewardFactionOverride1..5`, `AllowableRaces`) are documented. Baseline: 0 findings. |
 | Route inventory | Pointer-style (`->`) calls counted. `RemoveRewardedQuest` caller inventory (4 PB sites). `DropQuestAction::Execute` contract: master `drop <quest link>` removes a rewarded marker with no log slot, without any reset ([SRC] only; chat reachability untested). Stage and PvP sets are tracked separately; no preservation policy is implied. |
 | Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 5 (2026-10-31, test/docs only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-4 conditional review (F1, F2)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6546511038) and CS03-IP self-review S1–S3, scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6546542325) |
+| Files | The same seven paths; workflow and C++ harness unchanged. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| SQL gate | Unmodelled verbs naming a marker table fail closed (read-only allowlist). ODKU `ID` and chain-column assignments are findings. A double-quoted (ANSI_QUOTES) marker-table write target fails closed. Baseline: 0 findings. |
+| Limits | Accepted conservative false positive F3. Non-guarantees F4: concatenated or hex-built dynamic SQL, procedures defined elsewhere, views. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |

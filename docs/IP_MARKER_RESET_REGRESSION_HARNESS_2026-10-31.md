@@ -7,6 +7,7 @@
 **Revision 2** (same date): addresses the [CS02-IP review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6543427658) as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6543457181). See [Revision 2 changes](#revision-2-changes).
 **Revision 3** (same date): addresses the [CS02-IP rev-2 re-review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544136049) as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544205778). See [Revision 3 changes](#revision-3-changes).
 **Revision 4** (same date): addresses the [CS02-IP rev-3 re-review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544624580) (N1–N4) and the [`drop` finding](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6545502850), as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544844601). See [Revision 4 changes](#revision-4-changes).
+**Revision 5** (same date): closes CS02-IP rev-4 findings F1/F2 and self-review S1–S3, as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6546542325). See [Revision 5 changes](#revision-5-changes).
 
 ## What it checks
 
@@ -178,6 +179,9 @@ Making the markers repeatable would hide them from `ResetQuests`. It would **als
   - Pointer-style `f->Randomize(false)` and `sRandomPlayerbotMgr->Randomize(b)` in a new file are detected.
   - A new `RemoveRewardedQuest` caller is detected.
   - 3 `drop` control-flow mutants, each failing with `MSG_DROP_QUEST_CHANGED`: the removal call dropped; `entry` zeroed when no slot matches; a stage-marker exemption added.
+- **Revision 5 fixtures:**
+  - 9 negatives with asserted reasons: `LOAD DATA`, `LOAD XML`, `WITH … UPDATE` with and without a sub-select, ODKU `ID = 66001`, ODKU `ID = ID + 1`, ODKU chain column, ANSI-quoted `UPDATE`, ANSI-quoted `INSERT`.
+  - 9 controls: `SET @var := (SELECT …)` (a real baseline form), `SELECT`, `HANDLER`, `EXPLAIN`, a marker name only inside a string (twice), a non-chain ODKU with `VALUES(c)`, a plain unrelated insert, a PvP insert.
 - **Layer B, 2 compiled mutations:**
   - `ResetQuests` skipping 66001–66018;
   - **`ResetQuests` guarding removal with `!quest->HasFlag(QUEST_FLAGS_TRACKING)`**. This compiles with the verbatim `HasFlag`/`QuestFlags` and fails *on behaviour*: markers (`Flags = 1024`) survive, while ordinary quests are still deleted.
@@ -237,8 +241,20 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
   - `SET ID = <stage literal>` is a finding regardless of `WHERE` (N4a), and `SET ID = <expression>` fails closed. Literal non-stage or PvP IDs stay clean.
   - MySQL executable comments `/*! … */` naming a marker table are findings (N2). Ordinary comments are ignored.
   - Statements containing the keywords `CREATE`, `PREPARE`, `TRIGGER` or `PROCEDURE` (outside string literals) that name a marker table anywhere, including inside a string, are findings.
-- **Limits:**
-  - Statement **values** are not modelled, only which columns may change. That is why the analysis is conservative.
+- **Revision 5 — verb allowlist, ODKU and quoted identifiers:**
+  - A statement that names a marker table **as an identifier** is analysed only if its verb is modelled: `INSERT`/`REPLACE`/`UPDATE`/`DELETE`, the DDL rule, or the stored/dynamic SQL rule.
+  - The read-only verbs `SELECT`, `SET` (variable assignment), `SHOW`, `HANDLER` and `DESCRIBE`/`DESC`/`EXPLAIN` pass.
+  - **Every other verb fails closed** with `unsupported statement form '<VERB>' …`. This covers `LOAD DATA`, `LOAD XML`, a leading `WITH … UPDATE` (a read-only `WITH … SELECT` also fails closed, conservatively), and any future syntax. Mentions only inside strings or comments are not identifiers and stay clean.
+  - `INSERT`/`REPLACE … ON DUPLICATE KEY UPDATE` on a marker table:
+    - assigning `ID` a stage literal or an expression is a finding;
+    - assigning any other chain column fails closed, because ODKU rewrites whichever row already holds the key;
+    - rows are parsed only from the part before ODKU, so `c = VALUES(c)` no longer raises a parser error.
+  - A double-quoted table name in a write target (`UPDATE "quest_template" …`) fails closed, because it is an identifier under `sql_mode=ANSI_QUOTES`. The owner's SQL mode is unverified.
+- **Known conservative false positive (CS02-IP F3, accepted):** Pass B flags a chain write whose `WHERE` references a baseline-mutable column even when another conjunct pins a non-stage row (e.g. `WHERE ID = 12345 AND AllowableRaces = 1`). Narrowing conjuncts are not used to clear a dependency.
+- **Limits and non-guarantees (CS02-IP F4):**
+  - Statement **values** are not modelled, only which columns may change.
+  - Dynamic SQL **built** without naming a marker table literally (e.g. `CONCAT('UPDATE quest_', 'template …')`, hex-encoded names) is invisible.
+  - So are `CALL` of a procedure defined elsewhere and writes through a **view**. That is why the analysis is conservative.
   - `CALL` of a procedure defined outside these files, `EXECUTE` of a statement prepared elsewhere, and dynamic SQL that never names a marker table cannot be seen.
   - Only IP's `data/sql/**` and `optional/sql/**` are inputs. Core custom SQL, other modules, manual overlays and live DB history are **not** audited.
   - Live-DB or owner-local SQL is out of scope.
@@ -306,6 +322,15 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
 | P2 / N4a `SET ID = stage literal` | Finding regardless of `WHERE`; `SET ID = <expression>` fails closed; PvP and other literal IDs stay clean |
 | Optional / `drop` route | `RemoveRewardedQuest` caller inventory (4 sites) and `DropQuestAction::Execute` control-flow contract with an ID-agnostic stage/PvP mapping |
 | P2 / N4b PR description | Refreshed on GitHub after the exact-head runs (not a repository file) |
+
+## Revision 5 changes
+
+| CS01-IP priority / finding | Change |
+| --- | --- |
+| P1 / F1 + S1/S2 unmodelled verbs | Read-only verb allowlist; every other verb naming a marker table fails closed (`LOAD DATA/XML`, `WITH … UPDATE`, future forms) |
+| P2 / F2 + ODKU parser error | ODKU assignments checked (`ID` stage literal or expression, other chain columns); rows parsed before ODKU, so `VALUES(c)` no longer errors |
+| P3 / S3 ANSI_QUOTES | A double-quoted marker-table write target fails closed; string literals stay clean |
+| F3 / F4 | Documented as an accepted conservative false positive and as explicit non-guarantees |
 
 ## Rollback
 

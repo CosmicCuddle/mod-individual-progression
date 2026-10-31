@@ -523,6 +523,64 @@ class NegativeMutationFixtures(unittest.TestCase):
             "rewardfactionoverride4", "rewardfactionoverride5")})
         self.assertFalse({c for _, c in mutable} & set().union(*x.CHAIN_COLUMNS.values()))
 
+    # Revision 5: CS02-IP F1/F2 and self-review S1/S2/S3. Each reason is asserted.
+    SQL_REV5_NEGATIVES = [
+        ("load_data", "LOAD DATA INFILE 'x.csv' REPLACE INTO TABLE quest_template;",
+         "unsupported statement form 'LOAD' naming a marker table"),
+        ("load_xml", "LOAD XML INFILE 'x.xml' REPLACE INTO TABLE quest_template_addon;",
+         "unsupported statement form 'LOAD' naming a marker table"),
+        ("cte_update_with_subselect",
+         "WITH c AS (SELECT 66001 AS i) UPDATE quest_template SET Flags=0 WHERE ID IN (SELECT i FROM c);",
+         "unsupported statement form 'WITH' naming a marker table"),
+        ("cte_update_plain", "WITH s AS (SELECT 1) UPDATE quest_template SET Flags=0;",
+         "unsupported statement form 'WITH' naming a marker table"),
+        ("odku_assigns_stage_id",
+         "INSERT INTO quest_template (ID,Flags) VALUES (90000,0) ON DUPLICATE KEY UPDATE ID=66001;",
+         "ON DUPLICATE KEY UPDATE assigns ID = 66001 (a stage-marker ID)"),
+        ("odku_assigns_id_expression",
+         "INSERT INTO quest_template (ID,Flags) VALUES (90000,0) ON DUPLICATE KEY UPDATE ID=ID+1;",
+         "ON DUPLICATE KEY UPDATE assigns ID from an expression"),
+        ("odku_writes_chain_column",
+         "INSERT INTO quest_template_addon (ID,SpecialFlags) VALUES (90000,0) "
+         "ON DUPLICATE KEY UPDATE SpecialFlags=VALUES(SpecialFlags);",
+         "ON DUPLICATE KEY UPDATE writes chain column(s) ['specialflags']"),
+        ("ansi_quoted_update", 'UPDATE "quest_template" SET Flags = 0;',
+         'double-quoted marker-table identifier "quest_template" in UPDATE'),
+        ("ansi_quoted_insert", 'INSERT INTO "quest_template_addon" (ID, SpecialFlags) VALUES (9999, 0);',
+         'double-quoted marker-table identifier "quest_template_addon" in INSERT'),
+    ]
+    SQL_REV5_CONTROLS = [
+        ("set_variable_from_select",  # this form exists in zz_optional_custom_races.sql
+         "SET @BK := (SELECT `AllowableRaces` FROM `quest_template` WHERE `ID` = 9681);"),
+        ("plain_select", "SELECT ID FROM quest_template WHERE ID = 66001;"),
+        ("handler_read", "HANDLER quest_template OPEN;"),
+        ("explain_select", "EXPLAIN SELECT * FROM quest_template;"),
+        ("marker_name_only_in_string", "UPDATE creature_template SET subname = 'quest_template notes' WHERE entry = 1;"),
+        ("marker_name_in_set_value_string", "UPDATE quest_template SET LogTitle = 'quest_template' WHERE ID = 9999;"),
+        ("odku_non_chain_values_fn",
+         "INSERT INTO quest_template_addon (ID, MaxLevel) VALUES (9999, 60) ON DUPLICATE KEY UPDATE MaxLevel = VALUES(MaxLevel);"),
+        ("plain_unrelated_insert", "INSERT INTO quest_template_addon (ID, SpecialFlags) VALUES (9999, 0);"),
+        ("pvp_insert", "INSERT INTO quest_template_addon (ID, SpecialFlags) VALUES (66101, 256);"),
+    ]
+
+    def test_sql_rev5_negatives_report_the_intended_reason(self):
+        for name, sql, reason in self.SQL_REV5_NEGATIVES:
+            with self.subTest(fixture=name):
+                err = self._sql_findings(sql + "\n")
+                self.assertIsNotNone(err, f"{name}: not reported")
+                self.assertIn(reason, err)
+
+    def test_sql_rev5_controls_stay_clean(self):
+        for name, sql in self.SQL_REV5_CONTROLS:
+            with self.subTest(fixture=name):
+                self.assertIsNone(self._sql_findings(sql + "\n"))
+
+    def test_odku_values_function_no_longer_raises_extraction_error(self):
+        rows = x.ip_marker_rows(sources())
+        sql = ("INSERT INTO quest_template_addon (ID, MaxLevel) VALUES (9999, 60) "
+               "ON DUPLICATE KEY UPDATE MaxLevel = VALUES(MaxLevel);\n")
+        self.assertEqual(x.marker_sql_findings(sql, rows), [])  # rev 4 raised "row has 1 values for 2 columns"
+
     def test_sql_rev4_negatives_report_the_intended_reason(self):
         for name, sql, reason in self.SQL_REV4_NEGATIVES:
             with self.subTest(fixture=name):

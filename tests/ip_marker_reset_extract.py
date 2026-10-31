@@ -498,6 +498,10 @@ CHAIN_COLUMNS = {
 MARKER_TABLES = tuple(CHAIN_COLUMNS)
 _DDL_VERBS = ("TRUNCATE", "DROP", "ALTER", "RENAME")
 _STORED_OR_DYNAMIC_SQL_KEYWORDS = frozenset({"CREATE", "PREPARE", "TRIGGER", "PROCEDURE"})
+# Revision 5 (CS02-IP F1, self-review S1/S2): verbs allowed to NAME a marker table without analysis.
+# Every other unmodelled verb (LOAD DATA/XML, a leading WITH ... UPDATE, future syntax) fails closed.
+_READ_ONLY_VERBS = frozenset({"SELECT", "SET", "SHOW", "HANDLER", "DESCRIBE", "DESC", "EXPLAIN"})
+_WRITE_VERBS = ("INSERT", "REPLACE", "UPDATE", "DELETE")
 _EXECUTABLE_COMMENT_RE = re.compile(r"/\*!(?P<body>.*?)\*/", re.DOTALL)
 
 _SQL_TOKEN_RE = re.compile(r"""\s*(?:
@@ -741,6 +745,45 @@ def _skip_modifiers(tokens, i: int, *mods: str) -> int:
     return i
 
 
+def _odku_index(toks) -> int:
+    """Token index of a top-level ON DUPLICATE KEY UPDATE, or -1."""
+    i = _top_level_index(toks, "ON")
+    while i >= 0:
+        if i + 3 < len(toks) and _is_kw(toks[i + 1], "DUPLICATE") and _is_kw(toks[i + 2], "KEY") \
+                and _is_kw(toks[i + 3], "UPDATE"):
+            return i
+        i = _top_level_index(toks, "ON", start=i + 1)
+    return -1
+
+
+def _strip_odku(stmt: str) -> str:
+    matches = list(re.finditer(r"\bON\s+DUPLICATE\s+KEY\s+UPDATE\b", stmt, re.IGNORECASE))
+    return stmt[:matches[-1].start()] if matches else stmt
+
+
+def _odku_findings(assign_tokens, table: str, short: str) -> List[str]:
+    written = []
+    for assign in _split_top_level(assign_tokens, ","):
+        assign = [t for t in assign if t[1] != ";"]
+        if len(assign) < 3 or assign[0][0] != "ident" or assign[1][1] != "=":
+            return [f"{table}: UNPARSEABLE ON DUPLICATE KEY UPDATE list (fail closed): {short}"]
+        col = _ident_name(assign[0][1])
+        written.append(col)
+        if col == "id":
+            value = assign[2:]
+            if len(value) == 1 and value[0][0] == "num" and value[0][1].isdigit():
+                if int(value[0][1]) in EXPECTED_STAGE_MARKERS:
+                    return [f"{table}: ON DUPLICATE KEY UPDATE assigns ID = {value[0][1]} (a stage-marker ID) "
+                            f"to an existing row: {short}"]
+            else:
+                return [f"{table}: ON DUPLICATE KEY UPDATE assigns ID from an expression (fail closed): {short}"]
+    chain = sorted(set(written).intersection(CHAIN_COLUMNS[table]) - {"id"})
+    if chain:
+        return [f"{table}: ON DUPLICATE KEY UPDATE writes chain column(s) {chain} on whichever row already "
+                f"holds the key (fail closed): {short}"]
+    return []
+
+
 def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str, object], ...]]) -> List[str]:
     toks = sql_tokens(stmt)
     if toks is None:
@@ -753,6 +796,13 @@ def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str
         # inside a string literal) cannot be analysed statically -> fail closed.
         return [f"{'/'.join(sorted(keywords.intersection(_STORED_OR_DYNAMIC_SQL_KEYWORDS)))} naming a marker "
                 f"table (stored/dynamic SQL, fail closed): {short}"]
+    if verb in _WRITE_VERBS:
+        # Revision 5 (S3): under sql_mode=ANSI_QUOTES a double-quoted name is an identifier.
+        j = _skip_modifiers(toks, 1, "LOW_PRIORITY", "DELAYED", "HIGH_PRIORITY", "IGNORE", "QUICK", "INTO", "FROM")
+        if j < len(toks) and toks[j][0] == "str" and toks[j][1].startswith('"') \
+                and toks[j][1][1:-1].strip().lower() in MARKER_TABLES:
+            return [f"double-quoted marker-table identifier {toks[j][1]} in {verb} (ANSI_QUOTES; owner SQL mode "
+                    f"unverified) (fail closed): {short}"]
     names = {_ident_name(t[1]) for t in toks if t[0] == "ident"}
     if not names.intersection(MARKER_TABLES):
         return []
@@ -765,7 +815,16 @@ def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str
         if i >= len(toks) or _ident_name(toks[i][1]) not in MARKER_TABLES:
             return []  # target is another table (a marker table only appears in a sub-select)
         table = _ident_name(toks[i][1])
-        ins = parse_insert(stmt)
+        head = stmt
+        odku_at = _odku_index(toks)
+        if odku_at >= 0:
+            # Revision 5 (CS02-IP F2): ON DUPLICATE KEY UPDATE rewrites an EXISTING row, whatever
+            # the VALUES say. Check its assignments; parse rows only from the part before it.
+            odku = _odku_findings(toks[odku_at + 4:], table, short)
+            if odku:
+                return odku
+            head = _strip_odku(stmt)
+        ins = parse_insert(head)
         if ins is not None:
             id_cols = [c for c in ins.columns if c.lower() == "id"]
             if len(id_cols) != 1:
@@ -775,7 +834,7 @@ def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str
                 return [f"{table}: INSERT/REPLACE with a non-literal ID (fail closed): {short}"]
             stage = sorted(set(ids).intersection(EXPECTED_STAGE_MARKERS))
             return [f"{table}: INSERT/REPLACE of stage-marker ID(s) {stage}"] if stage else []
-        pos = _POSITIONAL_INSERT_RE.match(stmt)
+        pos = _POSITIONAL_INSERT_RE.match(head)
         if pos:
             ids = [row[0] if row else None for row in _value_tuples(pos.group(2))]
             if not ids or any(not isinstance(v, int) for v in ids):
@@ -841,7 +900,10 @@ def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str
         tail_at = _top_level_index(rest, "ORDER", "LIMIT")
         return _where_findings(rest[1:tail_at if tail_at > 0 else len(rest)], rows_by_table[table], what)
 
-    return []  # SELECT / SET @var / other reads
+    if verb in _READ_ONLY_VERBS:
+        return []  # documented read-only allowlist
+    return [f"unsupported statement form '{verb or toks[0][1]}' naming a marker table (only INSERT/REPLACE/UPDATE/"
+            f"DELETE are analysed; fail closed): {short}"]
 
 
 _MARKER_TABLE_TEXT_RE = re.compile(r"\b(?:quest_template|quest_template_addon)\b", re.IGNORECASE)
