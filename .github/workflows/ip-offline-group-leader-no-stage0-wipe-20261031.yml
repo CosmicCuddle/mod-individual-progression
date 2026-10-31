@@ -1,0 +1,154 @@
+name: IP offline-leader stage0 wipe prevention — isolated native verification
+
+on:
+  pull_request:
+    paths:
+      - src/IndividualProgressionPlayer.cpp
+      - tests/test_ip_offline_group_leader_no_progression_wipe.py
+      - docs/IP_OFFLINE_GROUP_LEADER_NO_STAGE_ZERO_REVIEW_2026-10-31.md
+      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
+      - .github/workflows/ip-offline-group-leader-no-stage0-wipe-20261031.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ip-offline-leader-stage0-current-review
+  cancel-in-progress: true
+
+jobs:
+  source-regression:
+    name: Verify exactly five reviewed files and original stage-write intent
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Strict changed-file and source regression check
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=origin/develop/cosmic-ip
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --check "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
+          printf '%s\n' \
+            '.github/workflows/ip-offline-group-leader-no-stage0-wipe-20261031.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/IP_OFFLINE_GROUP_LEADER_NO_STAGE_ZERO_REVIEW_2026-10-31.md' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'tests/test_ip_offline_group_leader_no_progression_wipe.py' | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/actual.txt
+          python3 -m unittest discover -s tests -p 'test_ip_offline_group_leader_no_progression_wipe.py' -v
+          test "$(git rev-parse HEAD:src/IndividualProgression.cpp)" = "$(git rev-parse "$BASE:src/IndividualProgression.cpp")"
+          test "$(git rev-parse HEAD:src/cs_individualProgression.cpp)" = "$(git rev-parse "$BASE:src/cs_individualProgression.cpp")"
+          test "$(git rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = "$(git rev-parse "$BASE:src/IndividualProgressionSpells.cpp")"
+          echo 'PASS: GM, Hunter, F14, and progression engine executable files preserved'
+      - name: Never run or deploy on owner host
+        run: echo 'This job only inspects source. The actual server and DB remain untouched.'
+
+  pinned-worldserver:
+    name: Compile full pinned Worldserver with actual group-leader fix (never launch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 170
+    steps:
+      - name: Fetch exact historical Grimfeather core
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          path: acore
+          persist-credentials: false
+      - name: Fetch exact historical Playerbots
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: acore/modules/mod-playerbots
+          persist-credentials: false
+      - name: Fetch exact invoking IP PR source, not moving branch
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: acore/modules/mod-individual-progression
+          persist-credentials: false
+      - name: Fetch pinned Naxxramas module (compatibility only)
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/Mod-Naxxramas-Core
+          ref: 80e9de1c39a6dc995188a80c31a5e785d0f2a6f9
+          path: acore/modules/mod-naxxramas-core
+          persist-credentials: false
+      - name: Verify actual pins and exact invoked IP head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C acore rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
+          test "$(git -C acore/modules/mod-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          test "$(git -C acore/modules/mod-naxxramas-core rev-parse HEAD)" = 80e9de1c39a6dc995188a80c31a5e785d0f2a6f9
+          ip=acore/modules/mod-individual-progression
+          test "$(git -C "$ip" rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          python3 -m unittest discover -s "$ip/tests" -p 'test_ip_offline_group_leader_no_progression_wipe.py' -v
+      - name: Apply exactly two known PB compatibility edits ONLY on disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path("acore/modules/mod-playerbots")
+          rules={
+            "src/Db/PlayerbotsDatabase.h":(
+              "MySQLConnection* CreateAsyncConnection(ProducerConsumerQueue<SQLOperation*>* queue,",
+              "MySQLConnection* CreateConnection(ProducerConsumerQueue<SQLOperation*>* queue,"
+            ),
+            "src/Util/LocaleColumns.h":(
+              "if (!IsLocaleRegistered(locale))",
+              "if (!localeNames[locale])"
+            )
+          }
+          for name,(before,after) in rules.items():
+            path=root/name
+            text=path.read_text()
+            assert text.count(before)==1 and after not in text, name
+            path.write_text(text.replace(before,after))
+          PY
+          git -C acore/modules/mod-playerbots diff --check
+          git -C acore/modules/mod-playerbots diff --name-only | sort > /tmp/actual-pb.txt
+          printf '%s\n' src/Db/PlayerbotsDatabase.h src/Util/LocaleColumns.h | sort > /tmp/expected-pb.txt
+          diff -u /tmp/expected-pb.txt /tmp/actual-pb.txt
+      - name: Install native dependencies on GitHub-hosted runner only
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git cmake ninja-build g++ make pkg-config file \
+            libmysqlclient-dev libssl-dev libbz2-dev \
+            libreadline-dev libncurses-dev libboost-all-dev
+      - name: Configure full Worldserver and export actual compilation sources
+        run: |
+          cmake -S acore -B acore-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DMODULES=static -DSCRIPTS=static -DAPPS_BUILD=world-only \
+            -DTOOLS_BUILD=none -DUSE_COREPCH=ON -DUSE_SCRIPTPCH=ON
+      - name: Require exactly one GM implementation in native compile graph
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          commands=json.loads(Path("acore-build/compile_commands.json").read_text())
+          refs=[x for x in commands if x["file"].replace("\\","/").endswith("/mod-individual-progression/src/IndividualProgressionPlayer.cpp")]
+          assert len(refs)==1, f"Expected exactly one GM source translation unit, found {len(refs)}"
+          print("PASS: PR offline leader group-accept C++ compiled exactly once")
+          PY
+      - name: Build AND link the real pinned Worldserver (NEVER START)
+        run: cmake --build acore-build --target worldserver --parallel 2
+      - name: Verify a linked, executable binary is produced but never launched/uploaded
+        run: |
+          set -euo pipefail
+          test -s acore-build/src/server/apps/worldserver
+          test -x acore-build/src/server/apps/worldserver
+          echo 'PASS: linked Worldserver built with isolated offline-leader no-stage0 safeguard'
+          echo 'NO game, SQL, owner config, characters or production host touched'

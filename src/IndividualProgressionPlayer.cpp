@@ -597,12 +597,21 @@ public:
         if (!player || !player->IsInWorld() || !group)
             return false;
 
-        Player* groupLeader = ObjectAccessor::FindPlayerByLowGUID(group->GetLeaderGUID().GetCounter());
-        uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(player);
-        uint8 groupLeaderState = sIndividualProgression->GetPlayerProgressionFromQuests(groupLeader);
-
         if (!sIndividualProgression->enabled)
             return true;
+
+        Player* groupLeader = ObjectAccessor::FindPlayerByLowGUID(group->GetLeaderGUID().GetCounter());
+
+        // A missing/offline leader has no trustworthy rewarded-quest stage.
+        // The old GetPlayerProgressionFromQuests(nullptr) returned stage 0
+        // and could wipe a joining bot's saved expansion progression.
+        // Enforcement ON: deny unknown group era. OFF: allow the invite
+        // unchanged, but do not guess a stage or write any hidden quests.
+        if (!groupLeader || !groupLeader->IsInWorld())
+            return !sIndividualProgression->enforceGroupRules;
+
+        uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+        uint8 groupLeaderState = sIndividualProgression->GetPlayerProgressionFromQuests(groupLeader);
 
         if (!sIndividualProgression->isNormalAccount(player)) // player is either a RNDbot or has an excluded account
         {

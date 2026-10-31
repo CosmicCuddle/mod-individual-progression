@@ -6,6 +6,20 @@
 **Authority:** CosmicCuddle's approved gameplay rules; coordination Issues are the two-way decision log.  
 **Operating rule:** Update this register for every proposed or implemented IP customization. Review it and actual owner source before upstream integration. Keep retired entries, and distinguish requested behaviour, committed source, passing builds, owner-reported game tests, verified live binaries and merged releases.
 
+## IP-GROUP-SAFETY-002 — Unknown/offline group leader stage0 wipe prevention (DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Intended behaviour | On IP `OnPlayerCanGroupAccept`, never interpret a missing/offline group leader as a real stage-0 leader or remove the joining character's rewarded IP progression markers. When leader cannot be verified: `EnforceGroupRules=0` allows group joining with **no stage write**, `=1` denies acceptance with no stage write; disabled-IP path retains old allow behaviour. |
+| Owner / reviewer | CosmicCuddle; independently corroborated CS02/Grok C3 source finding in [Coordination Issue #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11). Not approval for any broader grouping/F14 changes. |
+| Owning repo / isolated branch | `CosmicCuddle/mod-individual-progression` branch `fix/ip-offline-leader-no-progression-wipe-20261031`, based on `develop/cosmic-ip`. Separate from [expansion grouping DRAFT #3](https://github.com/CosmicCuddle/mod-individual-progression/pull/3) / combined [#10](https://github.com/CosmicCuddle/mod-individual-progression/pull/10). |
+| Executable file | `src/IndividualProgressionPlayer.cpp`: only non-null and `IsInWorld()` leader precondition before leader stage read; all valid online-leader paths and `ForceUpdateProgressionState` calls untouched. |
+| Supporting refs | [Detailed review](IP_OFFLINE_GROUP_LEADER_NO_STAGE_ZERO_REVIEW_2026-10-31.md), `tests/test_ip_offline_group_leader_no_progression_wipe.py`, native source verification CI. |
+| Dependencies | Existing Player/Group/GroupScript and ObjectAccessor Core APIs; normal and excluded accounts; original switch `IndividualProgression.EnforceGroupRules`. No new config key, SQL/DBC/client patch or Playerbots/core source edit. |
+| Risks | On OFF + unknown leader, skipping what previously became forced stage0 synchronization is a necessary data-safety exception; full client test and source-matched owner Core still needed. ON fail-closed may reject some legitimate temporary leader-unavailable groups. Core/PB direct-add bypass still unresolved. Stage0 historical resets could already have happened, but no live evidence. |
+| Conflict / preservation | Group expansion DRAFT #3/#10 changes the same callback. **Do not merge without semantic forward-port review**, code diff and combined Hunter/grouping native/game regression. Honor C3 guard in any future combined patch. |
+| Test/release/rollback | Source model and historical full native compile proposed. At register creation **not yet proven native or gameplay**. DRAFT unmerged; owner source/config/build fingerprint, restorable character/group DB snapshots and explicit CosmicCuddle approval required before staging/merge/deploy. Source revert alone cannot restore deleted rewarded quests. |
+
 ## IP-HUNTER-001 — Preserve same-pet Hunter autocast across rank reconciliation
 
 | Field | Record |
