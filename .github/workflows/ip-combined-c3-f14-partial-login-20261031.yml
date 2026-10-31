@@ -39,7 +39,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Make both pinned parents available (#16 ancestor, #13 port source)
+      - name: "Make both pinned parents available (PR 16 ancestor, PR 13 port source)"
         shell: bash
         run: |
           set -euo pipefail
@@ -48,7 +48,7 @@ jobs:
             test "$(git cat-file -t "$sha")" = commit
           done
           git merge-base --is-ancestor c44c3320406670cdc8f25c963ebba13e9cf24b71 HEAD
-      - name: Strict nine-file delta vs combined #16 parent
+      - name: "Strict nine-file delta vs combined PR 16 parent"
         # Exact-path freeze belongs to this PR's own head only; every regression
         # step below still runs on any later child PR.
         if: >-
@@ -80,7 +80,7 @@ jobs:
           test "$(git rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
           test -z "$(git diff --name-only "$BASE" HEAD -- data optional sql)"
           echo 'PASS: nine reviewed paths; Hunter, GM command, group policy and SQL/data unchanged vs #16'
-      - name: Run new integration test and every inherited #16 regression check
+      - name: "Run new integration test and every inherited PR 16 regression check"
         shell: bash
         run: |
           set -euo pipefail

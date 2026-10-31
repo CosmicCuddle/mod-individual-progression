@@ -285,7 +285,7 @@ class NewWorkflowContract(unittest.TestCase):
         self.assertNotIn("RandomBotStagePolicy", self.src, "#11's header is not part of #16")
 
     def test_own_freeze_scoped_and_no_launch_or_upload(self):
-        step = self.src.split("      - name: Strict nine-file delta vs combined #16 parent\n", 1)[1].split("        shell: bash", 1)[0]
+        step = self.src.split('      - name: "Strict nine-file delta vs combined PR 16 parent"\n', 1)[1].split("        shell: bash", 1)[0]
         self.assertIn("github.head_ref == 'integration/hunter-group-c3-f14-partial-login-20261031'", step)
         for job in ("  combined-source-and-negative-regression:", "  full-native-off-by-default:"):
             header = self.src.split(job, 1)[1].split("    steps:", 1)[0]
