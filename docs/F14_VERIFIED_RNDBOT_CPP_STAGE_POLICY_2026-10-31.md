@@ -18,7 +18,7 @@ For verified TBC-eligible RandomBots, existing saved stages 8–18 are preserved
 
 - Compile the actual header with both C++17 and C++20.
 - Exercise a large cross-product of identities, races, stages, routes, caps and entitlement cases.
-- Verify only five files changed from combined PR #10: the header, test, workflow, this memo and a register entry.
+- Verify only six explicitly reviewed files changed from combined PR #10: the header, test, F14 workflow, this memo, a register entry, and a **testing-workflow-only** adjustment. That adjustment freezes the earlier Hunter+grouping five-file comparison at its verified parent commit instead of misclassifying stacked F14 files as Hunter changes. Both original runtime implementations remain byte-identical.
 - Confirm the Hunter executable source and grouping implementation files are byte-identical to the already reviewed branches.
 - Confirm no Worldserver `.cpp` calls this policy yet; gameplay implementation awaits a compatible source interface.
 
