@@ -497,6 +497,8 @@ CHAIN_COLUMNS = {
 }
 MARKER_TABLES = tuple(CHAIN_COLUMNS)
 _DDL_VERBS = ("TRUNCATE", "DROP", "ALTER", "RENAME")
+_STORED_OR_DYNAMIC_SQL_KEYWORDS = frozenset({"CREATE", "PREPARE", "TRIGGER", "PROCEDURE"})
+_EXECUTABLE_COMMENT_RE = re.compile(r"/\*!(?P<body>.*?)\*/", re.DOTALL)
 
 _SQL_TOKEN_RE = re.compile(r"""\s*(?:
     (?P<str>'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*")
@@ -743,11 +745,17 @@ def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str
     toks = sql_tokens(stmt)
     if toks is None:
         return [f"UNPARSEABLE statement naming a marker table (fail closed): {normalize_ws(stmt)[:80]}"]
+    verb = toks[0][1].upper() if toks and toks[0][0] == "ident" else ""
+    short = normalize_ws(stmt)[:80]
+    keywords = {t[1].upper() for t in toks if t[0] == "ident"}
+    if keywords.intersection(_STORED_OR_DYNAMIC_SQL_KEYWORDS):
+        # N2: triggers/procedures/views/events and dynamic SQL that NAME a marker table (even
+        # inside a string literal) cannot be analysed statically -> fail closed.
+        return [f"{'/'.join(sorted(keywords.intersection(_STORED_OR_DYNAMIC_SQL_KEYWORDS)))} naming a marker "
+                f"table (stored/dynamic SQL, fail closed): {short}"]
     names = {_ident_name(t[1]) for t in toks if t[0] == "ident"}
     if not names.intersection(MARKER_TABLES):
         return []
-    verb = toks[0][1].upper() if toks and toks[0][0] == "ident" else ""
-    short = normalize_ws(stmt)[:80]
 
     if verb in _DDL_VERBS:
         return [f"{verb} on a marker table (fail closed): {short}"]
@@ -793,6 +801,15 @@ def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str
             if len(assign) < 3 or assign[0][0] != "ident" or assign[1][1] != "=":
                 return [f"UNPARSEABLE SET list on a marker table (fail closed): {short}"]
             written.append(_ident_name(assign[0][1]))
+            if written[-1] == "id":
+                value = assign[2:]
+                if len(value) == 1 and value[0][0] == "num" and value[0][1].isdigit():
+                    if int(value[0][1]) in EXPECTED_STAGE_MARKERS:
+                        return [f"UPDATE {target_tables[0]}: SET ID = {value[0][1]} assigns a stage-marker ID "
+                                f"to another row: {short}"]
+                else:
+                    return [f"UPDATE {target_tables[0]}: SET ID from an expression could produce a stage-marker "
+                            f"ID (fail closed): {short}"]
         relevant = sorted({c for c in written if any(c in CHAIN_COLUMNS[t] for t in target_tables)})
         if not relevant:
             return []  # documented allowlist: writes no chain-relevant column
@@ -836,16 +853,187 @@ def _marker_sql_findings_cached(sql_text: str, rows_key: Tuple) -> Tuple[str, ..
     if not _MARKER_TABLE_TEXT_RE.search(sql_text):
         return ()
     hits: List[str] = []
+    for m in _EXECUTABLE_COMMENT_RE.finditer(sql_text):
+        if _MARKER_TABLE_TEXT_RE.search(m.group("body")):
+            # N2: MySQL runs /*! ... */ bodies, but iter_sql_statements drops comments -> fail closed.
+            hits.append(f"MySQL executable comment naming a marker table (fail closed): "
+                        f"{normalize_ws(m.group(0))[:80]}")
     for stmt in iter_sql_statements(sql_text):
         if _MARKER_TABLE_TEXT_RE.search(stmt):
             hits.extend(_analyse_marker_statement(stmt, rows_by_table))
     return tuple(hits)
 
 
+def _rows_key(rows_by_table: Dict[str, Tuple[Dict[str, object], ...]]) -> Tuple:
+    return tuple((t, tuple(tuple(sorted(r.items())) for r in rows)) for t, rows in sorted(rows_by_table.items()))
+
+
+def marker_sql_statement_findings(sql_text: str, rows_by_table: Dict[str, Tuple[Dict[str, object], ...]]) -> List[str]:
+    """Per-statement static-gate findings for one SQL text (no cross-statement analysis)."""
+    return list(_marker_sql_findings_cached(sql_text, _rows_key(rows_by_table)))
+
+
 def marker_sql_findings(sql_text: str, rows_by_table: Dict[str, Tuple[Dict[str, object], ...]]) -> List[str]:
-    """Static-gate findings for one SQL file against the stage-marker rows (see above)."""
-    key = tuple((t, tuple(tuple(sorted(r.items())) for r in rows)) for t, rows in sorted(rows_by_table.items()))
-    return list(_marker_sql_findings_cached(sql_text, key))
+    """Static-gate findings for one SQL text: per-statement findings plus the cross-statement
+    dependency findings WITHIN that text (see marker_sql_dependency_findings)."""
+    return (marker_sql_statement_findings(sql_text, rows_by_table)
+            + marker_sql_dependency_findings({"<input>": sql_text}, rows_by_table))
+
+
+# --- Cross-statement / cross-file dependency (revision 4, CS02-IP N1) -------------------------
+# The per-statement gate evaluates each WHERE against the ORIGINAL marker rows. A statement that
+# writes only non-chain columns is allowlisted, so a LATER chain write whose WHERE filters on a
+# column that the earlier statement changed was invisible (same file or another file). This is a
+# bounded, conservative two-pass analysis, NOT statement execution:
+#   pass A (fixpoint): an UPDATE on a marker table "may touch stage-marker rows" if its WHERE is
+#     absent, TRUE/undecidable for any of the 18 rows, or references a column that ANOTHER
+#     touching UPDATE writes. Its SET columns become MUTABLE for that table.
+#   pass B: a chain-writing UPDATE, or any DELETE, whose WHERE references a column that ANOTHER
+#     touching UPDATE writes is a finding (fail closed). Order is deliberately ignored.
+
+@dataclass(frozen=True)
+class _MarkerWrite:
+    key: Tuple[str, int]
+    verb: str
+    tables: Tuple[str, ...]
+    set_cols: frozenset
+    where_state: str           # "absent" | "parsed" | "undecidable"
+    where_tree: object
+    where_cols: frozenset
+    text: str
+
+
+def _where_columns(node) -> set:
+    if not isinstance(node, tuple):
+        return set()
+    if node[0] == "col":
+        return {node[1]}
+    out: set = set()
+    for part in node[1:]:
+        if isinstance(part, list):
+            for p in part:
+                out |= _where_columns(p)
+        else:
+            out |= _where_columns(part)
+    return out
+
+
+def _parse_where(tokens) -> Tuple[str, object, frozenset]:
+    try:
+        tree = _WhereParser(tokens).parse()
+    except _Undecidable:
+        return "undecidable", None, frozenset()
+    return "parsed", tree, frozenset(_where_columns(tree))
+
+
+def _marker_write(stmt: str, key: Tuple[str, int]) -> Optional[_MarkerWrite]:
+    """UPDATE/DELETE on a marker table as a read/write summary (None for anything else)."""
+    toks = sql_tokens(stmt)
+    if not toks or toks[0][0] != "ident":
+        return None
+    verb = toks[0][1].upper()
+    short = normalize_ws(stmt)[:70]
+    if verb == "UPDATE":
+        set_at = _top_level_index(toks, "SET")
+        if set_at < 0:
+            return None
+        target = toks[_skip_modifiers(toks, 1, "LOW_PRIORITY", "IGNORE"):set_at]
+        tables = tuple(sorted({_ident_name(t[1]) for t in target if t[0] == "ident"}.intersection(MARKER_TABLES)))
+        if not tables:
+            return None
+        where_at = _top_level_index(toks, "WHERE", start=set_at)
+        tail_at = _top_level_index(toks, "ORDER", "LIMIT", start=set_at)
+        set_end = min(x for x in (where_at, tail_at, len(toks)) if x >= 0)
+        cols = set()
+        for assign in _split_top_level(toks[set_at + 1:set_end], ","):
+            assign = [t for t in assign if t[1] != ";"]
+            if assign and assign[0][0] == "ident":
+                cols.add(_ident_name(assign[0][1]))
+        if where_at < 0:
+            state, tree, wcols = "absent", None, frozenset()
+        else:
+            where_end = tail_at if tail_at > where_at else len(toks)
+            state, tree, wcols = _parse_where([t for t in toks[where_at + 1:where_end] if t[1] != ";"])
+        return _MarkerWrite(key, verb, tables, frozenset(cols), state, tree, wcols, short)
+    if verb == "DELETE":
+        i = _skip_modifiers(toks, 1, "LOW_PRIORITY", "QUICK", "IGNORE")
+        if not (i + 1 < len(toks) and _is_kw(toks[i], "FROM") and _ident_name(toks[i + 1][1]) in MARKER_TABLES):
+            return None  # multi-table DELETE already fails closed per statement
+        rest = [t for t in toks[i + 2:] if t[1] != ";"]
+        if not rest or not _is_kw(rest[0], "WHERE"):
+            state, tree, wcols = "absent", None, frozenset()
+        else:
+            tail_at = _top_level_index(rest, "ORDER", "LIMIT")
+            state, tree, wcols = _parse_where(rest[1:tail_at if tail_at > 0 else len(rest)])
+        return _MarkerWrite(key, verb, (_ident_name(toks[i + 1][1]),), frozenset(), state, tree, wcols, short)
+    return None
+
+
+@functools.lru_cache(maxsize=1024)
+def _file_marker_writes(rel: str, text: str) -> Tuple[_MarkerWrite, ...]:
+    if not _MARKER_TABLE_TEXT_RE.search(text):
+        return ()
+    out = []
+    for n, stmt in enumerate(iter_sql_statements(text), 1):
+        if _MARKER_TABLE_TEXT_RE.search(stmt):
+            w = _marker_write(stmt, (rel, n))
+            if w is not None:
+                out.append(w)
+    return tuple(out)
+
+
+def _touches_original_rows(w: _MarkerWrite, rows_by_table) -> bool:
+    if w.where_state != "parsed":
+        return True
+    for t in w.tables:
+        for row in rows_by_table[t]:
+            if eval_where(w.where_tree, row) in (True, None):
+                return True
+    return False
+
+
+def marker_sql_dependency_findings(files: Dict[str, str],
+                                   rows_by_table: Dict[str, Tuple[Dict[str, object], ...]]) -> List[str]:
+    """Cross-statement AND cross-file dependency findings over ``files`` (see block comment)."""
+    writes: List[Tuple[str, _MarkerWrite]] = []
+    for rel, text in files.items():
+        writes.extend((rel, w) for w in _file_marker_writes(rel, text))
+    original_touch = {w.key: _touches_original_rows(w, rows_by_table) for _, w in writes if w.verb == "UPDATE"}
+    mutators: Dict[Tuple[str, str], List[Tuple[str, _MarkerWrite]]] = {}
+
+    def others(w: _MarkerWrite, table: str, col: str):
+        return [(r, m) for r, m in mutators.get((table, col), []) if m.key != w.key]
+
+    touching = set()
+    changed = True
+    while changed:  # pass A fixpoint (monotone, bounded by statements x columns)
+        changed = False
+        for rel, w in writes:
+            if w.verb != "UPDATE" or w.key in touching:
+                continue
+            dep = any(others(w, t, c) for t in w.tables for c in w.where_cols)
+            if dep or original_touch[w.key]:
+                touching.add(w.key)
+                for t in w.tables:
+                    for c in w.set_cols:
+                        mutators.setdefault((t, c), []).append((rel, w))
+                changed = True
+    findings: List[str] = []
+    for rel, w in writes:
+        chain = w.verb == "DELETE" or any(c in CHAIN_COLUMNS[t] for t in w.tables for c in w.set_cols)
+        if not chain or w.where_state != "parsed":
+            continue  # absent/undecidable WHEREs on chain writes already fail closed per statement
+        for t in w.tables:
+            for c in sorted(w.where_cols):
+                src = others(w, t, c)
+                if src:
+                    mrel, m = src[0]
+                    more = f" and {len(src) - 1} other statement(s)" if len(src) > 1 else ""
+                    findings.append(
+                        f"{rel}: {w.verb} {t} (statement #{w.key[1]}): WHERE depends on column '{c}', which "
+                        f"{mrel} statement #{m.key[1]} ('{m.text}'){more} may change on stage-marker rows "
+                        f"(cross-statement dependency, fail closed)")
+    return findings
 
 
 # --------------------------------------------------------------------------
@@ -1395,9 +1583,9 @@ MIN_PB_SRC_FILES = 500  # the scan below is only meaningful on a full src/ check
 # DECLARATIONS appear as "<none>" entries on purpose: any new caller, in any file, changes the
 # multiset. Only meaningful at the frozen pin (a new pin requires re-deriving this table).
 PB_FULL_RESET_CALLEES = {
-    "Randomize(false)": r"\b\w+\s*\.\s*Randomize\s*\(\s*false\s*\)",
+    "Randomize(false)": r"\b\w+\s*(?:\.|->)\s*Randomize\s*\(\s*false\s*\)",
     "Randomize(<player>)": r"(?<![\w:&.>])Randomize\s*\(\s*(?!false\b|true\b)[A-Za-z_]\w*\s*\)",
-    "sRandomPlayerbotMgr.Randomize(": r"\bsRandomPlayerbotMgr\s*\.\s*Randomize\s*\(",
+    "sRandomPlayerbotMgr.Randomize(": r"\bsRandomPlayerbotMgr\s*(?:\.|->)\s*Randomize\s*\(",
     "RandomizeFirst(": r"(?<![\w:&])RandomizeFirst\s*\(",
     "RandomizeMin(": r"(?<![\w:&])RandomizeMin\s*\(",
     "ClearEverything(": r"(?<![\w:&])ClearEverything\s*\(",
@@ -1437,14 +1625,14 @@ def definition_spans(text: str) -> List[Tuple[int, int, str]]:
     return spans
 
 
-def pb_full_reset_call_inventory(src: Sources) -> Dict[Tuple[str, str, str], int]:
+def pb_call_inventory(src: Sources, callees: Dict[str, str], needles: Tuple[str, ...]) -> Dict[Tuple[str, str, str], int]:
+    """(file, enclosing qualified function or <none>, callee) -> count over the whole PB src/ tree."""
     inv: Dict[Tuple[str, str, str], int] = {}
-    needles = ("Randomize", "ClearEverything")
     for rel, text in src.pb_src_tree.items():
         if not any(n in text for n in needles):
             continue
         masked = mask_comments(text)
-        hits = [(name, m.start()) for name, pat in PB_FULL_RESET_CALLEES.items() for m in re.finditer(pat, masked)]
+        hits = [(name, m.start()) for name, pat in callees.items() for m in re.finditer(pat, masked)]
         if not hits:
             continue
         spans = definition_spans(text)
@@ -1455,6 +1643,10 @@ def pb_full_reset_call_inventory(src: Sources) -> Dict[Tuple[str, str, str], int
     return inv
 
 
+def pb_full_reset_call_inventory(src: Sources) -> Dict[Tuple[str, str, str], int]:
+    return pb_call_inventory(src, PB_FULL_RESET_CALLEES, ("Randomize", "ClearEverything"))
+
+
 def check_pb_tree_wide_full_reset_call_inventory(src: Sources) -> None:
     _require(len(src.pb_src_tree) >= MIN_PB_SRC_FILES,
              f"PB src/ scan saw only {len(src.pb_src_tree)} files; check out the whole src/ tree")
@@ -1463,6 +1655,68 @@ def check_pb_tree_wide_full_reset_call_inventory(src: Sources) -> None:
     missing = {k: v for k, v in EXPECTED_PB_FULL_RESET_CALL_INVENTORY.items() if got.get(k) != v}
     _require(not added and not missing,
              f"PB full-reset call-site inventory changed: new/changed {added}; missing/changed {missing}")
+
+
+# --- Rewarded-removal callers (revision 4 optional; CS02-IP Option-A review finding) -----------
+# Every PB call of RemoveRewardedQuest, wherever it is. Only PlayerbotFactory::ResetQuests is a
+# full reset; DropQuestAction::Execute ('drop <quest link>') can remove ONE rewarded marker without
+# any reset. Frozen at e88cc409. Stage IDs 66001-66018 and PvP rank IDs 66101-66114 are both
+# reachable by ID-agnostic removal; no preservation policy for either set is implied here.
+PB_REWARDED_REMOVAL_CALLEES = {"RemoveRewardedQuest(": r"(?:\.|->)\s*RemoveRewardedQuest\s*\("}
+EXPECTED_PB_REWARDED_REMOVAL_INVENTORY = {
+    ("src/Ai/Base/Actions/DropQuestAction.cpp", "CleanQuestLogAction::DropQuestType", "RemoveRewardedQuest("): 1,
+    ("src/Ai/Base/Actions/DropQuestAction.cpp", "CleanQuestLogAction::Execute", "RemoveRewardedQuest("): 1,
+    ("src/Ai/Base/Actions/DropQuestAction.cpp", "DropQuestAction::Execute", "RemoveRewardedQuest("): 1,
+    ("src/Bot/Factory/PlayerbotFactory.cpp", "PlayerbotFactory::ResetQuests", "RemoveRewardedQuest("): 1,
+}
+
+
+def check_pb_rewarded_removal_caller_inventory(src: Sources) -> None:
+    _require(len(src.pb_src_tree) >= MIN_PB_SRC_FILES,
+             f"PB src/ scan saw only {len(src.pb_src_tree)} files; check out the whole src/ tree")
+    got = pb_call_inventory(src, PB_REWARDED_REMOVAL_CALLEES, ("RemoveRewardedQuest",))
+    added = {k: v for k, v in got.items() if EXPECTED_PB_REWARDED_REMOVAL_INVENTORY.get(k) != v}
+    missing = {k: v for k, v in EXPECTED_PB_REWARDED_REMOVAL_INVENTORY.items() if got.get(k) != v}
+    _require(not added and not missing,
+             f"PB RemoveRewardedQuest caller inventory changed: new/changed {added}; missing/changed {missing}")
+
+
+DROP_QUEST_EXPECTED_SEQUENCE = (
+    "uint32 entry = handler.extractQuestId(link);",
+    "for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot) {",
+    "if (!entry) return false;",
+    "bot->RemoveRewardedQuest(entry);",
+    "bot->RemoveActiveQuest(entry, false);",
+)
+MSG_DROP_QUEST_CHANGED = ("DropQuestAction::Execute: 'drop <quest link>' control flow changed (expected: entry from "
+                          "the link, slot loop only overrides entry on a match, then unconditional "
+                          "RemoveRewardedQuest(entry) for any non-zero entry)")
+
+
+def check_pb_drop_quest_removes_rewarded_marker_without_log_slot(src: Sources) -> None:
+    """Master 'drop <quest link>': a non-zero quest ID with NO matching log slot still reaches
+    RemoveRewardedQuest(entry). [SRC] control flow only; hidden-link chat reachability UNTESTED."""
+    fn = find_function(src.pb_src_tree.get("src/Ai/Base/Actions/DropQuestAction.cpp", ""),
+                       "DropQuestAction::Execute", "DropQuestAction.cpp")
+    stmts = top_level_statements(fn.body)
+    try:
+        i = stmts.index(DROP_QUEST_EXPECTED_SEQUENCE[0])
+    except ValueError:
+        raise ContractViolation(MSG_DROP_QUEST_CHANGED)
+    window = stmts[i:i + len(DROP_QUEST_EXPECTED_SEQUENCE)]
+    ok = (len(window) == len(DROP_QUEST_EXPECTED_SEQUENCE)
+          and window[1].startswith(DROP_QUEST_EXPECTED_SEQUENCE[1])
+          and all(a == b for a, b in zip(window[2:], DROP_QUEST_EXPECTED_SEQUENCE[2:])))
+    _require(ok, MSG_DROP_QUEST_CHANGED)
+    loop_assignments = re.findall(r"\bentry\s*=(?!=)[^;]*;", window[1])
+    _require(loop_assignments == ["entry = logQuest;"], MSG_DROP_QUEST_CHANGED)
+    _require(not re.findall(r"\b\d{4,}\b", fn.flat), MSG_DROP_QUEST_CHANGED + " (ID-like literal added)")
+
+
+def drop_quest_affected_marker_sets(src: Sources) -> Dict[str, Tuple[int, ...]]:
+    """Derived from the contract above: removal is ID-agnostic, so both sets are reachable."""
+    check_pb_drop_quest_removes_rewarded_marker_without_log_slot(src)
+    return {"stage": EXPECTED_STAGE_MARKERS, "pvp_rank": tuple(PVP_MARKER_RANGE)}
 
 
 ADDCLASS_LOGIN_CONDITION = "addClassBot && master && abs((int)master->GetLevel() - (int)bot->GetLevel()) > 3"
@@ -1657,11 +1911,12 @@ def check_no_other_ip_sql_redefines_markers(src: Sources) -> None:
     """Static gate: no other IP SQL statement may change a chain column of a stage-marker row,
     or be undecidable while writing one (fail closed). NOT a SQL engine; see marker_sql_findings."""
     rows = ip_marker_rows(src)
+    others = {rel: text for rel, text in src.ip_sql_tree.items() if rel != IP_FILES["progression_sql"]}
     findings: List[str] = []
-    for rel, text in src.ip_sql_tree.items():
-        if rel == IP_FILES["progression_sql"]:
-            continue
-        findings.extend(f"{rel}: {hit}" for hit in marker_sql_findings(text, rows))
+    for rel, text in others.items():
+        findings.extend(f"{rel}: {hit}" for hit in marker_sql_statement_findings(text, rows))
+    # Revision 4 (CS02-IP N1): whole-tree pass, so a dependency split across two files is seen too.
+    findings.extend(marker_sql_dependency_findings(others, rows))
     _require(not findings, "other IP SQL touches stage-marker quest rows: " + "; ".join(findings))
 
 
@@ -1696,6 +1951,8 @@ ALL_CHECKS: Tuple[Callable[[Sources], None], ...] = (
     check_pb_no_legacy_config_namespace,
     check_pb_tree_wide_full_reset_call_inventory,
     check_pb_addclass_login_full_reset_route,
+    check_pb_rewarded_removal_caller_inventory,
+    check_pb_drop_quest_removes_rewarded_marker_without_log_slot,
     check_core_get_quest_status_rewarded_semantics,
     check_core_reward_and_remove_bookkeeping,
     check_core_save_persists_rewarded_delete,

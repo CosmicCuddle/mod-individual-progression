@@ -6,6 +6,7 @@
 **Register entry:** `IP-TEST-C1-001`.
 **Revision 2** (same date): addresses the [CS02-IP review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6543427658) as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6543457181). See [Revision 2 changes](#revision-2-changes).
 **Revision 3** (same date): addresses the [CS02-IP rev-2 re-review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544136049) as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544205778). See [Revision 3 changes](#revision-3-changes).
+**Revision 4** (same date): addresses the [CS02-IP rev-3 re-review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544624580) (N1–N4) and the [`drop` finding](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6545502850), as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544844601). See [Revision 4 changes](#revision-4-changes).
 
 ## What it checks
 
@@ -40,7 +41,17 @@ Pinned inputs (public, read-only):
      - The bot `init=*` variants in `PlayerbotHolder::ProcessBotCommand` (defined at L722; `Randomize(false)` at L815–857) sit behind the L782 "You can only use this command on addclass bots" return.
      - The bot `random` command (L883–887) also sits behind that return. It calls `sRandomPlayerbotMgr.Randomize(bot)`, so the trigger matrix above decides whether it is a full reset.
      - **Automatic after Core login:** `PlayerbotHolder::OnBotLogin` L639–650 fully randomises when the account is AddClass (`IsAccountType(accountId, 2)`), a master exists, and `abs(master level − bot level) > 3`. Contract: `check_pb_addclass_login_full_reset_route`, plus a derived matrix (type 2 with gap 5 or −10 → full reset; gap 3, no master, type 1 or type 0 → no).
-   - **Tree-wide inventory:** `check_pb_tree_wide_full_reset_call_inventory` maps every call of `.Randomize(false)`, unqualified `Randomize(<player>)`, `sRandomPlayerbotMgr.Randomize(`, `RandomizeFirst(`, `RandomizeMin(` and `ClearEverything(` across all 1,423 PB `src/` files to (file, enclosing function). The multiset must equal a frozen table, which includes header declarations on purpose. A new caller in **any** file, or a removed one, turns it red.
+   - **Tree-wide inventory:** `check_pb_tree_wide_full_reset_call_inventory` maps every call of `.Randomize(false)`, unqualified `Randomize(<player>)`, `sRandomPlayerbotMgr.Randomize(`, `RandomizeFirst(`, `RandomizeMin(` and `ClearEverything(` across all 1,423 PB `src/` files to (file, enclosing function). The multiset must equal a frozen table, which includes header declarations on purpose. A new caller in **any** file, or a removed one, turns it red. Both `.` and `->` call forms are counted (revision 4).
+   - **Non-reset deletion route — master `drop <quest link>`** (`src/Ai/Base/Actions/DropQuestAction.cpp`, `DropQuestAction::Execute`).
+     - Control flow: the quest ID is parsed from the link, and the log-slot loop only overrides `entry` on a match. If no slot matches, `entry` stays non-zero, and `if (!entry) return false;` is followed by an **unconditional `bot->RemoveRewardedQuest(entry)`**. So a rewarded marker with no log slot is removed **without any reset**.
+     - The removal is ID-agnostic, so it reaches stage markers 66001–66018 and PvP rank markers 66101–66114 alike; they are tracked separately, and no preservation policy is implied.
+     - Contract: `check_pb_drop_quest_removes_rewarded_marker_without_log_slot`.
+     - [SRC] control flow only. Whether the chat layer accepts a crafted hidden-quest link, and who can send it, is [UNTESTED].
+     - A `ResetQuests()`-only protection would miss this path.
+   - **Rewarded-removal caller inventory:** `check_pb_rewarded_removal_caller_inventory` freezes every `RemoveRewardedQuest(` call across PB `src/`:
+     - `PlayerbotFactory::ResetQuests`;
+     - `DropQuestAction::Execute`;
+     - `CleanQuestLogAction::Execute` and `CleanQuestLogAction::DropQuestType`. These two only touch quests that occupy a log slot, per CS02-IP; not separately contracted.
 
 2. **`PlayerbotFactory::Randomize(bool incremental)`** calls `ResetQuests()` only inside `if (!incremental)`.
 3. **`PlayerbotFactory::ResetQuests()`** loops over **every** loaded quest template. The loop body is exactly five top-level statements:
@@ -114,7 +125,7 @@ Making the markers repeatable would hide them from `ResetQuests`. It would **als
 
 | Level | What runs | What a pass means |
 | --- | --- | --- |
-| **A — source contract** | 21 `check_*` contracts in `tests/ip_marker_reset_extract.py`. Comment-aware C++ function and enum extraction (fails closed on conditional preprocessor directives inside an extracted body); top-level statement splitting; call-site inventory; a marker-table SQL static gate (see [SQL static gate](#sql-static-gate-revision-3)); evaluation of extracted branch conditions; whole-`src/` scans | The pinned text still has exactly the recorded chain. Commented-out or `#if 0` code never satisfies a contract. |
+| **A — source contract** | 23 `check_*` contracts in `tests/ip_marker_reset_extract.py`. Comment-aware C++ function and enum extraction (fails closed on conditional preprocessor directives inside an extracted body); top-level statement splitting; call-site inventory; a marker-table SQL static gate (see [SQL static gate](#sql-static-gate-revision-3)); evaluation of extracted branch conditions; whole-`src/` scans | The pinned text still has exactly the recorded chain. Commented-out or `#if 0` code never satisfies a contract. |
 | **A′ — review-only comparison** | `ConfigNamespaceAudit` reads the `037c0141` checkout for key names, defaults and the clamp only | Documents the rename. **Not** evidence about the owner's installed revision. |
 | **B — compiled extracted bodies** | The **verbatim** pinned bodies of `ResetQuests`, `GetQuestStatus`, `RemoveActiveQuest`, `RemoveRewardedQuest`, `SetRewardedQuest`, the rewarded loop of `_SaveQuestStatus`, Core `QuestFlags`, `Quest::HasFlag`/`IsRepeatable`/`IsSeasonal`, `Player::IsQuestRewarded` and IP `GetPlayerProgressionFromQuests`, compiled against minimal stand-ins (`tests/marker_reset_harness/harness_stubs.h`) with SQL-derived flags; 86 expectations | Those exact bodies, executed, wipe stages 1–18 to 0 and queue one DB delete per marker. Controls: stage 0, no-reset save, repeatable quest kept, PvP and ordinary collateral. |
 | **Not covered** | Worldserver, a real DB, Playerbots scheduling and timing, the owner's installed revisions, configs, environment and SQL overrides, actual GM command use | — |
@@ -155,6 +166,18 @@ Making the markers repeatable would hide them from `ResetQuests`. It would **als
   - The `initself` contract tolerates a variable rename but still counts any extra factory built on `master`.
   - Tree-wide inventory: a new caller in another file and a removed caller are detected; a caller only inside a comment is not counted.
   - AddClass login condition: a changed threshold or account type is detected, and the 6-row outcome matrix is evaluated.
+- **Revision 4 fixtures:**
+  - 4 same-file dependency negatives, each also proven invisible to the per-statement gate:
+    - `quest_template` `RewardFactionOverride1=123` → `Flags=5120`;
+    - `quest_template_addon` `MaxLevel=77` → `SpecialFlags=0`;
+    - a three-step chain;
+    - a dependent `DELETE`.
+  - A **cross-file** split, where each file alone is clean and the tree is flagged with both file names.
+  - 5 negatives for N2/N4a: executable comment, `CREATE TRIGGER`, `PREPARE`, `SET ID = 66001`, `SET ID = ID + 1`.
+  - 6 controls: the broad baseline update plus an ID-9999 chain write; mutators limited to ID 9999 or PvP IDs; `SET ID = 66102`; an ordinary comment; "Create"/"prepare" inside quest text.
+  - Pointer-style `f->Randomize(false)` and `sRandomPlayerbotMgr->Randomize(b)` in a new file are detected.
+  - A new `RemoveRewardedQuest` caller is detected.
+  - 3 `drop` control-flow mutants, each failing with `MSG_DROP_QUEST_CHANGED`: the removal call dropped; `entry` zeroed when no slot matches; a stage-marker exemption added.
 - **Layer B, 2 compiled mutations:**
   - `ResetQuests` skipping 66001–66018;
   - **`ResetQuests` guarding removal with `!quest->HasFlag(QUEST_FLAGS_TRACKING)`**. This compiles with the verbatim `HasFlag`/`QuestFlags` and fails *on behaviour*: markers (`Flags = 1024`) survive, while ordinary quests are still deleted.
@@ -200,8 +223,24 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
   - Column-less `VALUES` use ID in column 0.
 - **`TRUNCATE`, `DROP`, `ALTER` and `RENAME`** on a marker table are findings.
 - **Stage markers only.** PvP markers 66101–66114 are intentionally *not* frozen, so legitimate PvP changes stay allowed.
+- **Revision 4 — cross-statement and cross-file dependencies** (`marker_sql_dependency_findings`, CS02-IP N1). This is a whole-tree, two-pass, order-insensitive analysis, not statement execution.
+  - **Pass A (fixpoint).** An `UPDATE` on a marker table *may touch stage-marker rows* if its `WHERE`:
+    - is absent;
+    - is TRUE or undecidable for any of the 18 rows; or
+    - references a column that **another** touching `UPDATE` writes.
+
+    Its `SET` columns become *mutable* for that table.
+  - **Pass B.** A chain-writing `UPDATE`, or any `DELETE`, whose `WHERE` references a column that another touching `UPDATE` writes is a finding. The reason text names the column and the first mutating file and statement, plus the count of others.
+  - Same-file, cross-file and multi-step chains are covered.
+- **Mutable columns in the real baseline:** `quest_template.RewardFactionOverride1..5` (`vanilla_quest_reputations.sql`) and `AllowableRaces` (`zz_optional_custom_races.sql`; its `& N` predicates are undecidable, so they are treated as touching). None is a chain column, so the baseline stays clean. **A future chain write filtering on one of these columns fails closed by design**, even where values would not actually match. This is a deliberate false positive, asserted by `test_baseline_mutable_columns_are_documented`.
+- **Revision 4 — other fail-closed rules:**
+  - `SET ID = <stage literal>` is a finding regardless of `WHERE` (N4a), and `SET ID = <expression>` fails closed. Literal non-stage or PvP IDs stay clean.
+  - MySQL executable comments `/*! … */` naming a marker table are findings (N2). Ordinary comments are ignored.
+  - Statements containing the keywords `CREATE`, `PREPARE`, `TRIGGER` or `PROCEDURE` (outside string literals) that name a marker table anywhere, including inside a string, are findings.
 - **Limits:**
-  - Statement order and earlier writes are not modelled; rows are taken as `player_progression.sql` defines them.
+  - Statement **values** are not modelled, only which columns may change. That is why the analysis is conservative.
+  - `CALL` of a procedure defined outside these files, `EXECUTE` of a statement prepared elsewhere, and dynamic SQL that never names a marker table cannot be seen.
+  - Only IP's `data/sql/**` and `optional/sql/**` are inputs. Core custom SQL, other modules, manual overlays and live DB history are **not** audited.
   - Live-DB or owner-local SQL is out of scope.
   - MySQL string/number coercion is treated as undecidable, which fails closed.
   - The baseline IP tree produces **0 findings**.
@@ -256,6 +295,17 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
 | P3 / docs | Role-neutral header crediting the project owner; corrected CI trigger claims; `random` command (L883–887) and AddClass routes added to the inventory |
 | Low / route inventory | Tree-wide (file, enclosing function, callee) multiset over all PB `src/`; AddClass `OnBotLogin` condition contract with an outcome matrix; `initself` regex tolerates a variable rename |
 | Low / outside-loop changes | `ResetQuests` function-level top-level statements pinned (`MSG_RESET_FUNCTION_CHANGED`) |
+
+## Revision 4 changes
+
+| CS01-IP item / CS02-IP finding | Change |
+| --- | --- |
+| P1 / N1 (Medium) multi-statement and cross-file SQL dependency | Whole-tree two-pass fixpoint dependency analysis (fail closed); 4 same-file and 1 cross-file negatives, 6 controls; real-baseline mutable columns documented and asserted |
+| P2 / N2 executable comments, stored/dynamic SQL | `/*! … */` naming a marker table, and `CREATE`/`PREPARE`/`TRIGGER`/`PROCEDURE` statements naming one, are findings; ordinary comments and quest text stay clean |
+| P2 / N3 pointer-style calls | Tree-wide inventory counts `.` and `->` forms; frozen baseline unchanged |
+| P2 / N4a `SET ID = stage literal` | Finding regardless of `WHERE`; `SET ID = <expression>` fails closed; PvP and other literal IDs stay clean |
+| Optional / `drop` route | `RemoveRewardedQuest` caller inventory (4 sites) and `DropQuestAction::Execute` control-flow contract with an ID-agnostic stage/PvP mapping |
+| P2 / N4b PR description | Refreshed on GitHub after the exact-head runs (not a repository file) |
 
 ## Rollback
 

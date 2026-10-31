@@ -426,6 +426,115 @@ class NegativeMutationFixtures(unittest.TestCase):
         ("not_between_stage", "DELETE FROM quest_template WHERE ID = 9999 AND NOT ID BETWEEN 66001 AND 66018;"),
     ]
 
+    # Revision 4, CS02-IP N1: cross-statement dependencies (same file). Each reason is asserted.
+    SQL_DEPENDENCY_NEGATIVES = [
+        ("quest_template_two_stage",
+         "UPDATE quest_template SET RewardFactionOverride1=123 WHERE ID BETWEEN 66001 AND 66018;\n"
+         "UPDATE quest_template SET Flags=5120 WHERE RewardFactionOverride1=123;",
+         "WHERE depends on column 'rewardfactionoverride1'"),
+        ("quest_template_addon_two_stage",
+         "UPDATE quest_template_addon SET MaxLevel=77 WHERE ID BETWEEN 66001 AND 66018;\n"
+         "UPDATE quest_template_addon SET SpecialFlags=0 WHERE MaxLevel=77;",
+         "WHERE depends on column 'maxlevel'"),
+        ("three_step_chain",
+         "UPDATE quest_template SET RewardFactionOverride2=5 WHERE ID BETWEEN 66001 AND 66018;\n"
+         "UPDATE quest_template SET RewardFactionOverride3=6 WHERE RewardFactionOverride2=5;\n"
+         "UPDATE quest_template SET Flags=5120 WHERE RewardFactionOverride3=6;",
+         "WHERE depends on column 'rewardfactionoverride3'"),
+        ("dependent_delete",
+         "UPDATE quest_template SET RewardFactionOverride1=123 WHERE ID BETWEEN 66001 AND 66018;\n"
+         "DELETE FROM quest_template WHERE RewardFactionOverride1=123;",
+         "DELETE quest_template (statement #2): WHERE depends on column 'rewardfactionoverride1'"),
+    ]
+    # Revision 4, CS02-IP N2 / N4a.
+    SQL_REV4_NEGATIVES = [
+        ("executable_comment", "/*!50000 UPDATE quest_template_addon SET SpecialFlags=1 */;",
+         "MySQL executable comment naming a marker table"),
+        ("create_trigger",
+         "CREATE TRIGGER t BEFORE UPDATE ON quest_template_addon FOR EACH ROW SET NEW.SpecialFlags = 1;",
+         "stored/dynamic SQL, fail closed"),
+        ("prepare_dynamic_sql", "PREPARE s FROM 'UPDATE quest_template_addon SET SpecialFlags = 1';",
+         "PREPARE naming a marker table"),
+        ("set_id_to_stage_literal", "UPDATE quest_template SET ID = 66001 WHERE ID = 9999;",
+         "SET ID = 66001 assigns a stage-marker ID"),
+        ("set_id_from_expression", "UPDATE quest_template SET ID = ID + 1 WHERE ID = 9999;",
+         "SET ID from an expression"),
+    ]
+    SQL_REV4_CONTROLS = [
+        ("broad_irrelevant_then_literal_other_id",
+         "UPDATE quest_template SET RewardFactionOverride1 = 0 WHERE RewardFactionId1=0;\n"
+         "UPDATE quest_template SET Flags = 4096 WHERE ID = 9999;"),
+        # RewardHonor is used because the REAL baseline already makes RewardFactionOverride1..5 and
+        # AllowableRaces mutable on marker rows (see test_baseline_mutable_columns_are_documented).
+        ("mutator_limited_to_other_id",
+         "UPDATE quest_template SET RewardHonor=123 WHERE ID = 9999;\n"
+         "UPDATE quest_template SET Flags=5120 WHERE RewardHonor=123;"),
+        ("mutator_limited_to_pvp_ids",
+         "UPDATE quest_template SET RewardHonor=123 WHERE ID BETWEEN 66101 AND 66114;\n"
+         "UPDATE quest_template SET Flags=5120 WHERE RewardHonor=123;"),
+        ("set_id_to_pvp_literal", "UPDATE quest_template SET ID = 66102 WHERE ID = 9999;"),
+        ("ordinary_comment", "/* UPDATE quest_template_addon SET SpecialFlags=1 */ SELECT 1;"),
+        ("keywords_only_inside_quest_text",
+         "UPDATE quest_template SET QuestDescription = 'Create a potion; prepare well' WHERE ID = 9999;"),
+    ]
+
+    def test_sql_dependency_negatives_report_the_intended_reason(self):
+        for name, sql, reason in self.SQL_DEPENDENCY_NEGATIVES:
+            with self.subTest(fixture=name):
+                rows = x.ip_marker_rows(sources())
+                self.assertEqual(x.marker_sql_statement_findings(sql + "\n", rows), [],
+                                 f"{name}: must be invisible to the per-statement gate (that is the N1 gap)")
+                standalone = " | ".join(x.marker_sql_findings(sql + "\n", rows))
+                self.assertIn(reason, standalone)
+                self.assertIn("which <input> statement #", standalone)  # attributed to the fixture itself
+                err = self._sql_findings(sql + "\n")
+                self.assertIsNotNone(err, f"{name}: not reported")
+                self.assertIn(reason, err)
+                self.assertIn("cross-statement dependency, fail closed", err)
+
+    def test_sql_dependency_split_across_two_files_is_detected(self):
+        tree = dict(sources().ip_sql_tree)
+        tree["data/sql/world/base/zz_fixture_a.sql"] = (
+            "UPDATE quest_template SET RewardHonor=123 WHERE ID BETWEEN 66001 AND 66018;\n")
+        tree["optional/sql/world/zz_fixture_b.sql"] = (
+            "UPDATE quest_template SET Flags=5120 WHERE RewardHonor=123;\n")
+        rows = x.ip_marker_rows(sources())
+        for rel in ("data/sql/world/base/zz_fixture_a.sql", "optional/sql/world/zz_fixture_b.sql"):
+            self.assertEqual(x.marker_sql_findings(tree[rel], rows), [], f"{rel} alone must look clean")
+        with self.assertRaises(x.ContractViolation) as ctx:
+            x.check_no_other_ip_sql_redefines_markers(replace(sources(), ip_sql_tree=tree))
+        msg = str(ctx.exception)
+        self.assertIn("optional/sql/world/zz_fixture_b.sql: UPDATE quest_template (statement #1): "
+                      "WHERE depends on column 'rewardhonor', which data/sql/world/base/zz_fixture_a.sql", msg)
+
+    def test_baseline_mutable_columns_are_documented(self):
+        """The real tree's UPDATEs that may touch stage-marker rows write only non-chain columns.
+        A future chain write filtering on any of these columns fails closed BY DESIGN."""
+        rows = x.ip_marker_rows(sources())
+        mutable = set()
+        for rel, text in sources().ip_sql_tree.items():
+            if rel == x.IP_FILES["progression_sql"]:
+                continue
+            for w in x._file_marker_writes(rel, text):
+                if w.verb == "UPDATE" and x._touches_original_rows(w, rows):
+                    mutable |= {(t, c) for t in w.tables for c in w.set_cols}
+        self.assertEqual(mutable, {("quest_template", c) for c in (
+            "allowableraces", "rewardfactionoverride1", "rewardfactionoverride2", "rewardfactionoverride3",
+            "rewardfactionoverride4", "rewardfactionoverride5")})
+        self.assertFalse({c for _, c in mutable} & set().union(*x.CHAIN_COLUMNS.values()))
+
+    def test_sql_rev4_negatives_report_the_intended_reason(self):
+        for name, sql, reason in self.SQL_REV4_NEGATIVES:
+            with self.subTest(fixture=name):
+                err = self._sql_findings(sql + "\n")
+                self.assertIsNotNone(err, f"{name}: not reported")
+                self.assertIn(reason, err)
+
+    def test_sql_rev4_controls_stay_clean(self):
+        for name, sql in self.SQL_REV4_CONTROLS:
+            with self.subTest(fixture=name):
+                self.assertIsNone(self._sql_findings(sql + "\n"))
+
     def test_sql_gate_negatives_report_the_intended_reason(self):
         for name, sql, reason in self.SQL_GATE_NEGATIVES:
             with self.subTest(fixture=name):
@@ -528,6 +637,49 @@ class OptionalRouteContracts(unittest.TestCase):
     def test_comment_only_caller_is_not_counted(self):
         mutated = self._tree_edit("src/Ai/Note.cpp", lambda _: "// f.Randomize(false); RandomizeFirst(bot);\n")
         x.check_pb_tree_wide_full_reset_call_inventory(mutated)
+
+    def test_pointer_style_full_reset_callers_are_detected(self):
+        """CS02-IP N3: '->' forms must be inventoried like '.' forms."""
+        mutated = self._tree_edit("src/Ai/PointerFeature.cpp", lambda _: (
+            "void PointerFeature::Run(Player* b)\n{\n    PlayerbotFactory* f = new PlayerbotFactory(b, 60);\n"
+            "    f->Randomize(false);\n    sRandomPlayerbotMgr->Randomize(b);\n}\n"))
+        with self.assertRaises(x.ContractViolation) as ctx:
+            x.check_pb_tree_wide_full_reset_call_inventory(mutated)
+        msg = str(ctx.exception)
+        self.assertIn("('src/Ai/PointerFeature.cpp', 'PointerFeature::Run', 'Randomize(false)')", msg)
+        self.assertIn("('src/Ai/PointerFeature.cpp', 'PointerFeature::Run', 'sRandomPlayerbotMgr.Randomize(')", msg)
+
+    def test_new_rewarded_removal_caller_is_detected(self):
+        mutated = self._tree_edit("src/Ai/ForgetAction.cpp", lambda _: (
+            "bool ForgetAction::Execute(Event event)\n{\n    bot->RemoveRewardedQuest(66008);\n    return true;\n}\n"))
+        with self.assertRaises(x.ContractViolation) as ctx:
+            x.check_pb_rewarded_removal_caller_inventory(mutated)
+        self.assertIn("('src/Ai/ForgetAction.cpp', 'ForgetAction::Execute', 'RemoveRewardedQuest(')", str(ctx.exception))
+
+    def test_drop_quest_control_flow_changes_rejected_for_the_intended_reason(self):
+        rel = "src/Ai/Base/Actions/DropQuestAction.cpp"
+        fn = "DropQuestAction::Execute"
+        fixtures = (
+            ("removal_call_dropped", sub_once("    bot->RemoveRewardedQuest(entry);\n", "")),
+            ("entry_zeroed_when_no_slot_matches", sub_once(
+                "        uint32 logQuest = bot->GetQuestSlotQuestId(slot);",
+                "        entry = 0;\n        uint32 logQuest = bot->GetQuestSlotQuestId(slot);")),
+            ("stage_marker_exemption_added", sub_once(
+                "    bot->RemoveRewardedQuest(entry);",
+                "    if (entry < 66001 || entry > 66018)\n        bot->RemoveRewardedQuest(entry);")),
+        )
+        for name, transform in fixtures:
+            with self.subTest(fixture=name):
+                mutated = self._tree_edit(rel, in_function(fn, transform))
+                with self.assertRaises(x.ContractViolation) as ctx:
+                    x.check_pb_drop_quest_removes_rewarded_marker_without_log_slot(mutated)
+                self.assertTrue(str(ctx.exception).startswith(x.MSG_DROP_QUEST_CHANGED))
+
+    def test_drop_quest_reaches_stage_and_pvp_sets_separately(self):
+        sets = x.drop_quest_affected_marker_sets(sources())
+        self.assertEqual(sets["stage"], tuple(range(66001, 66019)))
+        self.assertEqual(sets["pvp_rank"], tuple(range(66101, 66115)))
+        self.assertFalse(set(sets["stage"]) & set(sets["pvp_rank"]))
 
     def test_addclass_login_matrix_from_pinned_condition(self):
         rows = [  # account type, master online, master level, bot level, expected full randomise

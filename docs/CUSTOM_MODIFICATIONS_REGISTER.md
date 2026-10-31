@@ -127,3 +127,13 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Route inventory | Tree-wide PB full-reset call-site multiset; AddClass `OnBotLogin` (type 2 + master + level gap > 3) source contract; `random` command documented (AddClass-restricted); `ResetQuests` function-level statements pinned |
 | Docs | Memo header made role-neutral, crediting the project owner |
 | Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 4 (2026-10-31, test/docs only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-3 re-review (PASS; N1 Medium, N2–N4 Low)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544624580) and the [`drop` route finding](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6545502850), scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544844601) |
+| Files | The same seven paths. The workflow is unchanged in this revision. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| SQL gate | Whole-tree cross-statement and cross-file dependency analysis (fail closed). `SET ID = <stage literal or expression>`, MySQL `/*! … */` comments and stored or dynamic SQL naming a marker table are findings. Real-baseline mutable non-chain columns (`RewardFactionOverride1..5`, `AllowableRaces`) are documented. Baseline: 0 findings. |
+| Route inventory | Pointer-style (`->`) calls counted. `RemoveRewardedQuest` caller inventory (4 PB sites). `DropQuestAction::Execute` contract: master `drop <quest link>` removes a rewarded marker with no log slot, without any reset ([SRC] only; chat reachability untested). Stage and PvP sets are tracked separately; no preservation policy is implied. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |
