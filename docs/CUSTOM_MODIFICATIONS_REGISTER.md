@@ -6,6 +6,20 @@
 **Authority:** CosmicCuddle's approved gameplay rules; coordination Issues are the two-way decision log.  
 **Operating rule:** Update this register for every proposed or implemented IP customization. Review it and actual owner source before upstream integration. Keep retired entries, and distinguish requested behaviour, committed source, passing builds, owner-reported game tests, verified live binaries and merged releases.
 
+## IP-GROUP-SAFETY-002-INTEGRATION — Offline-leader no-stage0 port to combined Hunter/grouping (DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Intended behaviour | On combined Hunter+grouping candidate `OnPlayerCanGroupAccept`, never treat unavailable/offline group leader as legitimate stage0. OFF → allow join with no guessed progression write; ON → fail closed with no write. Real online-leader rules remain exactly as #10. |
+| Owner/coordination | CosmicCuddle; CS02 review C3 [Issue #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11); Information grouping decision [Issue #10](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/10). Independently developed original-code fix in [DRAFT #15](https://github.com/CosmicCuddle/mod-individual-progression/pull/15), this is a **semantic integration port**, not replacement. |
+| Owning component/branch | `CosmicCuddle/mod-individual-progression` branch `integration/hunter-grouping-offline-leader-guard-20261031`, stacked on original combined Hunter/grouping [DRAFT #10](https://github.com/CosmicCuddle/mod-individual-progression/pull/10) exact `d3688e243a24441438eaff7b3488b05f41614deb`. |
+| Executable source | Only `src/IndividualProgressionPlayer.cpp` `OnPlayerCanGroupAccept`: check leader non-null/in-world before stage access. Preserve Hunter `IndividualProgressionSpells.cpp`, grouping `IndividualProgression.cpp`, group policy and GroupScript. |
+| Supporting source | [Detailed review/rollback](IP_COMBINED_HUNTER_GROUP_OFFLINE_LEADER_PORT_2026-10-31.md), `tests/test_ip_combined_offline_leader_guard.py`, strict integration source/static-C++ CI. |
+| Config / SQL / DBC / client | No new switches, SQL/DB schema, DBC or client patches; only existing `IndividualProgression.Enable` and `EnforceGroupRules`. |
+| Risks | Some legitimate online-guild/offline-leader group acceptance remains fail-closed with enforcement ON; special Core group types, direct Playerbots `AddMember` bypass, normal online-leader downgrades, F14 stage8+ floor and PB `ResetQuests` outside scope. Actual owner installed versions and config unknown. |
+| CI / runtime status | Review-only source/policy checks proposed. Parent combined Worldserver pinned compile known successful; this updated executable source has **not** been newly proven compiled/linked or tested in game. Owner explicit test approval required after actual backups/source match. |
+| Merge / rollback | Do **not** blindly merge this with #3/#10/#15 or overwrite the earlier source/register; reconcile all tested custom changes via a later approved combined release. Branch revert for source; character/group DB snapshots for lost stage markers. No live source, binaries, data or server changed. |
+
 ## IP-HUNTER-001 — Preserve same-pet Hunter autocast across rank reconciliation
 
 | Field | Record |

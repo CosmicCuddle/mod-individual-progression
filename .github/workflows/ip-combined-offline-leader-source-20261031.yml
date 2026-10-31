@@ -1,0 +1,72 @@
+name: IP combined Hunter+group no-offline-leader stage0 overwrite (source only)
+
+on:
+  pull_request:
+    paths:
+      - src/IndividualProgressionPlayer.cpp
+      - docs/IP_COMBINED_HUNTER_GROUP_OFFLINE_LEADER_PORT_2026-10-31.md
+      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
+      - tests/test_ip_combined_offline_leader_guard.py
+      - .github/workflows/ip-combined-offline-leader-source-20261031.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ip-combined-hunter-group-no-offline-leader-current-review
+  cancel-in-progress: true
+
+jobs:
+  frozen-combined-source-and-policy:
+    name: Preserve Hunter, group and F14 source; check missing leader before quest reads
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact invoking PR source and history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Strict five-file delta vs original combined Hunter/grouping parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=d3688e243a24441438eaff7b3488b05f41614deb
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --check "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
+          printf '%s\n' \
+            '.github/workflows/ip-combined-offline-leader-source-20261031.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/IP_COMBINED_HUNTER_GROUP_OFFLINE_LEADER_PORT_2026-10-31.md' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'tests/test_ip_combined_offline_leader_guard.py' | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/actual.txt
+          for file in src/cs_individualProgression.cpp src/IndividualProgressionGroupPolicy.h src/IndividualProgression.cpp src/IndividualProgressionSpells.cpp; do
+            test "$(git rev-parse "HEAD:$file")" = "$(git rev-parse "$BASE:$file")"
+          done
+          test "$(git rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
+          test "$(git rev-parse HEAD:src/IndividualProgression.cpp)" = 625817c67f70be65eb3a9462199c0228e378c605
+          test "$(git rev-parse HEAD:src/IndividualProgressionGroupPolicy.h)" = 3b7cf2c520137aeeb49dd1e6857614d9bdf63fa0
+          echo 'PASS: Hunter, expansion policy, GM and progression engine unchanged'
+      - name: Run new offline leader source tests and existing integrated regression checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p 'test_ip_combined_offline_leader_guard.py' -v
+          python3 tests/check_hunter_autocast_source.py
+          python3 tests/check_group_expansion_source.py
+      - name: Recheck original pure expansion policy under C++17 and C++20
+        shell: bash
+        run: |
+          set -euo pipefail
+          for std in c++17 c++20; do
+            g++ "-std=$std" -O2 -Wall -Wextra -Werror -pedantic \
+              tests/group_expansion_policy.cpp -o "/tmp/group-$std"
+            "/tmp/group-$std"
+          done
+      - name: Source-only safety declaration
+        run: |
+          echo 'Source/model tests ONLY; new combined login callback still needs native Worldserver compilation and gameplay acceptance.'
+          echo 'No game launched, owner source touched, configuration enabled, SQL/characters modified, or code merged.'
