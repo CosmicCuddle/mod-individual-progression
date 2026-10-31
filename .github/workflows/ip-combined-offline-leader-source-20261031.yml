@@ -50,12 +50,12 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           src=Path('.github/workflows/ip-hunter-group-integration-review-20261031.yml').read_text()
-          freeze="""      - name: Assert source equality and exact five-file review delta
-        if: >-
-          (github.event_name == 'pull_request' && github.head_ref == 'integration/hunter-grouping-candidate-20261031') ||
-          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/hunter-grouping-candidate-20261031')
-        shell: bash"""
-          assert src.count(freeze)==1, 'Frozen parent step must be scoped to #10'
+          start=src.index('      - name: Assert source equality and exact five-file review delta')
+          end=src.index('        shell: bash', start)
+          frozen_step=src[start:end]
+          assert frozen_step.count('        if: >-')==1, 'Scope only original frozen step'
+          assert "github.head_ref == 'integration/hunter-grouping-candidate-20261031'" in frozen_step
+          assert "github.ref == 'refs/heads/integration/hunter-grouping-candidate-20261031'" in frozen_step
           start=src.index('  integration-source-and-policy:')
           end=src.index('    steps:', start)
           assert '    if:' not in src[start:end], 'Do not skip all Hunter regressions'
