@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Guard exact five paths, original compiled Hunter and grouping source
+      - name: Guard exact six F14 test-only paths, original compiled Hunter and grouping source
         shell: bash
         run: |
           set -euo pipefail
@@ -32,6 +32,7 @@ jobs:
           git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
           printf '%s\n' \
             '.github/workflows/ip-f14-verified-stage-policy-20261031.yml' \
+            '.github/workflows/ip-hunter-group-integration-review-20261031.yml' \
             'src/IndividualProgressionRandomBotStagePolicy.h' \
             'tests/f14_verified_rndbot_stage_policy.cpp' \
             'docs/F14_VERIFIED_RNDBOT_CPP_STAGE_POLICY_2026-10-31.md' \
@@ -42,7 +43,7 @@ jobs:
           for f in src/IndividualProgression.cpp src/IndividualProgressionPlayer.cpp src/IndividualProgressionGroupPolicy.h src/cs_individualProgression.cpp; do
             test "$(git rev-parse "HEAD:$f")" = "$(git rev-parse "$BASE:$f")"
           done
-          echo 'PASS: original Hunter, grouping, player login and GM command C++ unchanged'
+          echo 'PASS: six test/documentation-only paths; original Hunter, grouping, login and GM command C++ unchanged'
       - name: Assert no live F14 hook falsely wired
         shell: bash
         run: |
