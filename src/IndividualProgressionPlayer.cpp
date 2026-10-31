@@ -8,6 +8,12 @@
 #define COSMIC_IP_F14_PLAYERBOTS_AVAILABLE 0
 #endif
 
+// Hosted full-build QA requires this integration, unlike the portable default
+// fork which must remain buildable without an installed Playerbots module.
+#if defined(COSMIC_IP_F14_REQUIRE_PLAYERBOTS) && !COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
+#error "F14 login guard: required Playerbots RandomPlayerbotMgr API was not found"
+#endif
+
 static_assert(PROGRESSION_PRE_TBC == IndividualProgressionGroupPolicy::FirstTbcStage,
               "Individual Progression TBC stage boundary changed");
 static_assert(PROGRESSION_TBC_TIER_5 == IndividualProgressionGroupPolicy::FirstWrathStage,
