@@ -1101,6 +1101,14 @@ private:
         sIndividualProgression->doableNaxx40Bosses_Patchwerk = sConfigMgr->GetOption<bool>("IndividualProgression.doableNaxx40Bosses_Patchwerk", false);
         sIndividualProgression->doableNaxx40Bosses_Razuvious = sConfigMgr->GetOption<bool>("IndividualProgression.doableNaxx40Bosses_Razuvious", false);
         sIndividualProgression->enforceGroupRules = sConfigMgr->GetOption<bool>("IndividualProgression.EnforceGroupRules", false);
+        sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = sConfigMgr->GetOption<bool>("IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin", false);
+#if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
+        if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 saved-RandomBot login safeguard requested, but required Playerbots API header is missing: feature is NOT active; forcing OFF");
+            sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = false;
+        }
+#endif
         sIndividualProgression->fishingFix = sConfigMgr->GetOption<bool>("IndividualProgression.FishingFix", true);
         sIndividualProgression->VanillaHunterPets = sConfigMgr->GetOption<bool>("IndividualProgression.VanillaHunterPets", true);
         sIndividualProgression->WarlockDemonTrainers = sConfigMgr->GetOption<bool>("IndividualProgression.WarlockDemonTrainers", true);

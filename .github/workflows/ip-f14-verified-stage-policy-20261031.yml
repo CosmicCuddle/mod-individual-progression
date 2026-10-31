@@ -15,6 +15,8 @@ permissions:
 
 jobs:
   f14-policy-cxx:
+    # Preserve policy C++/Hunter/group tests on every triggered PR.
+    # Only the immutable six-path test-only origin assertion is #11-specific.
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -24,6 +26,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Guard exact six F14 test-only paths, original compiled Hunter and grouping source
+        if: >-
+          (github.event_name == 'pull_request' && github.head_ref == 'feature/f14-verified-rndbot-stage-contract-20261031') ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/f14-verified-rndbot-stage-contract-20261031')
         shell: bash
         run: |
           set -euo pipefail
