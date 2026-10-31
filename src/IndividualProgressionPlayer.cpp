@@ -539,15 +539,19 @@ public:
             return true;
 
         Player* leader = ObjectAccessor::FindPlayerByLowGUID(group->GetLeaderGUID().GetCounter());
+
+        // With an unavailable/offline group leader there is NO verified stage.
+        // Never interpret GetPlayerProgressionFromQuests(nullptr) as Vanilla 0:
+        // OFF preserves membership and skips the destructive tier sync;
+        // ON denies a group whose expansion cannot be validated.
+        if (!leader || !leader->IsInWorld())
+            return !sIndividualProgression->enforceGroupRules;
+
         uint8 const joiningState = sIndividualProgression->GetPlayerProgressionFromQuests(player);
         uint8 const leaderState = sIndividualProgression->GetPlayerProgressionFromQuests(leader);
 
         if (sIndividualProgression->enforceGroupRules)
         {
-            // No authoritative group era without an online leader.
-            if (!leader || !leader->IsInWorld())
-                return false;
-
             int32 const limit = sIndividualProgression->progressionLimit;
             if (!IndividualProgressionGroupPolicy::MayGroup(
                     joiningState, player->getRace(), leaderState, leader->getRace(), limit))
