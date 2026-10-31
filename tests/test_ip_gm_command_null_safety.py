@@ -16,6 +16,12 @@ SET = SRC.split("static bool HandleSetIndividualProgressionCommand(", 1)[1].spli
     "static bool HandleSetBotIndividualProgressionCommand(", 1)[0]
 SETBOT = SRC.split("static bool HandleSetBotIndividualProgressionCommand(", 1)[1].split(
     "static bool HandleSetRepIndividualProgressionCommand(", 1)[0]
+SETREP = SRC.split("static bool HandleSetRepIndividualProgressionCommand(", 1)[1].split(
+    "static bool HandlePetIndividualProgressionCommand(", 1)[0]
+TELE = SRC.split("static bool HandleTeleIndividualProgressionCommand(", 1)[1].split(
+    "static bool HandleAttuneIndividualProgressionCommand(", 1)[0]
+ATTUNE = SRC.split("static bool HandleAttuneIndividualProgressionCommand(", 1)[1].split(
+    "static bool HandlePVPIndividualProgressionCommand(", 1)[0]
 
 
 class Scope(unittest.TestCase):
@@ -62,6 +68,45 @@ class Scope(unittest.TestCase):
         self.assertIn("if (!group)", SETBOT)
         self.assertIn("if (!member || sIndividualProgression->isNormalAccount(member))", SETBOT)
         self.assertIn("ForceUpdateProgressionState(member, static_cast<ProgressionState>(currentState))", SETBOT)
+
+    def test_tele_respects_explicit_player_identifier(self):
+        self.assertIn("if (!player)\n            player = PlayerIdentifier::FromTargetOrSelf(handler);", TELE)
+        self.assertEqual(TELE.count("player = PlayerIdentifier::FromTargetOrSelf(handler);"), 1)
+
+    def test_tele_missing_or_offline_target_refused_before_teleport(self):
+        self.assertIn("if (!player)\n        {", TELE)
+        self.assertIn("if (!target || !target->IsInWorld())", TELE)
+        self.assertLess(TELE.index("if (!target || !target->IsInWorld())"),
+                        TELE.index("GetPlayerProgressionFromQuests(target)"))
+        self.assertLess(TELE.index("if (!target || !target->IsInWorld())"),
+                        TELE.index("target->TeleportTo("))
+        self.assertIn("Group* group = target->GetGroup();", TELE)
+
+    def test_setrep_console_is_rejected_before_session_dereference(self):
+        self.assertIn("WorldSession* session = handler->GetSession();", SETREP)
+        self.assertIn("if (!session)", SETREP)
+        self.assertLess(SETREP.index("if (!session)"), SETREP.index("session->GetPlayer()"))
+        self.assertLess(SETREP.index("if (!session)"), SETREP.index("session->GetAccountId()"))
+        self.assertNotIn("handler->GetSession()->GetPlayer()", SETREP)
+        self.assertNotIn("handler->GetSession()->GetAccountId()", SETREP)
+
+    def test_setrep_inworld_player_guard_before_group_or_reputation(self):
+        self.assertIn("if (!player || !player->IsInWorld() || !accountId)", SETREP)
+        self.assertLess(SETREP.index("if (!player || !player->IsInWorld() || !accountId)"),
+                        SETREP.index("player->GetGroup()"))
+        self.assertIn('The .ip setrep command is currently disabled.', SETREP)
+
+    def test_attune_console_is_rejected_before_player_dereference(self):
+        self.assertIn("WorldSession* session = handler->GetSession();", ATTUNE)
+        self.assertIn("if (!session)", ATTUNE)
+        self.assertLess(ATTUNE.index("if (!session)"), ATTUNE.index("session->GetPlayer()"))
+        self.assertNotIn("handler->GetSession()->GetPlayer()", ATTUNE)
+
+    def test_attune_missing_or_nonworld_player_refused_before_change(self):
+        self.assertIn("if (!player || !player->IsInWorld())", ATTUNE)
+        self.assertLess(ATTUNE.index("if (!player || !player->IsInWorld())"),
+                        ATTUNE.index("UpdateGroupAttunement(player, location)"))
+        self.assertIn('location != "onyxia40" && location != "onyxia"', ATTUNE)
 
     def test_command_table_unchanged(self):
         self.assertIn('{ "set",    HandleSetIndividualProgressionCommand,    SEC_GAMEMASTER,    Console::Yes }', SRC)
