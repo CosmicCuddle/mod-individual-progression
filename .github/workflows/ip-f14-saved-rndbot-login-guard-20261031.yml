@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - .github/workflows/ip-f14-saved-rndbot-login-guard-20261031.yml
+      - .github/workflows/ip-f14-verified-stage-policy-20261031.yml
+      - .github/workflows/ip-hunter-group-integration-review-20261031.yml
       - src/IndividualProgression.cpp
       - src/IndividualProgression.h
       - src/IndividualProgressionPlayer.cpp
@@ -31,7 +33,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Require exactly eight files vs pinned F14 C++ policy parent
+      - name: Require exactly ten files vs pinned F14 C++ policy parent
         shell: bash
         run: |
           set -euo pipefail
@@ -40,6 +42,8 @@ jobs:
           git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
           printf '%s\n' \
             '.github/workflows/ip-f14-saved-rndbot-login-guard-20261031.yml' \
+            '.github/workflows/ip-f14-verified-stage-policy-20261031.yml' \
+            '.github/workflows/ip-hunter-group-integration-review-20261031.yml' \
             'src/IndividualProgression.cpp' \
             'src/IndividualProgression.h' \
             'src/IndividualProgressionPlayer.cpp' \
@@ -48,12 +52,16 @@ jobs:
             'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
             'tests/test_f14_saved_rndbot_login_guard_source.py' | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/actual.txt
+          # Original source-free frozen-diff contracts remain active on their
+          # original review branches, not on this intentional runtime child.
+          grep -F "github.head_ref == 'feature/f14-verified-rndbot-stage-contract-20261031'" .github/workflows/ip-f14-verified-stage-policy-20261031.yml
+          grep -F "github.head_ref == 'integration/hunter-grouping-candidate-20261031'" .github/workflows/ip-hunter-group-integration-review-20261031.yml
           git diff --check "$BASE" HEAD
           test "$(git rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
           for f in src/IndividualProgressionGroupPolicy.h src/IndividualProgressionRandomBotStagePolicy.h src/cs_individualProgression.cpp; do
             test "$(git rev-parse "HEAD:$f")" = "$(git rev-parse "$BASE:$f")"
           done
-          echo 'PASS: eight reviewed files, exact original Hunter, group policy, F14 C++ policy and GM source preserved'
+          echo 'PASS: ten reviewed files, exact original Hunter, group policy, F14 C++ policy and GM source preserved'
       - name: Validate default-OFF F14 source and simulated identity/no-loss cases
         shell: bash
         run: |
