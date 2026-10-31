@@ -119,8 +119,7 @@ jobs:
           test "$(git -C "$ip" rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
           grep -Fqx 'IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0' "$ip/conf/individualProgression.conf.dist"
           grep -Fq 'GetOption<bool>("IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin", false)' "$ip/src/IndividualProgression.cpp"
-          test "$(git -C "$ip" rev-parse HEAD:src/IndividualProgressionRandomBotStagePolicy.h)" = "$(git -C "$ip" rev-parse d4ff9374a0b89c42d93e0f57fdc3fc720cf2331c385:src/IndividualProgressionRandomBotStagePolicy.h)" 2>/dev/null || \
-            test "$(git -C "$ip" rev-parse HEAD:src/IndividualProgressionRandomBotStagePolicy.h)" = "$(git -C "$ip" rev-parse HEAD:src/IndividualProgressionRandomBotStagePolicy.h)"
+          test "$(git -C "$ip" rev-parse HEAD:src/IndividualProgressionRandomBotStagePolicy.h)" = 9fa9b96dbf7a799fed6bdf86eaabf27b88c28630
       - name: Apply exactly two historical Playerbots compatibility substitutions on runner only
         shell: bash
         run: |
