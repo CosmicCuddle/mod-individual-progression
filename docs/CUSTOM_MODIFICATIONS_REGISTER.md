@@ -6,6 +6,20 @@
 **Authority:** CosmicCuddle's approved gameplay rules; coordination Issues are the two-way decision log.  
 **Operating rule:** Update this register for every proposed or implemented IP customization. Review it and actual owner source before upstream integration. Keep retired entries, and distinguish requested behaviour, committed source, passing builds, owner-reported game tests, verified live binaries and merged releases.
 
+## IP-GM-SAFETY-001 — Explicit-name and console null-safety for IP GM commands (DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Intended behaviour | `.ip set [online player] [stage]` respects explicitly specified player; missing or offline targets fail before achievement/quest writes; `.ip setbot` checks console session before dereference. No authorized change to otherwise valid stage adjustment or grouped-bot synchronisation. |
+| Origin / review | Grok independent source review in [Coordination #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11) and Maintenance's direct source verification (31 Oct 2026) |
+| Source owner / branch | IP fork `fix/ip-gm-command-null-safety-20261031`, independent of unmerged Hunter, grouping and F14 implementation branches; based on `develop/cosmic-ip` |
+| Modified executable file | `src/cs_individualProgression.cpp` only. Optional `PlayerIdentifier` validated before `GetConnectedPlayer`, `target->IsInWorld` before stage/achievement writes; `WorldSession` and player validated before `.ip setbot` group usage |
+| Supporting files | `tests/test_ip_gm_command_null_safety.py`, [independent review memo](IP_GM_COMMAND_NULL_SAFETY_REVIEW_2026-10-31.md), pinned native source CI workflow |
+| Dependencies | Existing AzerothCore `ChatHandler`, `Optional<PlayerIdentifier>`, online `Player` APIs; no new config keys, SQL, DBC, client patch or Playerbots changes |
+| Risks / outstanding design | Command parser's exact optional-name dispatch, console log output and in-game validation untested. **Intentional non-fix:** valid `.ip set` may still change an F14 RandomBot to illegal stage and cleanup achievements; `.ip setbot` can still sync bots downward. Needs separate agreed policy |
+| Tests | Source-only regression and historical pinned full Worldserver compile workflow proposed. Exact-head CI not yet evidenced in register at creation; no gameplay or live test |
+| Release and rollback | DRAFT, not merged or deployed. Test only against backed-up disposable characters/config and exact installed source; rollback branch/release from known-good source and character DB snapshot. CosmicCuddle approval mandatory |
+
 ## IP-HUNTER-001 — Preserve same-pet Hunter autocast across rank reconciliation
 
 | Field | Record |
