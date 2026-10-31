@@ -81,6 +81,7 @@ class SourceEvidence(unittest.TestCase):
         cls.pb_mgr = (PB / "src/Bot/RandomPlayerbotMgr.cpp").read_text()
         cls.pb_db = (PB / "src/Db/PlayerbotsDatabase.cpp").read_text()
         cls.pb_session = (PB / "src/Bot/PlayerbotMgr.cpp").read_text()
+        cls.pb_world = (PB / "src/Script/Playerbots.cpp").read_text()
         cls.core_session = (CORE / "src/server/game/Server/WorldSession.h").read_text()
         cls.core_login = (CORE / "src/server/game/Handlers/CharacterHandler.cpp").read_text()
         cls.core_account = (CORE / "src/server/game/Accounts/AccountMgr.cpp").read_text()
@@ -144,6 +145,45 @@ class SourceEvidence(unittest.TestCase):
         self.assertIn('if (!currentBots.empty())', self.pb_mgr[start:end])
         self.assertIn('GetBots();', self.pb_mgr)
         self.assertIn('currentBots.erase(bot)', self.pb_mgr)
+
+    def test_world_thread_drives_pending_bot_login_and_random_selection(self):
+        # In this historical source, headless query processing and the
+        # RandomPlayerbotMgr update execute synchronously in WorldScript.
+        # This is promising for a read-only IsRandomBot check at IP login,
+        # but does NOT prove every future version or map-thread reader safe.
+        start = self.pb_world.index('class PlayerbotsWorldScript : public WorldScript')
+        tick = self.pb_world.index('void OnUpdate(uint32 diff) override', start)
+        end = self.pb_world.index('void OnShutdown() override', tick)
+        section = self.pb_world[tick:end]
+        pending = section.index('PlayerbotHolder::UpdatePendingLogins();')
+        events = section.index('PlayerbotWorldThreadProcessor::instance().Update(diff);')
+        random = section.index('sRandomPlayerbotMgr.UpdateAI(diff);')
+        self.assertLess(pending, events)
+        self.assertLess(events, random)
+        self.assertIn('session->ProcessQueryCallbacks();', self.pb_session)
+        self.assertIn('botSession->HandlePlayerLoginFromDB(holder)', self.pb_session)
+
+    def test_selected_guid_exists_before_async_headless_login(self):
+        # AddRandomBots chooses ONLY type-1 account IDs; it inserts currentBots
+        # before the later UpdatePendingLogins callback loads the character.
+        start = self.pb_mgr.index('uint32 RandomPlayerbotMgr::AddRandomBots()')
+        end = self.pb_mgr.index('void RandomPlayerbotMgr::LoadBattleMastersCache()', start)
+        section = self.pb_mgr[start:end]
+        self.assertIn('accountsToUse = rndBotTypeAccounts;', section)
+        self.assertIn('std::vector<uint32> shuffledAccounts = rndBotTypeAccounts;', section)
+        self.assertIn('currentBots.insert(charInfo.guid);', section)
+        # This is a per-boot mutable membership signal, not a saved DB marker.
+        self.assertIn('currentBots.erase(bot);', self.pb_mgr)
+
+    def test_existing_israndom_uses_no_sync_database_query(self):
+        start = self.pb_mgr.index('bool RandomPlayerbotMgr::IsRandomBot(ObjectGuid::LowType bot)')
+        end = self.pb_mgr.index('bool RandomPlayerbotMgr::IsAddclassBot(Player* bot)', start)
+        body = self.pb_mgr[start:end]
+        self.assertIn('sPlayerbotAIConfig.IsInRandomAccountList(', body)
+        self.assertIn('currentBots.contains(bot)', body)
+        self.assertNotIn('Database.Query(', body)
+        self.assertNotIn('IsAccountType(', body)
+        self.assertNotIn('AccountMgr::GetName(', body)
 
     def test_core_login_script_runs_before_later_pb_callback(self):
         start = self.pb_session.index('void PlayerbotHolder::HandlePlayerBotLoginCallback')
