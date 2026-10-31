@@ -53,6 +53,12 @@ A pure Python model rejects prefix-only cases, unassigned (0), historical AddCla
 
 **Passing means the limitations are now tested and documented. It does NOT demonstrate the proposed read-only producer snapshot exists, the owner uses matching SHAs, a character is safe, or F14 is enabled.**
 
+## Additional disposable native API compile/link probe (31 October 2026)
+
+The source-only CI workflow now contains an **additional isolated full Worldserver compilation job** which checks whether the historical IP login translation unit can include historical Playerbots `RandomPlayerbotMgr.h` and link a **read-only** `sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter())` call protected by `IsHeadless()`, before the original bot login stage-write branch. **The extra C++ code is injected into a temporary runner checkout and is NOT committed to any source branch.** It does not change a progression stage, quest, achievement, account, race, group, visibility or Playerbots state. The job never launches the produced Worldserver or uploads its binary. It applies only the previously documented two historical, narrowly scoped, runner-only Playerbots compilation compatibility substitutions.
+
+This native compile is an **API/link compatibility experiment**, not a gameplay test and not a proof that the function is safe to call from every thread. The early **headless world-thread login** is a plausible safe seam on the exact historical source; any actual F14 integration must still validate thread access, selected-character identity and TBC eligibility, handle missing/untrusted classification without removing saved stage8+ quest markers, and guard admin/group writers **before** side effects. A successful native compile alone does not justify turning on a feature or merging into a protected owner branch. The actual completion/conclusion must be checked at the matching GitHub Actions run; do not infer it from CI workflow creation.
+
 ## Implementation and release boundary
 
 Use the [first gameplay test plan](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/blob/main/handovers/Server-Side-Maintenance/2026-10-31-ip-first-gameplay-test-plan.md) only after the owner-installed source, restorable backups, staging environment and approval are independently verified. Coordinate source ownership and rndbot-only observer filtering with the already assigned Naxx F14 work in [Coordination #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9); do not create a second competing visibility system.
