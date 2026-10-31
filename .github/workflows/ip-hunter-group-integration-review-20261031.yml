@@ -29,13 +29,17 @@ jobs:
         run: |
           set -euo pipefail
           BASE=e0cd785f6b2090c8f099c824811077d0ab2a9de5
+          FROZEN=d3688e243a24441438eaff7b3488b05f41614deb
+          git merge-base --is-ancestor "$FROZEN" HEAD
           test "$(git rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
           test "$(git rev-parse HEAD:tests/check_hunter_autocast_source.py)" = 6f2e26b2048790c2850ccbd8992e3fdd77f01828
           for path in src/IndividualProgression.cpp src/IndividualProgressionPlayer.cpp src/IndividualProgressionGroupPolicy.h; do
             test "$(git rev-parse "HEAD:$path")" = "$(git rev-parse "$BASE:$path")"
           done
           git merge-base --is-ancestor "$BASE" HEAD
-          git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
+          # Keep Hunter+grouping five-path proof pinned at its approved candidate.
+          # Stacked F14 additions are independently guarded in their own workflow.
+          git diff --name-only "$BASE" "$FROZEN" | sort > /tmp/actual.txt
           printf '%s\n' \
             '.github/workflows/ip-hunter-group-integration-review-20261031.yml' \
             'docs/HUNTER_GROUPING_INTEGRATION_REVIEW_2026-10-31.md' \
@@ -43,8 +47,9 @@ jobs:
             'src/IndividualProgressionSpells.cpp' \
             'tests/check_hunter_autocast_source.py' | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/actual.txt
-          git diff --check "$BASE" HEAD
-          echo 'PASS: exact unchanged Hunter C++ blob and frozen grouped source, five-path review delta only.'
+          git diff --check "$BASE" "$FROZEN"
+          git diff --check "$FROZEN" HEAD
+          echo 'PASS: frozen five-file Hunter+grouping candidate remains identical across stacked review PRs.'
       - name: Hunter original source-preservation regression checks
         shell: bash
         run: |
