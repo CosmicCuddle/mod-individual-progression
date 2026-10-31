@@ -98,7 +98,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CosmicCuddle/mod-individual-progression
-          ref: feature/f14-preserve-saved-rndbot-login-guard-20261031
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: acore/modules/mod-individual-progression
           persist-credentials: false
       - name: Checkout Naxx module historical compatibility pin
@@ -116,6 +116,7 @@ jobs:
           test "$(git -C acore/modules/mod-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
           test "$(git -C acore/modules/mod-naxxramas-core rev-parse HEAD)" = 80e9de1c39a6dc995188a80c31a5e785d0f2a6f9
           ip=acore/modules/mod-individual-progression
+          test "$(git -C "$ip" rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           test "$(git -C "$ip" rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
           grep -Fqx 'IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0' "$ip/conf/individualProgression.conf.dist"
           grep -Fq 'GetOption<bool>("IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin", false)' "$ip/src/IndividualProgression.cpp"
