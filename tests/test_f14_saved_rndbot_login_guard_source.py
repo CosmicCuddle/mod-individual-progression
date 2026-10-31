@@ -72,7 +72,7 @@ class SourceGuards(unittest.TestCase):
 
     def test_no_stage8_grant_or_visibility_change(self):
         guarded = LOGIN.split("bool preserveVerifiedRandomBotStage = false;", 1)[1].split("else // normal account", 1)[0]
-        self.assertNotIn("UpdateProgressionState(player, static_cast<ProgressionState>(8));", guarded)
+        self.assertNotIn("sIndividualProgression->UpdateProgressionState(player, static_cast<ProgressionState>(8));", guarded)
         self.assertNotIn("SetPhaseMask", guarded)
         self.assertNotIn("SetVisible", guarded)
         self.assertNotIn("SetInvisibility", guarded)
