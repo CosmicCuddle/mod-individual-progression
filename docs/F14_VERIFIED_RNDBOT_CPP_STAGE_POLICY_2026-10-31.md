@@ -1,7 +1,7 @@
 # F14 verified RandomBot stage-write policy — C++ test candidate
 
-**Owner:** CosmicCuddle  
-**Created:** 31 October 2026  
+**Owner:** CosmicCuddle
+**Created:** 31 October 2026
 **Status:** Review-only. The policy is not connected to Worldserver, Playerbots, saved characters, or database operations.
 
 This branch builds on combined [IP draft #10](https://github.com/CosmicCuddle/mod-individual-progression/pull/10). The original Hunter and grouping implementation files remain unchanged.
