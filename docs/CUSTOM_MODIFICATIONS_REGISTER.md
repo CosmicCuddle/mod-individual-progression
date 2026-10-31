@@ -156,3 +156,12 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Files | The same seven paths; workflow and C++ harness unchanged. Still no `src/`, `data/`, `conf/` or `optional/` change. |
 | SQL gate | A double-quoted marker-table name anywhere in a non-read-only statement fails closed (ANSI_QUOTES; SQL mode unverified). `EXPLAIN`/`DESCRIBE` with `ANALYZE` or a write verb on a marker table fails closed (vendor/version unverified). Ordinary double-quoted text values stay clean. Baseline: 0 findings. |
 | Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 7 (2026-10-31, test/docs only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-6 conditional review (H1–H3)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6547601495), decisions by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547639162) |
+| Files | The same seven paths; workflow and C++ harness unchanged. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| SQL gate | MariaDB `SET STATEMENT … FOR` naming a marker table fails closed (engine unverified). Any top-level `ANALYZE` or write verb after `EXPLAIN`/`DESC`/`DESCRIBE` on a marker table fails closed. `EXPLAIN ANALYZE SELECT`, leading `(SELECT …)` and `EXPLAIN SELECT … FOR UPDATE` are intentional false positives, locked by tests. Baseline: 0 findings. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |

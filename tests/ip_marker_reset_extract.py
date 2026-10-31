@@ -803,15 +803,27 @@ def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str
     dq_markers = [t[1] for t in toks if t[0] == "str" and t[1].startswith('"')
                   and t[1][1:-1].strip().lower() in MARKER_TABLES]
     names = {_ident_name(t[1]) for t in toks if t[0] == "ident"}
-    if verb in _EXPLAIN_VERBS and (dq_markers or names.intersection(MARKER_TABLES)):
-        # Revision 6 (CS02-IP G2): EXPLAIN ANALYZE executes the statement on some engines; an
-        # EXPLAIN of a write verb is not a plain read either. Engine/version unverified -> fail closed.
-        k = 1
-        if k + 2 < len(toks) and _is_kw(toks[k], "FORMAT") and toks[k + 1][1] == "=":
-            k += 3
-        if k < len(toks) and (_is_kw(toks[k], "ANALYZE") or _is_kw(toks[k], *_WRITE_VERBS)):
-            return [f"{verb} with ANALYZE or a write verb on a marker table (engine behaviour unverified) "
-                    f"(fail closed): {short}"]
+    names_marker = bool(dq_markers or names.intersection(MARKER_TABLES))
+    if verb == "SET" and names_marker and (
+            (len(toks) > 1 and _is_kw(toks[1], "STATEMENT")) or _top_level_index(toks, "FOR", start=1) >= 0):
+        # Revision 7 (CS02-IP H1): MariaDB `SET STATEMENT var=val FOR <stmt>` EXECUTES <stmt>, so SET
+        # is not read-only here. The inner statement is not parsed; detection alone fails closed.
+        # (MariaDB documents that parser-affecting variables such as sql_mode may not take effect
+        # inside SET STATEMENT; quoted-target detection is conservative source detection only.)
+        return [f"MariaDB SET STATEMENT executes wrapped SQL (engine unverified; fail closed): {short}"]
+    if verb in _EXPLAIN_VERBS and names_marker:
+        # Revisions 6/7 (CS02-IP G2/H2): fail closed if ANY top-level keyword token after the wrapper
+        # is ANALYZE or a write verb, whatever EXTENDED / PARTITIONS / FORMAT=... / WITH / INTO precede
+        # it. Tokens are quote/comment aware and depth 0 only. EXPLAIN itself is not claimed to mutate.
+        depth = 0
+        for tok in toks[1:]:
+            if tok[1] == "(":
+                depth += 1
+            elif tok[1] == ")":
+                depth -= 1
+            elif depth == 0 and (_is_kw(tok, "ANALYZE") or _is_kw(tok, *_WRITE_VERBS)):
+                return [f"{verb} with ANALYZE or a write verb on a marker table (engine behaviour unverified) "
+                        f"(fail closed) [not a claim that {verb} mutates data]: {short}"]
     if dq_markers and verb not in _READ_ONLY_VERBS:
         # Revision 6 (CS02-IP G1): anywhere in the statement, not only the first write target.
         return [f"double-quoted marker-table identifier {dq_markers[0]} in {verb or toks[0][1]} (ANSI_QUOTES; "

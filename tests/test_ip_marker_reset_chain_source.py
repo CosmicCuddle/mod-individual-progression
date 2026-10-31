@@ -599,6 +599,67 @@ class NegativeMutationFixtures(unittest.TestCase):
         ("read_only_double_quoted_name", 'SELECT ID FROM "quest_template";'),
     ]
 
+    # Revision 7: CS02-IP H1 (MariaDB SET STATEMENT ... FOR), H2 (EXPLAIN modifiers), H3 (locked FPs).
+    H1_REASON = "MariaDB SET STATEMENT executes wrapped SQL (engine unverified; fail closed)"
+    SQL_REV7_NEGATIVES = [
+        ("h1_set_statement_delete",
+         "SET STATEMENT max_statement_time=60 FOR DELETE FROM quest_template WHERE ID=66001;", H1_REASON),
+        ("h1_set_statement_update", "SET STATEMENT max_statement_time=60 FOR UPDATE quest_template SET Flags=0;",
+         H1_REASON),
+        ("h1_set_statement_insert",
+         "SET STATEMENT max_statement_time=60 FOR INSERT INTO quest_template (ID) VALUES (66001);", H1_REASON),
+        # Conservative SOURCE detection only: MariaDB documents parser-affecting variables may not apply here.
+        ("h1_set_statement_ansi_quoted",
+         "SET STATEMENT sql_mode='ANSI_QUOTES' FOR UPDATE \"quest_template\" SET Flags=0;", H1_REASON),
+        ("h2_explain_extended_update", "EXPLAIN EXTENDED UPDATE quest_template SET Flags=0;",
+         "EXPLAIN " + G2_REASON),
+        ("h2_explain_partitions_delete", "EXPLAIN PARTITIONS DELETE FROM quest_template WHERE ID=66001;",
+         "EXPLAIN " + G2_REASON),
+        ("h2_describe_extended_update", "DESCRIBE EXTENDED UPDATE quest_template SET Flags=0;",
+         "DESCRIBE " + G2_REASON),
+        ("h2_explain_with_update", "EXPLAIN WITH c AS (SELECT 1) UPDATE quest_template SET Flags=0;",
+         "EXPLAIN " + G2_REASON),
+        ("h2_explain_format_into_update", "EXPLAIN FORMAT=JSON INTO @v UPDATE quest_template SET Flags=0;",
+         "EXPLAIN " + G2_REASON),
+    ]
+    # H3 + new H2 side effect: intentional, documented conservative false positives. Locked so that
+    # nobody "fixes" them by loosening the gate.
+    SQL_REV7_LOCKED_FALSE_POSITIVES = [
+        ("explain_analyze_select", "EXPLAIN ANALYZE SELECT * FROM quest_template;", "EXPLAIN " + G2_REASON),
+        ("leading_paren_select_quoted", '(SELECT 1 FROM "quest_template");',
+         'double-quoted marker-table identifier "quest_template"'),
+        ("leading_paren_select", "(SELECT 1 FROM quest_template);", "unsupported statement form '('"),
+        ("explain_select_for_update", "EXPLAIN SELECT * FROM quest_template FOR UPDATE;", "EXPLAIN " + G2_REASON),
+    ]
+    SQL_REV7_CONTROLS = [
+        ("real_set_variable_read_9681",
+         "SET @BK_RACES_9681 := (SELECT `AllowableRaces` FROM `quest_template` WHERE `ID` = 9681);"),
+        ("real_set_variable_read_9684",
+         "SET @BK_RACES_9684 := (SELECT `AllowableRaces` FROM `quest_template` WHERE `ID` = 9684);"),
+        ("set_variable_single_quoted_name", "SET @note = 'quest_template';"),
+        ("set_variable_nested_for_update", "SET @x := (SELECT ID FROM quest_template WHERE ID = 1 FOR UPDATE);"),
+        ("explain_keyword_only_in_string", "EXPLAIN SELECT * FROM quest_template WHERE LogTitle = 'UPDATE';"),
+    ]
+
+    def test_sql_rev7_negatives_report_the_intended_reason(self):
+        for name, sql, reason in self.SQL_REV7_NEGATIVES:
+            with self.subTest(fixture=name):
+                err = self._sql_findings(sql + "\n")
+                self.assertIsNotNone(err, f"{name}: not reported")
+                self.assertIn(reason, err)
+
+    def test_sql_rev7_documented_false_positives_stay_fail_closed(self):
+        for name, sql, reason in self.SQL_REV7_LOCKED_FALSE_POSITIVES:
+            with self.subTest(fixture=name):
+                err = self._sql_findings(sql + "\n")
+                self.assertIsNotNone(err, f"{name}: documented conservative false positive was loosened")
+                self.assertIn(reason, err)
+
+    def test_sql_rev7_controls_stay_clean(self):
+        for name, sql in self.SQL_REV7_CONTROLS:
+            with self.subTest(fixture=name):
+                self.assertIsNone(self._sql_findings(sql + "\n"))
+
     def test_sql_rev6_negatives_report_the_intended_reason(self):
         for name, sql, reason in self.SQL_REV6_NEGATIVES:
             with self.subTest(fixture=name):

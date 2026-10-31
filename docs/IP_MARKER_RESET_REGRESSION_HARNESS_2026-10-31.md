@@ -9,6 +9,7 @@
 **Revision 4** (same date): addresses the [CS02-IP rev-3 re-review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544624580) (N1–N4) and the [`drop` finding](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6545502850), as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544844601). See [Revision 4 changes](#revision-4-changes).
 **Revision 5** (same date): closes CS02-IP rev-4 findings F1/F2 and self-review S1–S3, as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6546542325). See [Revision 5 changes](#revision-5-changes).
 **Revision 6** (same date): closes CS02-IP rev-5 findings G1/G2, as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547206443). See [Revision 6 changes](#revision-6-changes).
+**Revision 7** (same date): closes CS02-IP rev-6 findings H1/H2 and documents H3, as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547639162). See [Revision 7 changes](#revision-7-changes).
 
 ## What it checks
 
@@ -187,6 +188,10 @@ Making the markers repeatable would hide them from `ResetQuests`. It would **als
   - 10 negatives with asserted reasons: Grok's 5 G1 statements, plus `"world"."quest_template"`, and 4 G2 statements, including `EXPLAIN UPDATE` and `EXPLAIN FORMAT=TREE ANALYZE DELETE`.
   - 6 controls: `EXPLAIN SELECT`, `EXPLAIN UPDATE` of a non-marker table, `DESCRIBE`, a single-quoted marker name, double-quoted quest text, and a read-only `SELECT … FROM "quest_template"`.
   - A baseline test bounds G1 to marker-name tokens.
+- **Revision 7 fixtures:**
+  - 9 negatives with asserted reasons: Grok's 4 H1 statements and 5 H2 statements.
+  - 4 locked false positives (H3 and `FOR UPDATE`).
+  - 5 controls: both real `SET @BK_RACES` reads, `SET @note = 'quest_template'`, a nested `FOR UPDATE` inside `SET @x := (SELECT …)`, and `UPDATE` only inside a string in an `EXPLAIN SELECT`.
 - **Layer B, 2 compiled mutations:**
   - `ResetQuests` skipping 66001–66018;
   - **`ResetQuests` guarding removal with `!quest->HasFlag(QUEST_FLAGS_TRACKING)`**. This compiles with the verbatim `HasFlag`/`QuestFlags` and fails *on behaviour*: markers (`Flags = 1024`) survive, while ordinary quests are still deleted.
@@ -258,7 +263,17 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
     - A double-quoted token whose content **is** a marker-table name, or whose last dotted segment is one (`"world"."quest_template"`), fails closed **anywhere** in a statement whose verb is not read-only: JOIN alias, `DELETE q FROM`, `LOAD`, `TRUNCATE`, `RENAME` and so on.
     - Ordinary double-quoted text values never match. The real tree has 74 `UPDATE`s with double-quoted quest text and 0 double-quoted marker names, which is asserted.
     - **Accepted conservative false positive:** a write statement whose double-quoted *value* is literally `"quest_template"` or `"quest_template_addon"` fails closed.
-  - **`EXPLAIN`/`DESCRIBE`/`DESC` (revision 6, G2):** these fail closed when followed (after an optional `FORMAT=…`) by `ANALYZE` or a write verb in a statement naming a marker table. The vendor and version (MySQL 8 vs MariaDB) are unverified and are not inferred. `EXPLAIN SELECT` and `DESCRIBE <table>` stay clean.
+  - **`EXPLAIN`/`DESCRIBE`/`DESC` (revisions 6–7, G2/H2):** in a statement naming a marker table, these fail closed if **any top-level keyword token** after the wrapper is `ANALYZE` or a write verb (`INSERT`/`REPLACE`/`UPDATE`/`DELETE`).
+    - This applies whatever `EXTENDED`, `PARTITIONS`, `FORMAT=…`, `WITH` or `INTO` precede the verb.
+    - Tokens are quote- and comment-aware and depth-0 only, so a keyword inside a string literal or sub-select never matches.
+    - This is **not** a claim that an EXPLAIN mutates data. The vendor and version (MySQL 8 vs MariaDB) are unverified and not inferred.
+    - `EXPLAIN SELECT` and `DESCRIBE <table>` stay clean.
+  - **`SET STATEMENT … FOR` (revision 7, H1):** MariaDB's `SET STATEMENT var=val FOR <statement>` **executes** the wrapped statement, so `SET` is read-only only for variable assignment.
+    - A `SET` whose second token is `STATEMENT`, or that has a top-level `FOR` keyword, fails closed if it names a marker table (identifier or exact double-quoted name). The reason is `MariaDB SET STATEMENT executes wrapped SQL (engine unverified; fail closed)`.
+    - The inner statement is not parsed.
+    - The quoted-target form (`sql_mode='ANSI_QUOTES' FOR UPDATE "quest_template" …`) is conservative **source detection only**. MariaDB documents that parser-affecting variables may not take effect inside `SET STATEMENT`.
+    - All ~260 real `SET @var …` statements stay clean, including the two `SET @BK_RACES := (SELECT … FROM quest_template …)` reads.
+  - **Intentional conservative false positives, locked by tests (H3 and the H2 side effect):** `EXPLAIN ANALYZE SELECT …` (a read), a leading parenthesised `(SELECT 1 FROM quest_template)` or `(SELECT 1 FROM "quest_template")`, and `EXPLAIN SELECT … FOR UPDATE` (a locking read). All fail closed by design; do not loosen them without review.
 - **Known conservative false positive (CS02-IP F3, accepted):** Pass B flags a chain write whose `WHERE` references a baseline-mutable column even when another conjunct pins a non-stage row (e.g. `WHERE ID = 12345 AND AllowableRaces = 1`). Narrowing conjuncts are not used to clear a dependency.
 - **Limits and non-guarantees (CS02-IP F4):**
   - Statement **values** are not modelled, only which columns may change.
@@ -347,6 +362,14 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
 | --- | --- |
 | G1 double-quoted marker names beyond the first target | Any double-quoted token equal to a marker-table name (or last dotted segment) fails closed in non-read-only statements; the rev-5 first-target check is subsumed; `.` added as an operator token so qualified quoted names are analysed by design |
 | G2 `EXPLAIN ANALYZE` / `EXPLAIN <write>` | Fail closed when the statement names a marker table; vendor/version not inferred |
+
+## Revision 7 changes
+
+| CS01-IP item / finding | Change |
+| --- | --- |
+| H1 (Medium) MariaDB `SET STATEMENT … FOR` | Fails closed before the read-only return when it names a marker table; real `SET @var` statements stay clean |
+| H2 (bounded) EXPLAIN modifiers | Any top-level `ANALYZE` or write-verb token after `EXPLAIN`/`DESC`/`DESCRIBE` fails closed (covers `EXTENDED`, `PARTITIONS`, `FORMAT=…`, `WITH`, `INTO`) |
+| H3 (docs) | `EXPLAIN ANALYZE SELECT`, leading `(SELECT …)` and `EXPLAIN SELECT … FOR UPDATE` documented as intentional false positives and locked by tests |
 
 ## Rollback
 
