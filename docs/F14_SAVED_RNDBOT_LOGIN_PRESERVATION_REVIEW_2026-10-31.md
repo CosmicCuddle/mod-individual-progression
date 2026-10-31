@@ -1,8 +1,8 @@
 # F14 partial implementation: preserve existing TBC RandomBot progress at login
 
-**Owner:** CosmicCuddle  
-**Created:** 31 October 2026  
-**Status:** DRAFT, OFF-by-default, not approved for merge/deployment or full F14 gameplay.  
+**Owner:** CosmicCuddle
+**Created:** 31 October 2026
+**Status:** DRAFT, OFF-by-default, not approved for merge/deployment or full F14 gameplay.
 **Parent source:** [F14 pure C++ policy #11](https://github.com/CosmicCuddle/mod-individual-progression/pull/11), fixed at `d4ff9374a0b89c42d93e0f57fdc3fc720cfec785`. This PR is a sibling, not a replacement for [F14 identity source tests #12](https://github.com/CosmicCuddle/mod-individual-progression/pull/12). Existing Hunter/grouping executable source is preserved.
 
 ## Precisely implemented behaviour (only if enabled)
