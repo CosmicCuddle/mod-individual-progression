@@ -1,9 +1,9 @@
 # Integration candidate — Hunter pet autocast and expansion-banded grouping
 
-**Owner:** CosmicCuddle  
-**Date:** 31 October 2026  
-**Status:** **DRAFT review candidate only**. Neither implementation merged to `develop/cosmic-ip`, installed in the owner Worldserver, or declared gameplay accepted.  
-**Base:** frozen [IP grouping #3](https://github.com/CosmicCuddle/mod-individual-progression/pull/3) source `e0cd785f6b2090c8f099c824811077d0ab2a9de5`.  
+**Owner:** CosmicCuddle
+**Date:** 31 October 2026
+**Status:** **DRAFT review candidate only**. Neither implementation merged to `develop/cosmic-ip`, installed in the owner Worldserver, or declared gameplay accepted.
+**Base:** frozen [IP grouping #3](https://github.com/CosmicCuddle/mod-individual-progression/pull/3) source `e0cd785f6b2090c8f099c824811077d0ab2a9de5`.
 **Hunter:** frozen [IP Hunter autocast #1](https://github.com/CosmicCuddle/mod-individual-progression/pull/1), exact original compile-tested `src/IndividualProgressionSpells.cpp` Git blob **`6ee93e1174b5aef6c5d61c9ea31526506c9d08da`**. This blob is identical in original Hunter compiled source `f0044987cc2d6f0b73c1cd25d17012a26a764beb` and current Hunter PR #1 head `b93040b50cf8197b62a7914b4e17741ed35e8a79`.
 
 ## What this branch really changes
