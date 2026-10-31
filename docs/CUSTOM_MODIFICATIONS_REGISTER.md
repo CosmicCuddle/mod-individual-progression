@@ -88,3 +88,19 @@ The protected `develop/cosmic-ip` baseline already contains individual progressi
 ## Upstream integration checklist
 
 Before every proposed Grimfeather update: identify actual installed commits and dirty files; compare upstream paths and ABI; cross-check this register and live issue decisions; propose a conflict-preservation plan; compile in a separate environment; test game outcomes and custom regressions; document backup and rollback; and request CosmicCuddle's approval before merge or production change.
+
+## IP-TEST-C1-001 — Playerbots quest-reset vs IP stage-marker regression harness (TEST-ONLY)
+
+| Field | Record |
+| --- | --- |
+| Purpose | Make accidental loss of IP stage markers 66001–66018 through Playerbots' full randomisation detectable in repeatable automated tests against exact pinned source. **Detection only; this is not a fix.** |
+| Owner / reference | CosmicCuddle's assignment to CS03-IP in [Coordination #13](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13). The C1 design decision remains open in [Coordination #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9). |
+| Branch / base | `claude/azerothcore-ip-fork-hoqu8m` based on `develop/cosmic-ip` @ `edd639b0a6eba858830876e987def510450f438a` |
+| Files (new, test/doc only) | `tests/ip_marker_reset_extract.py`, `tests/test_ip_marker_reset_chain_source.py`, `tests/marker_reset_harness/harness_stubs.h`, `tests/marker_reset_harness/harness_main.cpp`, `.github/workflows/ip-marker-reset-regression-harness-20261031.yml`, `docs/IP_MARKER_RESET_REGRESSION_HARNESS_2026-10-31.md`; this append-only entry |
+| Runtime impact | **None.** No `src/`, `data/`, `conf/` or `optional/` change, enforced by the CI guard. Not compiled into or loaded by Worldserver. No new config key, SQL, schema, DBC or client dependency. |
+| Pinned inputs | mod-playerbots `e88cc4099e69f35126b28942a412ca702d20453b`; Grimfeather AzerothCore `8daffdabe9202c228e45d833c9a1d399597a15cd`. These are **historical pins, not the owner-installed revisions.** |
+| Evidence levels | (A) source contracts with 17 negative mutation fixtures plus foreign-SQL fixtures; (B) verbatim pinned function bodies compiled (g++ C++17, clang++ C++17, g++ C++20) against stand-in types and executed: 86 expectations including controls. **No Worldserver, DB or gameplay test.** |
+| Findings recorded | The full reset also comes from console `rndbot clear` (`ClearEverything`) and `rndbot init`. The delete is persisted by `_SaveQuestStatus` (`CHAR_DEL_CHAR_QUESTSTATUS_REWARDED_BY_QUEST`). `DowngradeMaxLevelBot` code default is `true` when the key is absent (conf.dist ships 0). `RandomBotMaxLevel` is clamped to `MaxPlayerLevel`, so on a level-60 cap with downgrade on, level-60 RandomBots are fully reset periodically. Making markers repeatable would hide them from IP itself, so it is not a mitigation. PvP markers 661xx are collateral. |
+| Owner-side unknowns | Effective `MaxPlayerLevel`, `Playerbots.RandomBotMaxLevel`, `Playerbots.DowngradeMaxLevelBot` (present or absent), installed PB/Core/IP revisions and any live quest_template overrides |
+| Status | **DRAFT, test-only, unmerged, not deployed.** Awaiting CS01-IP integration review and optional CS02-IP independent review |
+| Rollback | Delete the files above and this section. Nothing else depends on them. |

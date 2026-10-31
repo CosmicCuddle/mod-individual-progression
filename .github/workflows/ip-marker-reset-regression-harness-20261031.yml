@@ -1,0 +1,150 @@
+name: IP marker-reset regression harness (C1, test-only, no runtime)
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ip-marker-reset-regression-harness-20261031.yml
+      - tests/ip_marker_reset_extract.py
+      - tests/test_ip_marker_reset_chain_source.py
+      - tests/marker_reset_harness/**
+      - docs/IP_MARKER_RESET_REGRESSION_HARNESS_2026-10-31.md
+  push:
+    branches:
+      - claude/azerothcore-ip-fork-hoqu8m
+    paths:
+      - .github/workflows/ip-marker-reset-regression-harness-20261031.yml
+      - tests/ip_marker_reset_extract.py
+      - tests/test_ip_marker_reset_chain_source.py
+      - tests/marker_reset_harness/**
+      - docs/IP_MARKER_RESET_REGRESSION_HARNESS_2026-10-31.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ip-marker-reset-harness-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASE_SHA: edd639b0a6eba858830876e987def510450f438a  # develop/cosmic-ip at claim time
+  PB_SHA: e88cc4099e69f35126b28942a412ca702d20453b
+  CORE_SHA: 8daffdabe9202c228e45d833c9a1d399597a15cd
+
+jobs:
+  marker-reset-harness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact IP head under test (not a PR merge commit)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard - test/doc-only diff; runtime source, SQL and config byte-identical
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          git diff --name-only "$BASE_SHA" HEAD | sort > /tmp/actual.txt
+          printf '%s\n' \
+            '.github/workflows/ip-marker-reset-regression-harness-20261031.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/IP_MARKER_RESET_REGRESSION_HARNESS_2026-10-31.md' \
+            'tests/ip_marker_reset_extract.py' \
+            'tests/marker_reset_harness/harness_main.cpp' \
+            'tests/marker_reset_harness/harness_stubs.h' \
+            'tests/test_ip_marker_reset_chain_source.py' | sort > /tmp/allowed.txt
+          echo "Changed paths since $BASE_SHA:"; cat /tmp/actual.txt
+          comm -23 /tmp/actual.txt /tmp/allowed.txt > /tmp/unexpected.txt
+          if [ -s /tmp/unexpected.txt ]; then echo 'Unexpected paths:'; cat /tmp/unexpected.txt; exit 1; fi
+          git diff --check "$BASE_SHA" HEAD
+          git diff --quiet "$BASE_SHA" HEAD -- src data conf optional include.sh
+          # Register must be append-only: no existing line removed or changed.
+          DELETED="$(git diff --numstat "$BASE_SHA" HEAD -- docs/CUSTOM_MODIFICATIONS_REGISTER.md | cut -f2)"
+          if [ -n "$DELETED" ] && [ "$DELETED" != 0 ]; then
+            echo "Register diff removes/changes $DELETED existing line(s)"; exit 1
+          fi
+          echo 'PASS: no src/, data/, conf/, optional/ change; register append-only'
+
+      - name: Checkout pinned Playerbots (READ ONLY, sparse)
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: ${{ env.PB_SHA }}
+          path: historical-playerbots
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /src/Bot/Factory/PlayerbotFactory.cpp
+            /src/Bot/RandomPlayerbotMgr.cpp
+            /src/PlayerbotAIConfig.cpp
+            /conf/playerbots.conf.dist
+
+      - name: Checkout pinned AzerothCore (READ ONLY, sparse)
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: ${{ env.CORE_SHA }}
+          path: historical-core
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /src/server/game/Entities/Player/PlayerQuest.cpp
+            /src/server/game/Entities/Player/PlayerStorage.cpp
+            /src/server/game/Entities/Player/Player.h
+            /src/server/game/Quests/QuestDef.h
+            /src/server/game/Quests/QuestDef.cpp
+            /src/server/game/Globals/ObjectMgr.cpp
+            /src/server/game/Globals/ObjectMgr.h
+            /src/server/shared/SharedDefines.h
+
+      - name: Verify frozen source SHAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C historical-playerbots rev-parse HEAD)" = "$PB_SHA"
+          test "$(git -C historical-core rev-parse HEAD)" = "$CORE_SHA"
+          echo 'PASS: exact historical pins (NOT the owner-installed revisions)'
+
+      - name: Layer A + B - unittest (source contracts, mutation fixtures, g++ C++17 compiled bodies)
+        shell: bash
+        env:
+          PINNED_PLAYERBOTS_ROOT: historical-playerbots
+          PINNED_CORE_ROOT: historical-core
+          PINNED_IP_ROOT: .
+          CXX: g++
+          REQUIRE_COMPILED_HARNESS: '1'
+        run: |
+          set -euo pipefail
+          python3 --version; g++ --version | head -1
+          python3 -I -m unittest discover -s tests -p 'test_ip_marker_reset_chain_source.py' -v
+
+      - name: Layer B - second compiler / standard (clang++ C++17, g++ C++20)
+        shell: bash
+        env:
+          PINNED_PLAYERBOTS_ROOT: historical-playerbots
+          PINNED_CORE_ROOT: historical-core
+          PINNED_IP_ROOT: .
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/marker-reset"
+          python3 -I tests/ip_marker_reset_extract.py generate --out "$OUT"
+          clang++ --version | head -1
+          clang++ -std=c++17 -Wall -Wextra -Werror -I "$OUT" -I tests/marker_reset_harness \
+            tests/marker_reset_harness/harness_main.cpp -o "$OUT/harness-clang"
+          g++ -std=c++20 -Wall -Wextra -Werror -I "$OUT" -I tests/marker_reset_harness \
+            tests/marker_reset_harness/harness_main.cpp -o "$OUT/harness-gxx20"
+          "$OUT/harness-clang" | tail -3
+          "$OUT/harness-gxx20" | tail -3
+          python3 -I tests/ip_marker_reset_extract.py check
+
+      - name: Safety boundary
+        if: always()
+        shell: bash
+        run: |
+          echo 'TEST-ONLY harness. Green = the HISTORICAL pinned PB/Core/IP chain still deletes IP stage markers 66001..66018'
+          echo 'on full randomise / ClearEverything, and the harness detects the listed mutations.'
+          echo 'NOT a Worldserver run, NOT a database test, NOT the owner-installed revisions or configs, NOT a fix.'
+          echo 'No Playerbots change, no SQL, no character data, no F14 enablement, no deployment.'
