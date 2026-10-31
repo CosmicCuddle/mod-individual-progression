@@ -15,11 +15,8 @@ permissions:
 
 jobs:
   integration-source-and-policy:
-    # Original frozen Hunter/group diff gate applies only to parent PR #10.
-    # Child #13 has an independent 10-path integration and Hunter blob check.
-    if: >-
-      (github.event_name == 'pull_request' && github.head_ref == 'integration/hunter-grouping-candidate-20261031') ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/hunter-grouping-candidate-20261031')
+    # Run Hunter/group regressions on every relevant PR; scope only the
+    # original immutable five-path delta assertion to #10's own head.
     name: Exact committed Hunter C++ plus protected grouping source checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -30,6 +27,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Assert source equality and exact five-file review delta
+        if: >-
+          (github.event_name == 'pull_request' && github.head_ref == 'integration/hunter-grouping-candidate-20261031') ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/hunter-grouping-candidate-20261031')
         shell: bash
         run: |
           set -euo pipefail

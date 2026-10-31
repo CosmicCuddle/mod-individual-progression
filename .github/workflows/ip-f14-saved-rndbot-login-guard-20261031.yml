@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ip-f14-saved-rndbot-login-guard-latest
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -52,10 +52,31 @@ jobs:
             'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
             'tests/test_f14_saved_rndbot_login_guard_source.py' | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/actual.txt
-          # Original source-free frozen-diff contracts remain active on their
-          # original review branches, not on this intentional runtime child.
-          grep -F "github.head_ref == 'feature/f14-verified-rndbot-stage-contract-20261031'" .github/workflows/ip-f14-verified-stage-policy-20261031.yml
-          grep -F "github.head_ref == 'integration/hunter-grouping-candidate-20261031'" .github/workflows/ip-hunter-group-integration-review-20261031.yml
+          # Verify original frozen delta steps remain on their own PRs, but
+          # inherited policy/Hunter regression steps still run on child PRs.
+          python3 - <<'PY'
+          from pathlib import Path
+          for fn, title, head in [
+            ('.github/workflows/ip-f14-verified-stage-policy-20261031.yml',
+             'Guard exact six F14 test-only paths, original compiled Hunter and grouping source',
+             'feature/f14-verified-rndbot-stage-contract-20261031'),
+            ('.github/workflows/ip-hunter-group-integration-review-20261031.yml',
+             'Assert source equality and exact five-file review delta',
+             'integration/hunter-grouping-candidate-20261031'),
+          ]:
+            src=Path(fn).read_text()
+            step=(
+              '      - name: ' + title + '\n'
+              '        if: >-\n'
+              "          (github.event_name == 'pull_request' && github.head_ref == '" + head + "') ||\n"
+              "          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/" + head + "')\n"
+              '        shell: bash'
+            )
+            assert src.count(step)==1, 'Frozen step must be scoped on original PR: '+fn
+            name='  f14-policy-cxx:' if 'f14-verified' in fn else '  integration-source-and-policy:'
+            job_header=src.split(name,1)[1].split('    steps:',1)[0]
+            assert '    if:' not in job_header, 'Do not skip entire policy/Hunter regression job'
+          PY
           git diff --check "$BASE" HEAD
           test "$(git rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
           for f in src/IndividualProgressionGroupPolicy.h src/IndividualProgressionRandomBotStagePolicy.h src/cs_individualProgression.cpp; do
