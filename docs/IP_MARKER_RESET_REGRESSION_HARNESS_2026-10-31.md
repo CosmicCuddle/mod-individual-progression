@@ -116,7 +116,7 @@ A full reset therefore needs **bot level ≥ effective `RandomBotMaxLevel` AND d
 - worldserver `MaxPlayerLevel` and `IndividualProgression.BotAccountsMaxLevel`.
 
 Pinned Core `ConfigMgr::GetValueDefault` (`src/common/Configuration/Config.cpp`) also:
-- accepts **environment-variable overrides** (upper-snake key, e.g. `PLAYERBOTS_DOWNGRADE_MAX_LEVEL_BOT`), so check the service environment;
+- accepts **environment-variable overrides** (`AC_`-prefixed upper-snake key, e.g. `AC_PLAYERBOTS_DOWNGRADE_MAX_LEVEL_BOT`), so check the service environment;
 - logs `Missing property <key>` at the configured missing-option severity, so the worldserver startup log may show a missing `Playerbots.*` key.
 
 These are inventory hints, not harness contracts.
