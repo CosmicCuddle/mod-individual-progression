@@ -1,5 +1,18 @@
 #include "IndividualProgression.h"
 #include "IndividualProgressionGroupPolicy.h"
+// Optional Playerbots dependency: the original IP fork can build without it.
+#if __has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
+#include "../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h"
+#define COSMIC_IP_F14_PLAYERBOTS_AVAILABLE 1
+#else
+#define COSMIC_IP_F14_PLAYERBOTS_AVAILABLE 0
+#endif
+
+// Hosted full-build QA requires this integration, unlike the portable default
+// fork which must remain buildable without an installed Playerbots module.
+#if defined(COSMIC_IP_F14_REQUIRE_PLAYERBOTS) && !COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
+#error "F14 login guard: required Playerbots RandomPlayerbotMgr API was not found"
+#endif
 
 static_assert(PROGRESSION_PRE_TBC == IndividualProgressionGroupPolicy::FirstTbcStage,
               "Individual Progression TBC stage boundary changed");
@@ -42,12 +55,39 @@ public:
             if (sIndividualProgression->isBotAccount(player))
                 sIndividualProgression->UpdateRNDbotSpells(player); // give class spells to RNDbots that have been removed from trainers by IP.
             
-            if (player->GetLevel() <= 60)
-                sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(0));
-            else if ((player->GetLevel() > 60) && (player->GetLevel() <= 70))
-                sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(8));
-            else
-                sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(13));
+            // F14 partial safeguard, OFF by default. Only preserve an already
+            // recorded TBC/WotLK stage for a positively selected headless RNDbot.
+            // This does not initialize stage 8, grant TBC, alter normal players,
+            // or implement the separate pre-map rndbot visibility feature.
+            bool preserveVerifiedRandomBotStage = false;
+#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
+            if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin &&
+                (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
+                player->GetSession() && player->GetSession()->IsHeadless())
+            {
+                uint8 const savedStage = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+                if (savedStage >= IndividualProgressionGroupPolicy::FirstTbcStage &&
+                    savedStage <= IndividualProgressionGroupPolicy::LastSupportedStage)
+                {
+                    // This is deliberately the GUID overload: the PlayerbotAI
+                    // may not yet exist during Core's PlayerScript login.
+                    // Do not call the mutable currentBots-backed predicate
+                    // outside the source-verified WorldScript login thread.
+                    preserveVerifiedRandomBotStage =
+                        sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter());
+                }
+            }
+
+#endif
+            if (!preserveVerifiedRandomBotStage)
+            {
+                if (player->GetLevel() <= 60)
+                    sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(0));
+                else if ((player->GetLevel() > 60) && (player->GetLevel() <= 70))
+                    sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(8));
+                else
+                    sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(13));
+            }
         }
         else // normal account
         {

@@ -29,6 +29,20 @@ IndividualProgression.Enable = 1
 #
 IndividualProgression.EnforceGroupRules = 0
 
+# IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin
+#
+#        DRAFT PARTIAL SAFEGUARD - NOT COMPLETE F14 ENFORCEMENT.
+#        0 = OFF (default). Exact original bot login stage syncing remains.
+#        1 = Preserve saved stage 8-18 for positively selected HEADLESS
+#            Blood Elf/Draenei RNDbots on Core's IP login callback only.
+#        This option never grants stage 8 to a new character and does NOT
+#        hide rndbots from Vanilla observers, protect GM/group stage writes,
+#        or prevent old stage 0 bot migrations. A matching Playerbots module
+#        must be available at build time. Keep OFF pending owner approval,
+#        full source-matched build, F14 integration and staging tests.
+#
+IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0
+
 # IndividualProgression.VanillaPowerAdjustment
 #
 #        Description: Adjustment to player's attack power before completing Vanilla content and opening the Dark Portal
