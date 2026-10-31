@@ -1,4 +1,14 @@
 name: IP marker-reset regression harness (C1, test-only, no runtime)
+
+# Two jobs (CS01-IP item 4 / CS02-IP finding 3):
+#  * pr17-frozen-scope-guard - the original PR #17 seven-path / frozen-base / append-only
+#    register guard. Runs ONLY for the PR #17 head branch; on any other branch it is SKIPPED
+#    (not red), so it can never block unrelated PRs.
+#  * marker-reset-chain - the reusable source contracts + compiled extracted bodies. Runs for
+#    harness changes AND for IP changes to src/IndividualProgression*, data/sql/** and
+#    optional/sql/**, on any branch that contains this workflow file. No frozen-diff dependence.
+# Read-only: contents: read, no pull_request_target, no secrets, no merge/deploy automation.
+
 on:
   pull_request:
     paths:
@@ -7,6 +17,9 @@ on:
       - tests/test_ip_marker_reset_chain_source.py
       - tests/marker_reset_harness/**
       - docs/IP_MARKER_RESET_REGRESSION_HARNESS_2026-10-31.md
+      - src/IndividualProgression*
+      - data/sql/**
+      - optional/sql/**
   push:
     branches:
       - claude/azerothcore-ip-fork-hoqu8m
@@ -16,6 +29,9 @@ on:
       - tests/test_ip_marker_reset_chain_source.py
       - tests/marker_reset_harness/**
       - docs/IP_MARKER_RESET_REGRESSION_HARNESS_2026-10-31.md
+      - src/IndividualProgression*
+      - data/sql/**
+      - optional/sql/**
   workflow_dispatch:
 
 permissions:
@@ -26,16 +42,25 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BASE_SHA: edd639b0a6eba858830876e987def510450f438a  # develop/cosmic-ip at claim time
-  PB_SHA: e88cc4099e69f35126b28942a412ca702d20453b
+  PB_SHA: e88cc4099e69f35126b28942a412ca702d20453b         # primary harness pin
   CORE_SHA: 8daffdabe9202c228e45d833c9a1d399597a15cd
+  PB_LEGACY_SHA: 037c01418b5d01506917a3db9b44fd56ac5f965c  # review-only key-name comparison
 
 jobs:
-  marker-reset-harness:
+  pr17-frozen-scope-guard:
+    name: PR17-only frozen scope guard (7 paths, runtime byte-identical, append-only register)
+    # Job-level `if` cannot read `env`, so the PR #17 branch is spelled out here.
+    if: >-
+      (github.event_name == 'pull_request'
+        && github.event.pull_request.head.ref == 'claude/azerothcore-ip-fork-hoqu8m'
+        && github.event.pull_request.head.repo.full_name == github.repository)
+      || (github.event_name != 'pull_request' && github.ref == 'refs/heads/claude/azerothcore-ip-fork-hoqu8m')
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
+    env:
+      BASE_SHA: edd639b0a6eba858830876e987def510450f438a  # develop/cosmic-ip at the PR #17 claim
     steps:
-      - name: Checkout exact IP head under test (not a PR merge commit)
+      - name: Checkout exact PR #17 head (not a PR merge commit)
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -61,14 +86,24 @@ jobs:
           if [ -s /tmp/unexpected.txt ]; then echo 'Unexpected paths:'; cat /tmp/unexpected.txt; exit 1; fi
           git diff --check "$BASE_SHA" HEAD
           git diff --quiet "$BASE_SHA" HEAD -- src data conf optional include.sh
-          # Register must be append-only: no existing line removed or changed.
           DELETED="$(git diff --numstat "$BASE_SHA" HEAD -- docs/CUSTOM_MODIFICATIONS_REGISTER.md | cut -f2)"
           if [ -n "$DELETED" ] && [ "$DELETED" != 0 ]; then
             echo "Register diff removes/changes $DELETED existing line(s)"; exit 1
           fi
           echo 'PASS: no src/, data/, conf/, optional/ change; register append-only'
 
-      - name: Checkout pinned Playerbots (READ ONLY, sparse)
+  marker-reset-chain:
+    name: Reusable marker-reset chain (source contracts + compiled extracted bodies)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact IP head under test (not a PR merge commit)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout pinned Playerbots (READ ONLY, sparse src/ + conf.dist)
         uses: actions/checkout@v4
         with:
           repository: mod-playerbots/mod-playerbots
@@ -77,8 +112,18 @@ jobs:
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: |
-            /src/Bot/Factory/PlayerbotFactory.cpp
-            /src/Bot/RandomPlayerbotMgr.cpp
+            /src/
+            /conf/playerbots.conf.dist
+
+      - name: Checkout legacy Playerbots for key-name comparison ONLY (READ ONLY, sparse)
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: ${{ env.PB_LEGACY_SHA }}
+          path: legacy-playerbots-037c0141
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
             /src/PlayerbotAIConfig.cpp
             /conf/playerbots.conf.dist
 
@@ -100,26 +145,32 @@ jobs:
             /src/server/game/Globals/ObjectMgr.h
             /src/server/shared/SharedDefines.h
 
-      - name: Verify frozen source SHAs
+      - name: Verify frozen source SHAs and clean pinned trees
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C historical-playerbots rev-parse HEAD)" = "$PB_SHA"
-          test "$(git -C historical-core rev-parse HEAD)" = "$CORE_SHA"
-          echo 'PASS: exact historical pins (NOT the owner-installed revisions)'
+          for pair in "historical-playerbots:$PB_SHA" "legacy-playerbots-037c0141:$PB_LEGACY_SHA" "historical-core:$CORE_SHA"; do
+            dir="${pair%%:*}"; sha="${pair##*:}"
+            test "$(git -C "$dir" rev-parse HEAD)" = "$sha"
+            test -z "$(git -C "$dir" status --porcelain --untracked-files=all)"
+            echo "PASS: $dir @ $sha, clean"
+          done
+          echo 'Historical pins only - NOT the owner-installed revisions.'
 
-      - name: Layer A + B - unittest (source contracts, mutation fixtures, g++ C++17 compiled bodies)
+      - name: Layer A + B - unittest (contracts, fixtures, namespace audit, g++ C++17 compiled bodies)
         shell: bash
         env:
           PINNED_PLAYERBOTS_ROOT: historical-playerbots
+          PINNED_PLAYERBOTS_LEGACY_ROOT: legacy-playerbots-037c0141
           PINNED_CORE_ROOT: historical-core
           PINNED_IP_ROOT: .
           CXX: g++
           REQUIRE_COMPILED_HARNESS: '1'
+          REQUIRE_LEGACY_CONFIG_AUDIT: '1'
         run: |
           set -euo pipefail
           python3 --version; g++ --version | head -1
-          python3 -I -m unittest discover -s tests -p 'test_ip_marker_reset_chain_source.py' -v
+          python3 -I -B -m unittest discover -s tests -p 'test_ip_marker_reset_chain_source.py' -v
 
       - name: Layer B - second compiler / standard (clang++ C++17, g++ C++20)
         shell: bash
@@ -130,7 +181,7 @@ jobs:
         run: |
           set -euo pipefail
           OUT="$RUNNER_TEMP/marker-reset"
-          python3 -I tests/ip_marker_reset_extract.py generate --out "$OUT"
+          python3 -I -B tests/ip_marker_reset_extract.py generate --out "$OUT"
           clang++ --version | head -1
           clang++ -std=c++17 -Wall -Wextra -Werror -I "$OUT" -I tests/marker_reset_harness \
             tests/marker_reset_harness/harness_main.cpp -o "$OUT/harness-clang"
@@ -138,13 +189,14 @@ jobs:
             tests/marker_reset_harness/harness_main.cpp -o "$OUT/harness-gxx20"
           "$OUT/harness-clang" | tail -3
           "$OUT/harness-gxx20" | tail -3
-          python3 -I tests/ip_marker_reset_extract.py check
+          python3 -I -B tests/ip_marker_reset_extract.py check
 
       - name: Safety boundary
         if: always()
         shell: bash
         run: |
           echo 'TEST-ONLY harness. Green = the HISTORICAL pinned PB/Core/IP chain still deletes IP stage markers 66001..66018'
-          echo 'on full randomise / ClearEverything, and the harness detects the listed mutations.'
+          echo 'via the inventoried routes, and the harness detects the listed mutations. A deliberate future change to the'
+          echo 'chain (e.g. an approved C1 Option A) turns this red BY DESIGN and must update the expectations explicitly.'
           echo 'NOT a Worldserver run, NOT a database test, NOT the owner-installed revisions or configs, NOT a fix.'
           echo 'No Playerbots change, no SQL, no character data, no F14 enablement, no deployment.'

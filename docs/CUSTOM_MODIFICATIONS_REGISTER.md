@@ -104,3 +104,14 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Owner-side unknowns | Effective `MaxPlayerLevel`, `Playerbots.RandomBotMaxLevel`, `Playerbots.DowngradeMaxLevelBot` (present or absent), installed PB/Core/IP revisions and any live quest_template overrides |
 | Status | **DRAFT, test-only, unmerged, not deployed.** Awaiting CS01-IP integration review and optional CS02-IP independent review |
 | Rollback | Delete the files above and this section. Nothing else depends on them. |
+
+### IP-TEST-C1-001 — revision 2 (2026-10-31, test/docs/CI only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP review of PR #17](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6543427658), scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6543457181) and claimed by CS03-IP in Issue #13 |
+| Files | The same seven paths. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| Coverage added | GM `initself` × 6 full-reset routes (a **real GM character** source risk) and `RandomBotLevelMgr` × 3 routes (default OFF behind `Playerbots.LevelBrackets.Enabled` / `Playerbots.ResetBotLevel.Enabled`). Five-statement unconditional removal contract that closes the guarded-removal loophole. Fail closed on preprocessor conditionals and on unparseable marker-table SQL. Clean-tree pin checks. |
+| Config finding | PB renamed `AiPlayerbot.*` → `Playerbots.*` between `037c0141` and `e88cc409`, with **no fallback** at `e88cc409`. A stale `AiPlayerbot.DowngradeMaxLevelBot = 0` is silently ignored, so downgrade defaults to **true**. Exposure still needs bot level ≥ effective `RandomBotMaxLevel` (clamped to worldserver `MaxPlayerLevel`, which is distinct from IP's XP-only caps). **Owner config unverified.** |
+| CI | Split into a PR17-only frozen scope guard (skipped elsewhere) and a reusable chain job that also triggers on `src/IndividualProgression*`, `data/sql/**` and `optional/sql/**`. Read-only; the legacy PB checkout is used for key-name comparison only. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** Deferred: `!` precedence and digit separators in the extractor. |

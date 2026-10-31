@@ -53,15 +53,71 @@ def sources() -> x.Sources:
 # --------------------------------------------------------------------------
 
 class PinnedRevisions(unittest.TestCase):
-    def test_playerbots_checkout_is_exact_pin(self):
+    def test_playerbots_checkout_is_exact_clean_pin(self):
         root = sources().roots["pb"]
         self.assertEqual(x.git_head(root), x.PINNED_PLAYERBOTS_SHA,
                          f"{root} must be a git checkout of mod-playerbots@{x.PINNED_PLAYERBOTS_SHA}")
+        self.assertTrue(x.git_is_clean(root), f"{root} has local modifications or untracked files")
 
-    def test_core_checkout_is_exact_pin(self):
+    def test_core_checkout_is_exact_clean_pin(self):
         root = sources().roots["core"]
         self.assertEqual(x.git_head(root), x.PINNED_CORE_SHA,
                          f"{root} must be a git checkout of azerothcore-wotlk@{x.PINNED_CORE_SHA}")
+        self.assertTrue(x.git_is_clean(root), f"{root} has local modifications or untracked files")
+
+
+class ConfigNamespaceAudit(unittest.TestCase):
+    """CS02-IP finding 1 / CS01-IP item 2: AiPlayerbot.* -> Playerbots.* rename (review-only comparison).
+
+    The legacy checkout (PINNED_PLAYERBOTS_LEGACY_ROOT @ 037c0141...) is read ONLY for key names and
+    defaults. It is not the harness input and not evidence of the owner's installed revision.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        root = os.environ.get("PINNED_PLAYERBOTS_LEGACY_ROOT")
+        if not root:
+            if os.environ.get("REQUIRE_LEGACY_CONFIG_AUDIT") == "1":
+                raise AssertionError("REQUIRE_LEGACY_CONFIG_AUDIT=1 but PINNED_PLAYERBOTS_LEGACY_ROOT is unset")
+            raise unittest.SkipTest("legacy PB checkout not provided; namespace audit not run")
+        cls.root = Path(root)
+        cls.legacy = {k: (cls.root / v).read_text(encoding="utf-8", errors="replace")
+                      for k, v in x.LEGACY_PB_FILES.items()}
+
+    def test_legacy_checkout_is_exact_clean_pin(self):
+        self.assertEqual(x.git_head(self.root), x.LEGACY_PLAYERBOTS_SHA)
+        self.assertTrue(x.git_is_clean(self.root))
+        self.assertNotEqual(self.root.resolve(), sources().roots["pb"].resolve(),
+                            "legacy audit must use a distinct checkout from the primary pin")
+
+    def test_key_namespace_renamed_with_same_defaults(self):
+        legacy = x.legacy_config_facts(self.legacy["config"], self.legacy["conf_dist"])
+        primary = x.legacy_config_facts(sources().pb["config"], sources().pb["conf_dist"])
+        self.assertEqual(legacy, {"RandomBotMaxLevel": ("AiPlayerbot", "80", "80"),
+                                  "DowngradeMaxLevelBot": ("AiPlayerbot", "true", "0")})
+        self.assertEqual(primary, {"RandomBotMaxLevel": ("Playerbots", "80", "80"),
+                                   "DowngradeMaxLevelBot": ("Playerbots", "true", "0")})
+
+    def test_legacy_pin_also_clamps_to_world_max_level(self):
+        self.assertIn("if (randomBotMaxLevel > sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL)) "
+                      "randomBotMaxLevel = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);",
+                      x.normalize_ws(x.mask_comments(self.legacy["config"])))
+
+    def test_stale_legacy_conf_under_primary_pin_silently_enables_downgrade(self):
+        """A legacy-style 'AiPlayerbot.DowngradeMaxLevelBot = 0' line is not read at e88cc409,
+        so the effective value is the code default. Derived from source; owner config UNKNOWN."""
+        primary = x.legacy_config_facts(sources().pb["config"], sources().pb["conf_dist"])
+        stale_conf = "AiPlayerbot.DowngradeMaxLevelBot = 0\nAiPlayerbot.RandomBotMaxLevel = 60\n"
+        ns, code_default, _ = primary["DowngradeMaxLevelBot"]
+        present = re.findall(r"(?m)^\s*" + ns + r"\.DowngradeMaxLevelBot\s*=\s*(\S+)", stale_conf)
+        effective = present[0] if present else code_default
+        self.assertEqual(effective, "true")
+        model = x.randomize_decision_model(sources())
+        # Bot at 60, worldserver MaxPlayerLevel 60 (clamp) -> full reset; MaxPlayerLevel 80 -> incremental.
+        self.assertEqual(model.outcome(level=60, cls=1, random_bot_max_level=60, downgrade_max_level_bot=True),
+                         "full_reset")
+        self.assertEqual(model.outcome(level=60, cls=1, random_bot_max_level=80, downgrade_max_level_bot=True),
+                         "incremental")
 
 
 # --------------------------------------------------------------------------
@@ -180,6 +236,36 @@ MUTATIONS: List[Tuple[str, str, str, Callable[[str], str], str]] = [
     ("pb_max_level_clamp_removed", "pb", "config",
      sub_once("        RandomBotMaxLevel = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);\n", ""),
      "check_pb_config_exposure_defaults"),
+    ("pb_initself_rare_made_incremental", "pb", "playerbot_mgr",
+     in_function("PlayerbotHolder::HandlePlayerbotCommand", sub_once(
+         "ITEM_QUALITY_RARE);\n                factory.Randomize(false);",
+         "ITEM_QUALITY_RARE);\n                factory.Randomize(true);")),
+     "check_pb_gm_initself_full_reset_routes"),
+    ("pb_initself_uncommon_extra_gate", "pb", "playerbot_mgr",
+     in_function("PlayerbotHolder::HandlePlayerbotCommand", sub_once(
+         "if (master->CanBeGameMaster())\n            {\n                // OnBotLogin(master);\n"
+         "                PlayerbotFactory factory(master, master->GetLevel(), ITEM_QUALITY_UNCOMMON);",
+         "if (master->CanBeGameMaster() && !HasSavedIpStage(master))\n            {\n                // OnBotLogin(master);\n"
+         "                PlayerbotFactory factory(master, master->GetLevel(), ITEM_QUALITY_UNCOMMON);")),
+     "check_pb_gm_initself_full_reset_routes"),
+    ("pb_level_mgr_reset_bot_incremental", "pb", "level_mgr",
+     in_function("RandomBotLevelMgr::ResetBot", sub_once("newFactory.Randomize(false);", "newFactory.Randomize(true);")),
+     "check_pb_level_mgr_full_reset_routes_default_off"),
+    ("pb_level_mgr_login_hook_ungated", "pb", "level_mgr",
+     sub_once("        if (!sPlayerbotAIConfig.ResetBotLevelEnabled)\n            return;\n"
+              "        RandomBotLevelMgr::instance().OnBotLogin(player);",
+              "        RandomBotLevelMgr::instance().OnBotLogin(player);"),
+     "check_pb_level_mgr_full_reset_routes_default_off"),
+    ("pb_level_mgr_new_unconditional_caller", "pb", "level_mgr",
+     in_function("RandomBotLevelMgr::Update", lambda t: t.replace("{", "{\n    SkipBotLevel(nullptr, 0);", 1)),
+     "check_pb_level_mgr_full_reset_routes_default_off"),
+    ("pb_level_brackets_code_default_on", "pb", "config",
+     sub_once('GetOption<bool>("Playerbots.LevelBrackets.Enabled", false)',
+              'GetOption<bool>("Playerbots.LevelBrackets.Enabled", true)'),
+     "check_pb_level_mgr_full_reset_routes_default_off"),
+    ("ip_vanilla_human_xp_cap_moved", "ip", "ip_player",
+     sub_once("PROGRESSION_PRE_TBC) && player->GetLevel() >= 60)", "PROGRESSION_PRE_TBC) && player->GetLevel() >= 70)"),
+     "check_ip_level_caps_are_xp_gates_not_world_cap"),
     ("core_get_status_ignores_repeatable", "core", "player_quest",
      in_function("Player::GetQuestStatus", sub_once(
          "if (!qInfo->IsRepeatable() && IsQuestRewarded(quest_id))", "if (IsQuestRewarded(quest_id))")),
@@ -211,8 +297,38 @@ MUTATIONS: List[Tuple[str, str, str, Callable[[str], str], str]] = [
 ]
 
 
+REMOVE_CALL = "        bot->RemoveRewardedQuest(entry);\n"
+
+# CS02-IP review finding 4: guards that wrap the removal WITHOUT a new 'continue'.
+GUARDED_REMOVAL_FIXTURES: List[Tuple[str, str]] = [
+    ("braced_tracking_flag_guard",
+     "        if (!quest->HasFlag(QUEST_FLAGS_TRACKING))\n        {\n    " + REMOVE_CALL + "        }\n"),
+    ("braced_ip_marker_range_guard",
+     "        if (entry < IP_STAGE_MARKER_FIRST || entry > IP_STAGE_MARKER_LAST)\n        {\n    "
+     + REMOVE_CALL + "        }\n"),
+    ("braceless_tracking_flag_guard",
+     "        if (!quest->HasFlag(QUEST_FLAGS_TRACKING))\n    " + REMOVE_CALL),
+]
+
+
 class NegativeMutationFixtures(unittest.TestCase):
     """The harness must notice each deliberate break of the recorded chain."""
+
+    def test_guarded_removal_rejected_for_the_intended_reason(self):
+        for name, replacement in GUARDED_REMOVAL_FIXTURES:
+            with self.subTest(fixture=name):
+                mutated = sources().with_edit(
+                    "pb", "factory", in_function("PlayerbotFactory::ResetQuests", sub_once(REMOVE_CALL, replacement)))
+                with self.assertRaises(x.ContractViolation) as ctx:
+                    x.check_pb_reset_quests_removes_every_non_none_quest(mutated)
+                self.assertEqual(str(ctx.exception), x.MSG_REMOVE_NOT_UNCONDITIONAL)
+
+    def test_top_level_statement_splitter(self):
+        block = ("a = 1; if (b) c(); if (d) { e(); } else { f(); } g(\";}\"); "
+                 "for (int i = 0; i < 2; ++i) { h(); } k();")
+        self.assertEqual(x.top_level_statements(block), [
+            "a = 1;", "if (b) c();", "if (d) { e(); } else { f(); }", 'g(";}");',
+            "for (int i = 0; i < 2; ++i) { h(); }", "k();"])
 
     def test_baseline_has_no_failures(self):
         failures = {k: v for k, v in x.run_all(sources()).items() if v}
@@ -233,6 +349,39 @@ class NegativeMutationFixtures(unittest.TestCase):
         results = x.run_all(replace(sources(), ip_sql_tree=tree))
         self.assertIsNotNone(results["check_no_other_ip_sql_redefines_markers"])
 
+    def _sql_findings(self, sql: str):
+        tree = dict(sources().ip_sql_tree)
+        tree["data/sql/world/base/zz_fixture.sql"] = sql
+        return x.run_all(replace(sources(), ip_sql_tree=tree))["check_no_other_ip_sql_redefines_markers"]
+
+    def test_column_less_insert_on_marker_is_detected(self):
+        err = self._sql_findings("INSERT INTO `quest_template_addon` VALUES (66004, 0, 0, 1);\n")
+        self.assertIsNotNone(err)
+        self.assertIn("column-less", err)
+
+    def test_column_less_insert_on_unrelated_id_is_not_flagged(self):
+        self.assertIsNone(self._sql_findings("REPLACE INTO quest_template_addon VALUES (9999, 0, 0, 1);\n"))
+
+    def test_insert_select_on_marker_table_fails_closed(self):
+        err = self._sql_findings(
+            "INSERT INTO `quest_template_addon` SELECT * FROM `quest_template_addon_backup` WHERE `ID` > 1;\n")
+        self.assertIsNotNone(err)
+        self.assertIn("UNPARSEABLE", err)
+
+    def test_conditional_preprocessor_in_extracted_body_fails_closed(self):
+        for name, group, key, fn, old in (
+                ("if0_around_removal", "pb", "factory", "PlayerbotFactory::ResetQuests", REMOVE_CALL),
+                ("ifdef_in_get_quest_status", "core", "player_quest", "Player::GetQuestStatus",
+                 "    return QUEST_STATUS_NONE;\n")):
+            with self.subTest(fixture=name):
+                wrapped = "#if 0\n" + old + "#endif\n"
+                mutated = sources().with_edit(group, key, in_function(fn, sub_once(old, wrapped)))
+                with self.assertRaises(x.ExtractionError) as ctx:
+                    x.find_function(getattr(mutated, group)[key], fn)
+                self.assertIn("conditional preprocessor '#if'", str(ctx.exception))
+                failing = [k for k, v in x.run_all(mutated).items() if v]
+                self.assertTrue(failing, f"{name}: no contract failed")
+
     def test_foreign_sql_on_unrelated_ids_is_not_flagged(self):
         tree = dict(sources().ip_sql_tree)
         tree["data/sql/world/base/zz_control_fixture.sql"] = (
@@ -245,6 +394,32 @@ class NegativeMutationFixtures(unittest.TestCase):
 # --------------------------------------------------------------------------
 # Extractor self-tests on synthetic input
 # --------------------------------------------------------------------------
+
+class TreeScanFixtures(unittest.TestCase):
+    """Fixtures for contracts that scan whole src/ trees rather than one file."""
+
+    def test_legacy_option_key_anywhere_in_pb_src_is_detected(self):
+        tree = dict(sources().pb_src_tree)
+        tree["src/Script/LegacyConfigShim.cpp"] = (
+            'bool d = sConfigMgr->GetOption<bool>("AiPlayerbot.DowngradeMaxLevelBot", true);\n')
+        with self.assertRaises(x.ContractViolation):
+            x.check_pb_no_legacy_config_namespace(replace(sources(), pb_src_tree=tree))
+
+    def test_legacy_key_in_comment_is_not_a_finding(self):
+        tree = dict(sources().pb_src_tree)
+        tree["src/Script/Note.cpp"] = "// previously AiPlayerbot.DowngradeMaxLevelBot\n"
+        x.check_pb_no_legacy_config_namespace(replace(sources(), pb_src_tree=tree))
+
+    def test_partial_pb_src_checkout_fails_closed(self):
+        with self.assertRaises(x.ContractViolation):
+            x.check_pb_no_legacy_config_namespace(replace(sources(), pb_src_tree={}))
+
+    def test_ip_touching_world_max_level_is_detected(self):
+        tree = dict(sources().ip_src_tree)
+        tree["src/IndividualProgressionCap.cpp"] = "uint32 c = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);\n"
+        with self.assertRaises(x.ContractViolation):
+            x.check_ip_level_caps_are_xp_gates_not_world_cap(replace(sources(), ip_src_tree=tree))
+
 
 class ExtractorSelfTests(unittest.TestCase):
     def test_comments_masked_but_strings_kept(self):
@@ -338,6 +513,14 @@ class CompiledExtractedBodies(unittest.TestCase):
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn("not ok", run.stdout)
         self.assertRegex(run.stdout, r"not ok \d+ - stage 8: IP reads stage 0 after pinned ResetQuests")
+
+    def test_tracking_flag_guard_is_caught_for_the_right_reason(self):
+        """CS02 finding 4: the guard must COMPILE (verbatim Quest::HasFlag/QuestFlags) and
+        fail on behaviour (markers carry Flags=1024 TRACKING and survive), not on a build error."""
+        run = self._build_and_run("tracking-guard", (x.RESET_SKIP_TRACKING_FLAG_MUTATION,))
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertRegex(run.stdout, r"not ok \d+ - stage 8: every rewarded stage marker removed from m_RewardedQuests")
+        self.assertRegex(run.stdout, r"(?m)^ok \d+ - ordinary rewarded quest also deleted")
 
 
 if __name__ == "__main__":

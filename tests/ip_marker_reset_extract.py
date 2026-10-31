@@ -43,6 +43,10 @@ from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence,
 
 PINNED_PLAYERBOTS_SHA = "e88cc4099e69f35126b28942a412ca702d20453b"
 PINNED_CORE_SHA = "8daffdabe9202c228e45d833c9a1d399597a15cd"
+# Review-only comparison pin (CS02-IP's earlier PB revision; ancestor of e88cc409 by 53 commits).
+# Used ONLY to compare config key names/defaults. Never a substitute for the primary pin.
+LEGACY_PLAYERBOTS_SHA = "037c01418b5d01506917a3db9b44fd56ac5f965c"
+LEGACY_PB_FILES = {"config": "src/PlayerbotAIConfig.cpp", "conf_dist": "conf/playerbots.conf.dist"}
 
 STAGE_MARKER_BASE = 66000
 EXPECTED_STAGE_MARKERS = tuple(range(66001, 66019))  # 66001..66018 inclusive
@@ -54,6 +58,8 @@ PB_FILES = {
     "mgr": "src/Bot/RandomPlayerbotMgr.cpp",
     "config": "src/PlayerbotAIConfig.cpp",
     "conf_dist": "conf/playerbots.conf.dist",
+    "playerbot_mgr": "src/Bot/PlayerbotMgr.cpp",
+    "level_mgr": "src/Bot/RandomBotLevelMgr.cpp",
 }
 CORE_FILES = {
     "player_quest": "src/server/game/Entities/Player/PlayerQuest.cpp",
@@ -68,6 +74,7 @@ CORE_FILES = {
 IP_FILES = {
     "ip_cpp": "src/IndividualProgression.cpp",
     "ip_h": "src/IndividualProgression.h",
+    "ip_player": "src/IndividualProgressionPlayer.cpp",
     "progression_sql": "data/sql/world/base/player_progression.sql",
 }
 IP_SQL_DIRS = ("data/sql", "optional/sql")
@@ -193,6 +200,11 @@ def find_function(src: str, name: str, label: str = "") -> CppFunction:
         body_open = paren_close + tail.end()
         body_close = match_bracket(masked, body_open)
         start = m.start()
+        directive = re.search(r"(?m)^[ \t]*#[ \t]*(if|ifdef|ifndef|elif|else|endif)\b", masked[body_open + 1:body_close])
+        if directive:
+            raise ExtractionError(
+                f"{name} in {label or 'source'}: conditional preprocessor '#{directive.group(1)}' inside the "
+                "extracted body; a text contract cannot tell which branch is compiled (fail closed)")
         found.append(CppFunction(
             name=name,
             label=label,
@@ -257,6 +269,51 @@ def find_statement(fn: CppFunction, head_regex: str) -> Tuple[str, str]:
     if len(hits) != 1:
         raise ExtractionError(f"{fn.name}: expected one statement /{head_regex}/, found {len(hits)}")
     return hits[0]
+
+
+def braced_inner(masked_stmt: str) -> str:
+    """Text strictly inside the first top-level ``{ ... }`` of a statement."""
+    open_idx = masked_stmt.index("{")
+    return masked_stmt[open_idx + 1:match_bracket(masked_stmt, open_idx)]
+
+
+def top_level_statements(block: str) -> List[str]:
+    """Split comment-masked block contents into normalised top-level statements.
+
+    ``if (c) x;`` and ``if (c) { x; } else { y; }`` are ONE statement each, so a
+    call wrapped in any guard is never reported as a top-level statement.
+    """
+    out: List[str] = []
+    buf: List[str] = []
+    paren = brace = 0
+    i, n = 0, len(block)
+    while i < n:
+        c = block[i]
+        if c in "\"'":
+            j = _skip_literal(block, i)
+            buf.append(block[i:j])
+            i = j
+            continue
+        buf.append(c)
+        if c == "(":
+            paren += 1
+        elif c == ")":
+            paren -= 1
+        elif c == "{":
+            brace += 1
+        elif c == "}":
+            brace -= 1
+            if brace == 0 and paren == 0 and not re.match(r"\s*else\b", block[i + 1:]):
+                out.append(normalize_ws("".join(buf)))
+                buf = []
+        elif c == ";" and paren == 0 and brace == 0:
+            out.append(normalize_ws("".join(buf)))
+            buf = []
+        i += 1
+    tail = normalize_ws("".join(buf))
+    if tail:
+        out.append(tail)
+    return [s for s in out if s]
 
 
 def concatenated_string_literal(code: str) -> str:
@@ -376,14 +433,9 @@ _INSERT_RE = re.compile(
     re.IGNORECASE | re.DOTALL)
 
 
-def parse_insert(stmt: str) -> Optional[SqlInsert]:
-    m = _INSERT_RE.match(stmt)
-    if not m:
-        return None
-    table = m.group(1)
-    columns = tuple(c.strip().strip("`") for c in m.group(2).split(","))
-    values = m.group(3)
-    rows: List[Dict[str, object]] = []
+def _value_tuples(values: str) -> List[List[object]]:
+    """Every top-level ``( ... )`` tuple of a VALUES list, split into typed values."""
+    rows: List[List[object]] = []
     i, n = 0, len(values)
     while i < n:
         if values[i] == "(":
@@ -408,15 +460,29 @@ def parse_insert(stmt: str) -> Optional[SqlInsert]:
                 elif ch == ")":
                     depth -= 1
                 j += 1
-            vals = _split_sql_values(values[i + 1:j - 1])
-            if len(vals) != len(columns):
-                raise ExtractionError(
-                    f"{table}: row has {len(vals)} values for {len(columns)} columns: {values[i:i + 60]!r}")
-            rows.append(dict(zip(columns, vals)))
+            rows.append(_split_sql_values(values[i + 1:j - 1]))
             i = j
         else:
             i += 1
+    return rows
+
+
+def parse_insert(stmt: str) -> Optional[SqlInsert]:
+    m = _INSERT_RE.match(stmt)
+    if not m:
+        return None
+    table = m.group(1)
+    columns = tuple(c.strip().strip("`") for c in m.group(2).split(","))
+    rows: List[Dict[str, object]] = []
+    for vals in _value_tuples(m.group(3)):
+        if len(vals) != len(columns):
+            raise ExtractionError(f"{table}: row has {len(vals)} values for {len(columns)} columns: {vals[:4]!r}")
+        rows.append(dict(zip(columns, vals)))
     return SqlInsert(table=table, columns=columns, rows=tuple(rows))
+
+
+_POSITIONAL_INSERT_RE = re.compile(
+    r"^\s*(?:INSERT|REPLACE)\s+(?:IGNORE\s+)?INTO\s+`?(\w+)`?\s*VALUES\s*(.*)$", re.IGNORECASE | re.DOTALL)
 
 
 def _ids_in_where(where: str) -> Iterable[int]:
@@ -446,6 +512,16 @@ def _statements_touching_ids_cached(sql_text: str, tables: Tuple[str, ...], want
             if ins.table in tables and any(r.get("ID") in wanted for r in ins.rows):
                 hits.append(f"{ins.table}: INSERT/REPLACE")
             continue
+        if re.match(r"\s*(?:INSERT|REPLACE)\b", stmt, re.IGNORECASE):
+            # Fail closed: an insert on a marker table we cannot read is a finding, never a skip.
+            pos = _POSITIONAL_INSERT_RE.match(stmt)
+            if pos and pos.group(1) in tables:
+                # Column-less VALUES: ID is column 0 of both quest_template and quest_template_addon.
+                if any(row and row[0] in wanted for row in _value_tuples(pos.group(2))):
+                    hits.append(f"{pos.group(1)}: column-less INSERT/REPLACE")
+                continue
+            hits.append(f"UNPARSEABLE insert on a marker table (fail closed): {normalize_ws(stmt)[:80]}")
+            continue
         m = re.match(r"^\s*(UPDATE|DELETE\s+FROM)\s+`?(" + table_alt + r")`?\b(.*)$",
                      stmt, re.IGNORECASE | re.DOTALL)
         if not m:
@@ -468,6 +544,8 @@ class Sources:
     ip: Dict[str, str]
     ip_sql_tree: Dict[str, str]  # every *.sql under data/sql and optional/sql
     roots: Dict[str, Path] = field(default_factory=dict)
+    pb_src_tree: Dict[str, str] = field(default_factory=dict)  # every *.cpp/*.h under PB src/
+    ip_src_tree: Dict[str, str] = field(default_factory=dict)  # every *.cpp/*.h under IP src/
 
     def with_edit(self, group: str, key: str, transform: Callable[[str], str]) -> "Sources":
         """Return a copy with one file transformed (used by negative fixtures)."""
@@ -504,13 +582,34 @@ def load_sources(roots: Optional[Dict[str, Path]] = None) -> Sources:
         if base.is_dir():
             for p in sorted(base.rglob("*.sql")):
                 sql_tree[p.relative_to(roots["ip"]).as_posix()] = p.read_text(encoding="utf-8", errors="replace")
+    def tree(root: Path, sub: str, patterns: Tuple[str, ...]) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        base = root / sub
+        if base.is_dir():
+            for pat in patterns:
+                for p in sorted(base.rglob(pat)):
+                    out[p.relative_to(root).as_posix()] = p.read_text(encoding="utf-8", errors="replace")
+        return out
+
     return Sources(
+        pb_src_tree=tree(roots["pb"], "src", ("*.cpp", "*.h")),
+        ip_src_tree=tree(roots["ip"], "src", ("*.cpp", "*.h")),
         pb={k: read(roots["pb"], v) for k, v in PB_FILES.items()},
         core={k: read(roots["core"], v) for k, v in CORE_FILES.items()},
         ip={k: read(roots["ip"], v) for k, v in IP_FILES.items()},
         ip_sql_tree=sql_tree,
         roots=dict(roots),
     )
+
+
+def git_is_clean(root: Path) -> bool:
+    """True when ``git status --porcelain`` (incl. untracked) is empty for the checkout."""
+    try:
+        out = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
+                             capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return out.stdout.strip() == ""
 
 
 def git_head(root: Path) -> Optional[str]:
@@ -764,16 +863,28 @@ def _require(cond: bool, msg: str) -> None:
         raise ContractViolation(msg)
 
 
+RESET_LOOP_EXPECTED_STATEMENTS = (
+    "Quest const* quest = i->second;",
+    "uint32 entry = quest->GetQuestId();",
+    "if (bot->GetQuestStatus(entry) == QUEST_STATUS_NONE) continue;",
+    "bot->RemoveRewardedQuest(entry);",
+    "bot->RemoveActiveQuest(entry, false);",
+)
+MSG_REMOVE_NOT_UNCONDITIONAL = ("ResetQuests: 'bot->RemoveRewardedQuest(entry);' is no longer an unconditional "
+                                "top-level statement of the quest-template loop (guarded, wrapped or moved)")
+
+
 def check_pb_reset_quests_removes_every_non_none_quest(src: Sources) -> None:
     fn = find_function(src.pb["factory"], "PlayerbotFactory::ResetQuests", "PlayerbotFactory.cpp")
     flat = fn.flat
     _require("sObjectMgr->GetQuestTemplates()" in flat, "ResetQuests no longer iterates every loaded quest template")
-    _require(re.search(r"if \(bot->GetQuestStatus\(entry\) == QUEST_STATUS_NONE\) continue;", flat) is not None,
-             "ResetQuests skip condition is no longer exactly 'GetQuestStatus(entry) == QUEST_STATUS_NONE'")
-    _require("bot->RemoveRewardedQuest(entry);" in flat, "ResetQuests no longer calls RemoveRewardedQuest(entry)")
-    _require("bot->RemoveActiveQuest(entry, false);" in flat, "ResetQuests no longer calls RemoveActiveQuest(entry, false)")
-    continues = re.findall(r"\bcontinue;", flat)
-    _require(len(continues) == 1, f"ResetQuests has {len(continues)} 'continue' paths; a new skip filter was added")
+    _, loop = find_statement(fn, r"\bfor\s*\(\s*ObjectMgr::QuestMap::const_iterator\b")
+    _require("questTemplates.begin()" in loop and "questTemplates.end()" in loop,
+             "ResetQuests template loop no longer spans questTemplates.begin()..end()")
+    stmts = top_level_statements(braced_inner(loop))
+    _require("bot->RemoveRewardedQuest(entry);" in stmts, MSG_REMOVE_NOT_UNCONDITIONAL)
+    _require(tuple(stmts) == RESET_LOOP_EXPECTED_STATEMENTS,
+             "ResetQuests quest-template loop body changed (new filter or statement?): " + " | ".join(stmts))
     big_literals = [int(x) for x in re.findall(r"\b\d{4,}\b", flat)]
     _require(not big_literals, f"ResetQuests now contains ID-like literals {big_literals} (marker exemption?)")
 
@@ -837,6 +948,145 @@ def check_pb_config_exposure_defaults(src: Sources) -> None:
              f"PlayerbotAIConfig code defaults changed: {facts.code_default}")
     _require(facts.max_level_clamped_to_world_cap,
              "RandomBotMaxLevel is no longer clamped to CONFIG_MAX_PLAYER_LEVEL")
+
+
+def call_site_inventory(src_text: str, class_name: str, callee: str) -> List[str]:
+    """Enclosing ``class_name::<fn>`` of every call to ``callee`` (``<outside>`` if none)."""
+    masked = mask_comments(src_text)
+    spans: List[Tuple[int, int, str]] = []
+    for name in sorted(set(re.findall(r"(?m)^[^\n;{}]*?\b" + re.escape(class_name) + r"::(\w+)\s*\(", masked))):
+        try:
+            fn = find_function(src_text, f"{class_name}::{name}")
+        except ExtractionError:
+            continue  # a call such as Class::instance(), not a definition
+        start = src_text.index(fn.text)
+        spans.append((start, start + len(fn.text), name))
+    sites: List[str] = []
+    for m in re.finditer(r"(?<![\w:])" + re.escape(callee) + r"\s*\(", masked):
+        enclosing = [n for a, b, n in spans if a <= m.start() < b]
+        sites.append(enclosing[0] if enclosing else "<outside>")
+    return sorted(sites)
+
+
+INITSELF_EXPECTED_QUALITIES = ("ITEM_QUALITY_EPIC", "ITEM_QUALITY_UNCOMMON", "ITEM_QUALITY_RARE",
+                               "ITEM_QUALITY_EPIC", "ITEM_QUALITY_LEGENDARY", "ITEM_QUALITY_LEGENDARY, gs")
+
+
+def check_pb_gm_initself_full_reset_routes(src: Sources) -> None:
+    """GM 'initself' variants fully randomise the CALLING player's own character.
+
+    Historical SOURCE risk for a real GM character's saved IP stage; not runtime evidence.
+    """
+    fn = find_function(src.pb["playerbot_mgr"], "PlayerbotHolder::HandlePlayerbotCommand", "PlayerbotMgr.cpp")
+    flat = fn.flat
+    for token in ('if (!strcmp(cmd, "initself"))', 'if (!strncmp(cmd, "initself=", 9))',
+                  'if (!strcmp(cmd, "initself=uncommon"))', 'if (!strcmp(cmd, "initself=rare"))',
+                  'if (!strcmp(cmd, "initself=epic"))', 'if (!strcmp(cmd, "initself=legendary"))',
+                  'if (sscanf(cmd, "initself=%d", &gs) != -1)'):
+        _require(token in flat, f"HandlePlayerbotCommand no longer dispatches: {token}")
+    routes = re.findall(
+        r"if \(master->CanBeGameMaster\(\)\) \{ PlayerbotFactory factory\(master, master->GetLevel\(\), "
+        r"(ITEM_QUALITY_\w+(?:, gs)?)\); factory\.Randomize\(false\);", flat)
+    _require(tuple(routes) == INITSELF_EXPECTED_QUALITIES,
+             f"GM initself full-reset routes changed: {routes} (expected {list(INITSELF_EXPECTED_QUALITIES)}, "
+             "each gated only by master->CanBeGameMaster())")
+    _require(len(re.findall(r"PlayerbotFactory factory\(master\b", flat)) == len(INITSELF_EXPECTED_QUALITIES),
+             "HandlePlayerbotCommand builds a PlayerbotFactory on 'master' outside the inventoried initself routes")
+
+
+LEVEL_MGR_FULL_RESET_FUNCTIONS = ("AdjustBotToRange", "ResetBot", "SkipBotLevel")
+LEVEL_MGR_EXPECTED_CALLERS = {
+    "AdjustBotToRange": ["ProcessPendingLevelResets"],
+    "ResetBot": ["OnBotLevelChanged", "OnBotLevelChanged", "OnBotLogin", "OnBotLogin", "RunResetPlayedTimeCheck"],
+    "SkipBotLevel": ["OnBotLevelChanged", "OnBotLogin"],
+    "ProcessPendingLevelResets": ["Update"],
+    "RunLevelBracketsDistribution": ["Update"],
+    "RunResetPlayedTimeCheck": ["Update"],
+    "OnBotLogin": ["<outside>"],
+    "OnBotLevelChanged": ["<outside>"],
+}
+
+
+def check_pb_level_mgr_full_reset_routes_default_off(src: Sources) -> None:
+    """RandomBotLevelMgr brackets / level-reset features fully randomise bots, but are default OFF."""
+    text = src.pb["level_mgr"]
+    for name in LEVEL_MGR_FULL_RESET_FUNCTIONS:
+        fn = find_function(text, f"RandomBotLevelMgr::{name}", "RandomBotLevelMgr.cpp")
+        _require("newFactory.Randomize(false);" in fn.flat, f"RandomBotLevelMgr::{name} no longer does Randomize(false)")
+    for callee, expected in LEVEL_MGR_EXPECTED_CALLERS.items():
+        got = call_site_inventory(text, "RandomBotLevelMgr", callee)
+        _require(got == sorted(expected), f"RandomBotLevelMgr call sites of {callee} changed: {got} (expected {sorted(expected)})")
+    upd = find_function(text, "RandomBotLevelMgr::Update", "RandomBotLevelMgr.cpp")
+    brackets = [b for _, b in find_statements(upd, r"\bif\s*\(\s*sPlayerbotAIConfig\.LevelBracketsEnabled\s*\)")]
+    _require(len(brackets) == 1 and "ProcessPendingLevelResets()" in brackets[0]
+             and "RunLevelBracketsDistribution()" in brackets[0],
+             "Update no longer gates bracket redistribution on LevelBracketsEnabled")
+    played = [b for _, b in find_statements(upd, r"\bif\s*\(\s*sPlayerbotAIConfig\.ResetBotLevelEnabled\s*&&")]
+    _require(len(played) == 1 and "RunResetPlayedTimeCheck()" in played[0],
+             "Update no longer gates the played-time reset on ResetBotLevelEnabled")
+    flat_file = normalize_ws(mask_comments(text))
+    for hook, call in (("void OnPlayerLogin(Player* player) override", "OnBotLogin(player);"),
+                       ("void OnPlayerLevelChanged(Player* player, uint8 oldLevel) override",
+                        "OnBotLevelChanged(player, oldLevel);")):
+        _require(f"{hook} {{ if (!sPlayerbotAIConfig.ResetBotLevelEnabled) return; RandomBotLevelMgr::instance().{call} }}"
+                 in flat_file, f"PlayerScript hook no longer gated on ResetBotLevelEnabled: {hook}")
+    cfg = mask_comments(src.pb["config"])
+    for member, key in (("LevelBracketsEnabled", "Playerbots.LevelBrackets.Enabled"),
+                        ("ResetBotLevelEnabled", "Playerbots.ResetBotLevel.Enabled")):
+        _require(re.search(member + r"\s*=\s*sConfigMgr->GetOption<bool>\(\s*\"" + re.escape(key) + r"\"\s*,\s*false\s*\)",
+                           cfg) is not None, f"{key} code default is no longer false")
+        hits = re.findall(r"(?m)^\s*" + re.escape(key) + r"\s*=\s*(\S+)", src.pb["conf_dist"])
+        _require(hits == ["0"], f"playerbots.conf.dist {key} is {hits} (expected ['0'])")
+
+
+CONFIG_EXPOSURE_KEYS = ("RandomBotMaxLevel", "DowngradeMaxLevelBot")
+MIN_PB_SRC_FILES = 500  # the scan below is only meaningful on a full src/ checkout
+
+
+def check_pb_no_legacy_config_namespace(src: Sources) -> None:
+    """At the primary pin no source reads an ``AiPlayerbot.*`` option: old keys are silently ignored."""
+    _require(len(src.pb_src_tree) >= MIN_PB_SRC_FILES,
+             f"PB src/ scan saw only {len(src.pb_src_tree)} files; check out the whole src/ tree")
+    legacy = []
+    for rel, text in src.pb_src_tree.items():
+        if "AiPlayerbot." in text and re.search(r'"AiPlayerbot\.', mask_comments(text)):
+            legacy.append(rel)
+    _require(not legacy, f"PB source reads legacy AiPlayerbot.* option keys in {legacy}; re-derive exposure")
+    cfg = mask_comments(src.pb["config"])
+    for key in CONFIG_EXPOSURE_KEYS:
+        _require(len(re.findall(r'"Playerbots\.' + key + r'"', cfg)) == 1,
+                 f"Playerbots.{key} is not read exactly once in PlayerbotAIConfig.cpp")
+
+
+def legacy_config_facts(config_cpp: str, conf_dist: str) -> Dict[str, Tuple[str, str, str]]:
+    """{key: (namespace, code default, conf.dist value)} for the exposure keys of any PB revision."""
+    cfg = mask_comments(config_cpp)
+    out: Dict[str, Tuple[str, str, str]] = {}
+    for key in CONFIG_EXPOSURE_KEYS:
+        hits = re.findall(r'GetOption<\w+>\(\s*"(\w+)\.' + key + r'"\s*,\s*([^)]+)\)', cfg)
+        if len(hits) != 1:
+            raise ContractViolation(f"expected one load of *.{key}, found {hits}")
+        ns, default = hits[0]
+        dist = re.findall(r"(?m)^\s*" + re.escape(ns) + r"\." + key + r"\s*=\s*(\S+)", conf_dist)
+        if len(dist) != 1:
+            raise ContractViolation(f"conf.dist: expected one active {ns}.{key}, found {dist}")
+        out[key] = (ns, default.strip(), dist[0])
+    return out
+
+
+def check_ip_level_caps_are_xp_gates_not_world_cap(src: Sources) -> None:
+    """IP's Vanilla/bot caps stop XP; they do not set worldserver MaxPlayerLevel (the PB clamp input)."""
+    users = [rel for rel, text in src.ip_src_tree.items()
+             if "CONFIG_MAX_PLAYER_LEVEL" in mask_comments(text)]
+    _require(not users, f"IP source now references CONFIG_MAX_PLAYER_LEVEL in {users}; re-derive the cap premise")
+    _require(re.search(r'BotAccountsMaxLevel = sConfigMgr->GetOption<uint8>\("IndividualProgression\.BotAccountsMaxLevel", 80\);',
+                       normalize_ws(mask_comments(src.ip["ip_cpp"]))) is not None,
+             "IndividualProgression.BotAccountsMaxLevel load/default (80) changed")
+    give = find_function(src.ip["ip_player"], "OnPlayerGiveXP", "IndividualProgressionPlayer.cpp").flat
+    _require("if (player->GetLevel() >= sIndividualProgression->BotAccountsMaxLevel)" in give and "amount = 0;" in give,
+             "OnPlayerGiveXP no longer caps bot XP at BotAccountsMaxLevel")
+    _require("if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_PRE_TBC) && player->GetLevel() >= 60)"
+             in give, "OnPlayerGiveXP no longer stops pre-TBC (stage < 8) human XP at level 60")
 
 
 def check_core_get_quest_status_rewarded_semantics(src: Sources) -> None:
@@ -994,6 +1244,9 @@ ALL_CHECKS: Tuple[Callable[[Sources], None], ...] = (
     check_pb_full_reset_entry_points,
     check_pb_trigger_matrix,
     check_pb_config_exposure_defaults,
+    check_pb_gm_initself_full_reset_routes,
+    check_pb_level_mgr_full_reset_routes_default_off,
+    check_pb_no_legacy_config_namespace,
     check_core_get_quest_status_rewarded_semantics,
     check_core_reward_and_remove_bookkeeping,
     check_core_save_persists_rewarded_delete,
@@ -1002,6 +1255,7 @@ ALL_CHECKS: Tuple[Callable[[Sources], None], ...] = (
     check_ip_sql_markers_are_rewarded_status_quests,
     check_ip_reads_exactly_the_sql_markers,
     check_no_other_ip_sql_redefines_markers,
+    check_ip_level_caps_are_xp_gates_not_world_cap,
     check_chain_verdict_markers_deleted_by_full_reset,
 )
 
@@ -1023,7 +1277,8 @@ def run_all(src: Sources) -> Dict[str, Optional[str]]:
 # --------------------------------------------------------------------------
 
 RESET_SKIP_IP_MARKERS_MUTATION = "reset_skip_ip_markers"
-COMPILED_MUTATIONS = (RESET_SKIP_IP_MARKERS_MUTATION,)
+RESET_SKIP_TRACKING_FLAG_MUTATION = "reset_skip_tracking_flag"
+COMPILED_MUTATIONS = (RESET_SKIP_IP_MARKERS_MUTATION, RESET_SKIP_TRACKING_FLAG_MUTATION)
 
 
 def _banner(origin: str, sha: str, path: str, line: int) -> str:
@@ -1044,11 +1299,12 @@ def generate_harness_sources(src: Sources, out_dir: Path, mutations: Sequence[st
         f"// Core {cs}\n" + find_define(core["quest_def_h"], "MAX_QUEST_LOG_SIZE") + "\n",
         find_enum(core["quest_def_h"], "QuestStatus", "QuestDef.h") + "\n",
         find_enum(core["quest_def_h"], "QuestSpecialFlags", "QuestDef.h") + "\n",
+        find_enum(core["quest_def_h"], "QuestFlags", "QuestDef.h") + "\n",
         find_enum(core["shared_defines"], "QuestSort", "SharedDefines.h") + "\n",
         "// IP fork under test\n" + find_enum(ip["ip_h"], "ProgressionState", "IndividualProgression.h") + "\n",
     ]
     quest_methods = []
-    for name in ("GetQuestId", "IsRepeatable", "IsSeasonal"):
+    for name in ("GetQuestId", "HasFlag", "IsRepeatable", "IsSeasonal"):
         fn = find_function(core["quest_def_h"], name, "QuestDef.h")
         quest_methods.append(_banner("Core", cs, CORE_FILES["quest_def_h"], fn.line) + fn.text.strip() + "\n")
     player_inline = []
@@ -1077,6 +1333,12 @@ def generate_harness_sources(src: Sources, out_dir: Path, mutations: Sequence[st
             raise ExtractionError("mutation anchor missing in ResetQuests")
         reset_text = reset_text.replace(
             anchor, anchor + "\n        if (entry >= 66001 && entry <= 66018) continue; // NEGATIVE FIXTURE ONLY")
+    if RESET_SKIP_TRACKING_FLAG_MUTATION in mutations:
+        anchor = "bot->RemoveRewardedQuest(entry);"
+        if reset_text.count(anchor) != 1:
+            raise ExtractionError("mutation anchor missing in ResetQuests")
+        reset_text = reset_text.replace(
+            anchor, "if (!quest->HasFlag(QUEST_FLAGS_TRACKING)) // NEGATIVE FIXTURE ONLY\n            " + anchor)
     bodies.append(_banner("mod-playerbots", ps, PB_FILES["factory"], reset.line) + reset_text + "\n")
     ipfn = find_function(ip["ip_cpp"], "IndividualProgression::GetPlayerProgressionFromQuests", "IndividualProgression.cpp")
     bodies.append(_banner("IP", "under-test", IP_FILES["ip_cpp"], ipfn.line) + ipfn.text + "\n")
