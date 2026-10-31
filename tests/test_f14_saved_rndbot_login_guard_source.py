@@ -28,6 +28,20 @@ class SourceGuards(unittest.TestCase):
         self.assertIn('GetOption<bool>("' + key + '", false)', CORE)
         self.assertIn("f14PreserveVerifiedRandomBotStageOnLogin", HEADER)
 
+    def test_missing_playerbots_api_forces_f14_flag_off_with_error(self):
+        self.assertIn('#if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")', CORE)
+        self.assertIn('if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin)', CORE)
+        self.assertIn('LOG_ERROR("module", "IndividualProgression F14 saved-RandomBot login safeguard requested,', CORE)
+        self.assertIn('sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = false;', CORE)
+
+    def test_native_compile_does_not_silently_omit_playerbots(self):
+        workflow = (ROOT / ".github/workflows/ip-f14-saved-rndbot-login-guard-20261031.yml").read_text()
+        self.assertIn('defined(COSMIC_IP_F14_REQUIRE_PLAYERBOTS) && !COSMIC_IP_F14_PLAYERBOTS_AVAILABLE', LOGIN)
+        self.assertIn('#error "F14 login guard: required Playerbots RandomPlayerbotMgr API was not found"', LOGIN)
+        self.assertIn('-DCMAKE_CXX_FLAGS="-DCOSMIC_IP_F14_REQUIRE_PLAYERBOTS"', workflow)
+        self.assertIn("assert '-DCOSMIC_IP_F14_REQUIRE_PLAYERBOTS' in command", workflow)
+        self.assertIn('test "$(git -C "$ip" rev-parse HEAD)"', workflow)
+
     def test_original_level_based_forced_stage_remains_beneath_guard(self):
         self.assertIn("if (!preserveVerifiedRandomBotStage)", LOGIN)
         block = LOGIN.split("if (!preserveVerifiedRandomBotStage)", 1)[1]
