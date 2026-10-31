@@ -485,51 +485,367 @@ _POSITIONAL_INSERT_RE = re.compile(
     r"^\s*(?:INSERT|REPLACE)\s+(?:IGNORE\s+)?INTO\s+`?(\w+)`?\s*VALUES\s*(.*)$", re.IGNORECASE | re.DOTALL)
 
 
-def _ids_in_where(where: str) -> Iterable[int]:
-    for a, b in re.findall(r"BETWEEN\s+(\d+)\s+AND\s+(\d+)", where, re.IGNORECASE):
-        yield from range(int(a), int(b) + 1)
-    for num in re.findall(r"\b\d+\b", where):
-        yield int(num)
+# --- Marker-table SQL static gate --------------------------------------------
+# A narrow, documented STATIC gate, explicitly NOT a SQL engine and NOT a game test.
+# It reports any statement in other IP SQL files that could change a column the
+# marker chain depends on, for a stage-marker row (66001..66018), or that it cannot
+# decide (fail closed). PvP markers 66101..66114 are deliberately NOT stage markers.
+
+CHAIN_COLUMNS = {
+    "quest_template": frozenset({"id", "flags", "questsortid"}),
+    "quest_template_addon": frozenset({"id", "specialflags"}),
+}
+MARKER_TABLES = tuple(CHAIN_COLUMNS)
+_DDL_VERBS = ("TRUNCATE", "DROP", "ALTER", "RENAME")
+
+_SQL_TOKEN_RE = re.compile(r"""\s*(?:
+    (?P<str>'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*")
+  | (?P<num>\d+(?:\.\d+)?)
+  | (?P<ident>(?:`[^`]+`|[A-Za-z_@][\w$@]*)(?:\s*\.\s*(?:`[^`]+`|[A-Za-z_][\w$]*))*)
+  | (?P<op><=|>=|<>|!=|:=|\|\||&&|[=<>(),;*+\-/&|^~%])
+)""", re.VERBOSE)
 
 
-def statements_touching_ids(sql_text: str, tables: Sequence[str], ids: Iterable[int]) -> List[str]:
-    """Statements on ``tables`` that insert/update/delete any of ``ids``."""
-    return list(_statements_touching_ids_cached(sql_text, tuple(tables), frozenset(ids)))
+class _Undecidable(Exception):
+    """The static gate cannot decide this predicate (caller fails closed)."""
 
 
-@functools.lru_cache(maxsize=1024)
-def _statements_touching_ids_cached(sql_text: str, tables: Tuple[str, ...], wanted: frozenset) -> Tuple[str, ...]:
-    hits: List[str] = []
-    table_alt = "|".join(re.escape(t) for t in tables)
-    # Cheap prefilter: files that never name the tables cannot touch them.
-    if not re.search(r"\b(?:" + table_alt + r")\b", sql_text, re.IGNORECASE):
-        return ()
-    for stmt in iter_sql_statements(sql_text):
-        if not re.match(r"\s*(?:INSERT|REPLACE|UPDATE|DELETE)\b[^(]*?\b(?:" + table_alt + r")\b", stmt, re.IGNORECASE):
-            continue
+def sql_tokens(stmt: str) -> Optional[List[Tuple[str, str]]]:
+    """Quote-aware tokens [(kind, text)]; None if the text cannot be tokenised."""
+    out: List[Tuple[str, str]] = []
+    pos, n = 0, len(stmt)
+    while pos < n:
+        if stmt[pos:].strip() == "":
+            break
+        m = _SQL_TOKEN_RE.match(stmt, pos)
+        if not m or m.end() == pos:
+            return None
+        kind = m.lastgroup
+        out.append((kind, m.group(kind)))
+        pos = m.end()
+    return out
+
+
+def _ident_name(text: str) -> str:
+    """`db`.`tbl` / q.`ID` / Id -> last part, lower case, unquoted."""
+    return re.split(r"\s*\.\s*", text)[-1].strip("`").lower()
+
+
+def _is_kw(tok: Tuple[str, str], *words: str) -> bool:
+    return tok[0] == "ident" and tok[1].upper() in words
+
+
+def _top_level_index(tokens: Sequence[Tuple[str, str]], *words: str, start: int = 0) -> int:
+    depth = 0
+    for i in range(start, len(tokens)):
+        kind, text = tokens[i]
+        if text == "(":
+            depth += 1
+        elif text == ")":
+            depth -= 1
+        elif depth == 0 and _is_kw(tokens[i], *words):
+            return i
+    return -1
+
+
+def _split_top_level(tokens: Sequence[Tuple[str, str]], sep: str) -> List[List[Tuple[str, str]]]:
+    parts: List[List[Tuple[str, str]]] = [[]]
+    depth = 0
+    for tok in tokens:
+        if tok[1] == "(":
+            depth += 1
+        elif tok[1] == ")":
+            depth -= 1
+        if depth == 0 and tok[1] == sep:
+            parts.append([])
+        else:
+            parts[-1].append(tok)
+    return parts
+
+
+class _WhereParser:
+    """Recursive descent over a deliberately tiny predicate grammar (see module docs)."""
+
+    def __init__(self, tokens: Sequence[Tuple[str, str]]):
+        self.t = [tok for tok in tokens if tok[1] != ";"]
+        self.i = 0
+
+    def peek(self, k: int = 0) -> Optional[Tuple[str, str]]:
+        return self.t[self.i + k] if self.i + k < len(self.t) else None
+
+    def take(self) -> Tuple[str, str]:
+        tok = self.peek()
+        if tok is None:
+            raise _Undecidable("unexpected end of WHERE")
+        self.i += 1
+        return tok
+
+    def parse(self):
+        node = self.expr()
+        if self.peek() is not None:
+            raise _Undecidable(f"unsupported WHERE syntax near {self.peek()[1]!r}")
+        return node
+
+    def expr(self):
+        nodes = [self.term()]
+        while self.peek() and (_is_kw(self.peek(), "OR") or self.peek()[1] == "||"):
+            self.take()
+            nodes.append(self.term())
+        return ("or", nodes) if len(nodes) > 1 else nodes[0]
+
+    def term(self):
+        nodes = [self.factor()]
+        while self.peek() and (_is_kw(self.peek(), "AND") or self.peek()[1] == "&&"):
+            self.take()
+            nodes.append(self.factor())
+        return ("and", nodes) if len(nodes) > 1 else nodes[0]
+
+    def factor(self):
+        tok = self.peek()
+        if tok and _is_kw(tok, "NOT"):
+            self.take()
+            return ("not", self.factor())
+        if tok and tok[1] == "(":
+            self.take()
+            node = self.expr()
+            if self.take()[1] != ")":
+                raise _Undecidable("unbalanced parenthesis")
+            return node
+        return self.predicate()
+
+    def operand(self):
+        kind, text = self.take()
+        if kind == "num":
+            return ("lit", int(text) if text.isdigit() else float(text))
+        if kind == "op" and text == "-" and self.peek() and self.peek()[0] == "num":
+            num = self.take()[1]
+            return ("lit", -(int(num) if num.isdigit() else float(num)))
+        if kind == "str":
+            return ("lit", text[1:-1].replace(text[0] * 2, text[0]))
+        if kind == "ident" and text.upper() not in ("SELECT", "NULL", "AND", "OR", "NOT", "IN", "BETWEEN", "IS"):
+            return ("col", _ident_name(text))
+        raise _Undecidable(f"unsupported operand {text!r}")
+
+    def predicate(self):
+        left = self.operand()
+        tok = self.peek()
+        if tok is None:
+            raise _Undecidable("bare operand is not a predicate")
+        negate = False
+        if _is_kw(tok, "NOT"):
+            negate = True
+            self.take()
+            tok = self.peek()
+        if tok and tok[0] == "op" and tok[1] in ("=", "!=", "<>", "<", ">", "<=", ">=") and not negate:
+            op = self.take()[1]
+            return ("cmp", op, left, self.operand())
+        if tok and _is_kw(tok, "IN"):
+            self.take()
+            if self.take()[1] != "(":
+                raise _Undecidable("IN without a literal list")
+            vals = [self.operand()]
+            while self.peek() and self.peek()[1] == ",":
+                self.take()
+                vals.append(self.operand())
+            if self.take()[1] != ")" or any(v[0] != "lit" for v in vals):
+                raise _Undecidable("IN list is not literals only (subquery?)")
+            node = ("in", left, [v[1] for v in vals])
+            return ("not", node) if negate else node
+        if tok and _is_kw(tok, "BETWEEN"):
+            self.take()
+            lo = self.operand()
+            if not _is_kw(self.take(), "AND"):
+                raise _Undecidable("BETWEEN without AND")
+            node = ("between", left, lo, self.operand())
+            return ("not", node) if negate else node
+        if tok and _is_kw(tok, "IS") and not negate:
+            self.take()
+            neg = False
+            if self.peek() and _is_kw(self.peek(), "NOT"):
+                self.take()
+                neg = True
+            if not _is_kw(self.take(), "NULL"):
+                raise _Undecidable("IS without NULL")
+            node = ("isnull", left)
+            return ("not", node) if neg else node
+        raise _Undecidable(f"unsupported predicate operator {tok[1]!r}")
+
+
+def _value(node, row: Dict[str, object]):
+    if node[0] == "lit":
+        return node[1]
+    return row.get(node[1], _UNKNOWN)
+
+
+_UNKNOWN = object()
+
+
+def _cmp(op: str, a, b) -> Optional[bool]:
+    if a is _UNKNOWN or b is _UNKNOWN or a is None or b is None:
+        return None
+    if isinstance(a, str) and isinstance(b, str):
+        a, b = a.casefold(), b.casefold()
+    elif isinstance(a, str) or isinstance(b, str):
+        return None  # mixed string/number comparison: MySQL coercion is not modelled
+    return {"=": a == b, "!=": a != b, "<>": a != b, "<": a < b, ">": a > b, "<=": a <= b, ">=": a >= b}[op]
+
+
+def eval_where(node, row: Dict[str, object]) -> Optional[bool]:
+    """Kleene three-valued evaluation of a parsed WHERE against one row (None = unknown)."""
+    kind = node[0]
+    if kind in ("and", "or"):
+        vals = [eval_where(n, row) for n in node[1]]
+        if kind == "and":
+            return False if False in vals else (None if None in vals else True)
+        return True if True in vals else (None if None in vals else False)
+    if kind == "not":
+        v = eval_where(node[1], row)
+        return None if v is None else not v
+    if kind == "cmp":
+        return _cmp(node[1], _value(node[2], row), _value(node[3], row))
+    if kind == "in":
+        vals = [_cmp("=", _value(node[1], row), v) for v in node[2]]
+        return True if True in vals else (None if None in vals else False)
+    if kind == "between":
+        lo, hi = _cmp(">=", _value(node[1], row), _value(node[2], row)), _cmp("<=", _value(node[1], row), _value(node[3], row))
+        return eval_where(("and", [("const", lo), ("const", hi)]), row)
+    if kind == "const":
+        return node[1]
+    if kind == "isnull":
+        v = _value(node[1], row)
+        return None if v is _UNKNOWN else v is None
+    raise _Undecidable(kind)
+
+
+def _where_findings(where_tokens, rows: Sequence[Dict[str, object]], what: str) -> List[str]:
+    try:
+        tree = _WhereParser(where_tokens).parse()
+        results = [(row.get("id"), eval_where(tree, row)) for row in rows]
+    except _Undecidable as exc:
+        return [f"{what}: WHERE not statically decidable ({exc}) (fail closed)"]
+    hit = sorted(i for i, r in results if r is True)
+    unknown = sorted(i for i, r in results if r is None)
+    out = []
+    if hit:
+        out.append(f"{what}: WHERE matches stage-marker row(s) {hit[0]}..{hit[-1]} ({len(hit)})")
+    if unknown:
+        out.append(f"{what}: WHERE undecidable for stage-marker row(s) {unknown[0]}..{unknown[-1]} (fail closed)")
+    return out
+
+
+def _skip_modifiers(tokens, i: int, *mods: str) -> int:
+    while i < len(tokens) and _is_kw(tokens[i], *mods):
+        i += 1
+    return i
+
+
+def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str, object], ...]]) -> List[str]:
+    toks = sql_tokens(stmt)
+    if toks is None:
+        return [f"UNPARSEABLE statement naming a marker table (fail closed): {normalize_ws(stmt)[:80]}"]
+    names = {_ident_name(t[1]) for t in toks if t[0] == "ident"}
+    if not names.intersection(MARKER_TABLES):
+        return []
+    verb = toks[0][1].upper() if toks and toks[0][0] == "ident" else ""
+    short = normalize_ws(stmt)[:80]
+
+    if verb in _DDL_VERBS:
+        return [f"{verb} on a marker table (fail closed): {short}"]
+
+    if verb in ("INSERT", "REPLACE"):
+        i = _skip_modifiers(toks, 1, "LOW_PRIORITY", "DELAYED", "HIGH_PRIORITY", "IGNORE", "INTO")
+        if i >= len(toks) or _ident_name(toks[i][1]) not in MARKER_TABLES:
+            return []  # target is another table (a marker table only appears in a sub-select)
+        table = _ident_name(toks[i][1])
         ins = parse_insert(stmt)
         if ins is not None:
-            if ins.table in tables and any(r.get("ID") in wanted for r in ins.rows):
-                hits.append(f"{ins.table}: INSERT/REPLACE")
-            continue
-        if re.match(r"\s*(?:INSERT|REPLACE)\b", stmt, re.IGNORECASE):
-            # Fail closed: an insert on a marker table we cannot read is a finding, never a skip.
-            pos = _POSITIONAL_INSERT_RE.match(stmt)
-            if pos and pos.group(1) in tables:
-                # Column-less VALUES: ID is column 0 of both quest_template and quest_template_addon.
-                if any(row and row[0] in wanted for row in _value_tuples(pos.group(2))):
-                    hits.append(f"{pos.group(1)}: column-less INSERT/REPLACE")
-                continue
-            hits.append(f"UNPARSEABLE insert on a marker table (fail closed): {normalize_ws(stmt)[:80]}")
-            continue
-        m = re.match(r"^\s*(UPDATE|DELETE\s+FROM)\s+`?(" + table_alt + r")`?\b(.*)$",
-                     stmt, re.IGNORECASE | re.DOTALL)
-        if not m:
-            continue
-        where = re.split(r"\bWHERE\b", m.group(3), maxsplit=1, flags=re.IGNORECASE)
-        if len(where) == 2 and wanted.intersection(_ids_in_where(where[1])):
-            hits.append(f"{m.group(2)}: {m.group(1).split()[0].upper()} {normalize_ws(where[1])[:80]}")
+            id_cols = [c for c in ins.columns if c.lower() == "id"]
+            if len(id_cols) != 1:
+                return [f"{table}: INSERT/REPLACE without exactly one ID column (fail closed): {short}"]
+            ids = [r[id_cols[0]] for r in ins.rows]
+            if any(not isinstance(v, int) for v in ids):
+                return [f"{table}: INSERT/REPLACE with a non-literal ID (fail closed): {short}"]
+            stage = sorted(set(ids).intersection(EXPECTED_STAGE_MARKERS))
+            return [f"{table}: INSERT/REPLACE of stage-marker ID(s) {stage}"] if stage else []
+        pos = _POSITIONAL_INSERT_RE.match(stmt)
+        if pos:
+            ids = [row[0] if row else None for row in _value_tuples(pos.group(2))]
+            if not ids or any(not isinstance(v, int) for v in ids):
+                return [f"{table}: column-less INSERT/REPLACE with a non-literal ID (fail closed): {short}"]
+            stage = sorted(set(ids).intersection(EXPECTED_STAGE_MARKERS))
+            return [f"{table}: column-less INSERT/REPLACE of stage-marker ID(s) {stage}"] if stage else []
+        return [f"UNPARSEABLE insert on a marker table (fail closed): {short}"]
+
+    if verb == "UPDATE":
+        set_at = _top_level_index(toks, "SET")
+        if set_at < 0:
+            return [f"UNPARSEABLE UPDATE on a marker table (no SET) (fail closed): {short}"]
+        target = toks[_skip_modifiers(toks, 1, "LOW_PRIORITY", "IGNORE"):set_at]
+        target_tables = sorted({_ident_name(t[1]) for t in target if t[0] == "ident"}.intersection(MARKER_TABLES))
+        if not target_tables:
+            return []  # marker table only read in a sub-select
+        where_at = _top_level_index(toks, "WHERE", start=set_at)
+        tail_at = _top_level_index(toks, "ORDER", "LIMIT", start=set_at)
+        set_end = min(x for x in (where_at, tail_at, len(toks)) if x >= 0)
+        written = []
+        for assign in _split_top_level(toks[set_at + 1:set_end], ","):
+            assign = [t for t in assign if t[1] != ";"]
+            if len(assign) < 3 or assign[0][0] != "ident" or assign[1][1] != "=":
+                return [f"UNPARSEABLE SET list on a marker table (fail closed): {short}"]
+            written.append(_ident_name(assign[0][1]))
+        relevant = sorted({c for c in written if any(c in CHAIN_COLUMNS[t] for t in target_tables)})
+        if not relevant:
+            return []  # documented allowlist: writes no chain-relevant column
+        single = (len(target) in (1, 2) or (len(target) == 3 and _is_kw(target[1], "AS"))) and \
+            _ident_name(target[0][1]) in MARKER_TABLES
+        what = f"UPDATE {target_tables[0]} SET {relevant}"
+        if not single:
+            return [f"multi-table UPDATE writing chain column(s) {relevant} on {target_tables} (fail closed): {short}"]
+        if where_at < 0:
+            return [f"{what}: no WHERE, rewrites every row including stage markers"]
+        where_end = tail_at if tail_at > where_at else len(toks)
+        return _where_findings(toks[where_at + 1:where_end], rows_by_table[target_tables[0]], what)
+
+    if verb == "DELETE":
+        i = _skip_modifiers(toks, 1, "LOW_PRIORITY", "QUICK", "IGNORE")
+        if not (i + 1 < len(toks) and _is_kw(toks[i], "FROM") and _ident_name(toks[i + 1][1]) in MARKER_TABLES):
+            from_at = _top_level_index(toks, "FROM")
+            using = toks[from_at + 1:] if from_at >= 0 else toks
+            if {_ident_name(t[1]) for t in using[:3] if t[0] == "ident"}.intersection(MARKER_TABLES) or from_at < 0:
+                return [f"multi-table or unparseable DELETE on a marker table (fail closed): {short}"]
+            return []
+        table = _ident_name(toks[i + 1][1])
+        rest = [t for t in toks[i + 2:] if t[1] != ";"]
+        what = f"DELETE FROM {table}"
+        if not rest:
+            return [f"{what}: no WHERE, deletes every row including stage markers"]
+        if not _is_kw(rest[0], "WHERE"):
+            return [f"{what}: unsupported clause {rest[0][1]!r} (fail closed)"]
+        tail_at = _top_level_index(rest, "ORDER", "LIMIT")
+        return _where_findings(rest[1:tail_at if tail_at > 0 else len(rest)], rows_by_table[table], what)
+
+    return []  # SELECT / SET @var / other reads
+
+
+_MARKER_TABLE_TEXT_RE = re.compile(r"\b(?:quest_template|quest_template_addon)\b", re.IGNORECASE)
+
+
+@functools.lru_cache(maxsize=2048)
+def _marker_sql_findings_cached(sql_text: str, rows_key: Tuple) -> Tuple[str, ...]:
+    rows_by_table = {t: tuple(dict(r) for r in rows) for t, rows in rows_key}
+    if not _MARKER_TABLE_TEXT_RE.search(sql_text):
+        return ()
+    hits: List[str] = []
+    for stmt in iter_sql_statements(sql_text):
+        if _MARKER_TABLE_TEXT_RE.search(stmt):
+            hits.extend(_analyse_marker_statement(stmt, rows_by_table))
     return tuple(hits)
+
+
+def marker_sql_findings(sql_text: str, rows_by_table: Dict[str, Tuple[Dict[str, object], ...]]) -> List[str]:
+    """Static-gate findings for one SQL file against the stage-marker rows (see above)."""
+    key = tuple((t, tuple(tuple(sorted(r.items())) for r in rows)) for t, rows in sorted(rows_by_table.items()))
+    return list(_marker_sql_findings_cached(sql_text, key))
 
 
 # --------------------------------------------------------------------------
@@ -729,6 +1045,24 @@ def ip_marker_templates(src: Sources, ids: Iterable[int] = EXPECTED_STAGE_MARKER
     return out
 
 
+def ip_marker_rows(src: Sources) -> Dict[str, Tuple[Dict[str, object], ...]]:
+    """Stage-marker rows (66001..66018) of both marker tables from player_progression.sql,
+    keys lower-cased. Used by the SQL static gate to evaluate WHERE clauses."""
+    rows: Dict[str, List[Dict[str, object]]] = {t: [] for t in MARKER_TABLES}
+    for stmt in iter_sql_statements(src.ip["progression_sql"]):
+        ins = parse_insert(stmt)
+        if ins is None or ins.table.lower() not in rows:
+            continue
+        for r in ins.rows:
+            low = {k.lower(): v for k, v in r.items()}
+            if low.get("id") in EXPECTED_STAGE_MARKERS:
+                rows[ins.table.lower()].append(low)
+    for t, rs in rows.items():
+        if sorted(r["id"] for r in rs) != list(EXPECTED_STAGE_MARKERS):
+            raise ContractViolation(f"player_progression.sql: {t} stage-marker rows are incomplete")
+    return {t: tuple(rs) for t, rs in rows.items()}
+
+
 def ip_progression_quest_ids(src: Sources) -> Tuple[int, ...]:
     """Marker IDs IP reads, derived from GetPlayerProgressionFromQuests + enum."""
     fn = find_function(src.ip["ip_cpp"], "IndividualProgression::GetPlayerProgressionFromQuests", "IndividualProgression.cpp")
@@ -870,6 +1204,13 @@ RESET_LOOP_EXPECTED_STATEMENTS = (
     "bot->RemoveRewardedQuest(entry);",
     "bot->RemoveActiveQuest(entry, false);",
 )
+RESET_FUNCTION_EXPECTED_STATEMENTS = (
+    "for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot) { bot->SetQuestSlot(slot, 0); }",
+    "ObjectMgr::QuestMap const& questTemplates = sObjectMgr->GetQuestTemplates();",
+    "for (ObjectMgr::QuestMap::const_iterator i = questTemplates.begin(); i != questTemplates.end(); ++i) {",
+)
+MSG_RESET_FUNCTION_CHANGED = ("ResetQuests: function body changed outside the quest-template loop "
+                              "(early return, extra loop or post-loop restore?)")
 MSG_REMOVE_NOT_UNCONDITIONAL = ("ResetQuests: 'bot->RemoveRewardedQuest(entry);' is no longer an unconditional "
                                 "top-level statement of the quest-template loop (guarded, wrapped or moved)")
 
@@ -878,6 +1219,11 @@ def check_pb_reset_quests_removes_every_non_none_quest(src: Sources) -> None:
     fn = find_function(src.pb["factory"], "PlayerbotFactory::ResetQuests", "PlayerbotFactory.cpp")
     flat = fn.flat
     _require("sObjectMgr->GetQuestTemplates()" in flat, "ResetQuests no longer iterates every loaded quest template")
+    # CS02-IP rev-2 Low: pin the function's own top-level statements too (exactly three).
+    fn_stmts = top_level_statements(fn.body)
+    _require(len(fn_stmts) == 3 and fn_stmts[0] == RESET_FUNCTION_EXPECTED_STATEMENTS[0]
+             and fn_stmts[1] == RESET_FUNCTION_EXPECTED_STATEMENTS[1]
+             and fn_stmts[2].startswith(RESET_FUNCTION_EXPECTED_STATEMENTS[2]), MSG_RESET_FUNCTION_CHANGED)
     _, loop = find_statement(fn, r"\bfor\s*\(\s*ObjectMgr::QuestMap::const_iterator\b")
     _require("questTemplates.begin()" in loop and "questTemplates.end()" in loop,
              "ResetQuests template loop no longer spans questTemplates.begin()..end()")
@@ -984,13 +1330,13 @@ def check_pb_gm_initself_full_reset_routes(src: Sources) -> None:
                   'if (!strcmp(cmd, "initself=epic"))', 'if (!strcmp(cmd, "initself=legendary"))',
                   'if (sscanf(cmd, "initself=%d", &gs) != -1)'):
         _require(token in flat, f"HandlePlayerbotCommand no longer dispatches: {token}")
-    routes = re.findall(
-        r"if \(master->CanBeGameMaster\(\)\) \{ PlayerbotFactory factory\(master, master->GetLevel\(\), "
-        r"(ITEM_QUALITY_\w+(?:, gs)?)\); factory\.Randomize\(false\);", flat)
+    routes = [quality for _, quality in re.findall(
+        r"if \(master->CanBeGameMaster\(\)\) \{ PlayerbotFactory (\w+)\s*\(\s*master, master->GetLevel\(\), "
+        r"(ITEM_QUALITY_\w+(?:, gs)?)\); \1\.Randomize\(false\);", flat)]
     _require(tuple(routes) == INITSELF_EXPECTED_QUALITIES,
              f"GM initself full-reset routes changed: {routes} (expected {list(INITSELF_EXPECTED_QUALITIES)}, "
              "each gated only by master->CanBeGameMaster())")
-    _require(len(re.findall(r"PlayerbotFactory factory\(master\b", flat)) == len(INITSELF_EXPECTED_QUALITIES),
+    _require(len(re.findall(r"PlayerbotFactory\s+\w+\s*\(\s*master\b", flat)) == len(INITSELF_EXPECTED_QUALITIES),
              "HandlePlayerbotCommand builds a PlayerbotFactory on 'master' outside the inventoried initself routes")
 
 
@@ -1041,6 +1387,105 @@ def check_pb_level_mgr_full_reset_routes_default_off(src: Sources) -> None:
 
 CONFIG_EXPOSURE_KEYS = ("RandomBotMaxLevel", "DowngradeMaxLevelBot")
 MIN_PB_SRC_FILES = 500  # the scan below is only meaningful on a full src/ checkout
+
+
+# --- Tree-wide full-reset call-site inventory (CS02-IP rev-2 Low; optional rev-3 item) -------
+# Every call of these callees anywhere under PB src/ is mapped to (file, enclosing qualified
+# function or "<none>", callee) and the multiset must equal the frozen inventory below. Header
+# DECLARATIONS appear as "<none>" entries on purpose: any new caller, in any file, changes the
+# multiset. Only meaningful at the frozen pin (a new pin requires re-deriving this table).
+PB_FULL_RESET_CALLEES = {
+    "Randomize(false)": r"\b\w+\s*\.\s*Randomize\s*\(\s*false\s*\)",
+    "Randomize(<player>)": r"(?<![\w:&.>])Randomize\s*\(\s*(?!false\b|true\b)[A-Za-z_]\w*\s*\)",
+    "sRandomPlayerbotMgr.Randomize(": r"\bsRandomPlayerbotMgr\s*\.\s*Randomize\s*\(",
+    "RandomizeFirst(": r"(?<![\w:&])RandomizeFirst\s*\(",
+    "RandomizeMin(": r"(?<![\w:&])RandomizeMin\s*\(",
+    "ClearEverything(": r"(?<![\w:&])ClearEverything\s*\(",
+}
+EXPECTED_PB_FULL_RESET_CALL_INVENTORY = {
+    ("src/Bot/Factory/PlayerbotFactory.h", "<none>", "ClearEverything("): 1,
+    ("src/Bot/PlayerbotMgr.cpp", "PlayerbotHolder::HandlePlayerbotCommand", "Randomize(false)"): 6,
+    ("src/Bot/PlayerbotMgr.cpp", "PlayerbotHolder::OnBotLogin", "Randomize(false)"): 1,
+    ("src/Bot/PlayerbotMgr.cpp", "PlayerbotHolder::ProcessBotCommand", "Randomize(false)"): 7,
+    ("src/Bot/PlayerbotMgr.cpp", "PlayerbotHolder::ProcessBotCommand", "sRandomPlayerbotMgr.Randomize("): 1,
+    ("src/Bot/RandomBotLevelMgr.cpp", "RandomBotLevelMgr::AdjustBotToRange", "Randomize(false)"): 1,
+    ("src/Bot/RandomBotLevelMgr.cpp", "RandomBotLevelMgr::ResetBot", "Randomize(false)"): 1,
+    ("src/Bot/RandomBotLevelMgr.cpp", "RandomBotLevelMgr::SkipBotLevel", "Randomize(false)"): 1,
+    ("src/Bot/RandomPlayerbotMgr.cpp", "RandomPlayerbotMgr::Clear", "ClearEverything("): 1,
+    ("src/Bot/RandomPlayerbotMgr.cpp", "RandomPlayerbotMgr::ProcessBot", "Randomize(<player>)"): 1,
+    ("src/Bot/RandomPlayerbotMgr.cpp", "RandomPlayerbotMgr::Randomize", "RandomizeFirst("): 2,
+    ("src/Bot/RandomPlayerbotMgr.cpp", "RandomPlayerbotMgr::RandomizeFirst", "Randomize(false)"): 1,
+    ("src/Bot/RandomPlayerbotMgr.cpp", "RandomPlayerbotMgr::RandomizeMin", "Randomize(false)"): 1,
+    ("src/Bot/RandomPlayerbotMgr.h", "<none>", "RandomizeFirst("): 1,
+    ("src/Bot/RandomPlayerbotMgr.h", "<none>", "RandomizeMin("): 1,
+}
+
+
+def definition_spans(text: str) -> List[Tuple[int, int, str]]:
+    """(start, end, qualified name) of every out-of-class definition; overloads allowed."""
+    masked = mask_comments(text)
+    spans: List[Tuple[int, int, str]] = []
+    for d in re.finditer(r"(?m)^[^\n;{}]*?(?<![\w:])((?:\w+::)+\w+)\s*\(", masked):
+        try:
+            close = match_bracket(masked, d.end() - 1)
+        except ExtractionError:
+            continue
+        tail = re.match(r"\s*(?:const\s*)?(?:noexcept\s*)?(?:override\s*)?\{", masked[close + 1:])
+        if tail:
+            body_open = close + tail.end()
+            spans.append((d.start(), match_bracket(masked, body_open), d.group(1)))
+    return spans
+
+
+def pb_full_reset_call_inventory(src: Sources) -> Dict[Tuple[str, str, str], int]:
+    inv: Dict[Tuple[str, str, str], int] = {}
+    needles = ("Randomize", "ClearEverything")
+    for rel, text in src.pb_src_tree.items():
+        if not any(n in text for n in needles):
+            continue
+        masked = mask_comments(text)
+        hits = [(name, m.start()) for name, pat in PB_FULL_RESET_CALLEES.items() for m in re.finditer(pat, masked)]
+        if not hits:
+            continue
+        spans = definition_spans(text)
+        for name, pos in hits:
+            enclosing = [n for a, b, n in spans if a <= pos <= b]
+            key = (rel, enclosing[-1] if enclosing else "<none>", name)
+            inv[key] = inv.get(key, 0) + 1
+    return inv
+
+
+def check_pb_tree_wide_full_reset_call_inventory(src: Sources) -> None:
+    _require(len(src.pb_src_tree) >= MIN_PB_SRC_FILES,
+             f"PB src/ scan saw only {len(src.pb_src_tree)} files; check out the whole src/ tree")
+    got = pb_full_reset_call_inventory(src)
+    added = {k: v for k, v in got.items() if EXPECTED_PB_FULL_RESET_CALL_INVENTORY.get(k) != v}
+    missing = {k: v for k, v in EXPECTED_PB_FULL_RESET_CALL_INVENTORY.items() if got.get(k) != v}
+    _require(not added and not missing,
+             f"PB full-reset call-site inventory changed: new/changed {added}; missing/changed {missing}")
+
+
+ADDCLASS_LOGIN_CONDITION = "addClassBot && master && abs((int)master->GetLevel() - (int)bot->GetLevel()) > 3"
+
+
+def addclass_login_full_reset(account_type: int, master_present: bool, master_level: int, bot_level: int,
+                              src: Sources) -> bool:
+    """Evaluate the pinned OnBotLogin AddClass auto-randomise condition (asserted verbatim first)."""
+    check_pb_addclass_login_full_reset_route(src)
+    return (account_type == 2) and master_present and abs(master_level - bot_level) > 3
+
+
+def check_pb_addclass_login_full_reset_route(src: Sources) -> None:
+    """AddClass (account type 2) bots with a master and a level gap > 3 are fully randomised in
+    PlayerbotHolder::OnBotLogin (after Core login). Source route only; owner reports no AddClass use."""
+    flat = find_function(src.pb["playerbot_mgr"], "PlayerbotHolder::OnBotLogin", "PlayerbotMgr.cpp").flat
+    _require("bool addClassBot = sRandomPlayerbotMgr.IsAccountType(accountId, 2);" in flat,
+             "OnBotLogin AddClass classification changed (expected IsAccountType(accountId, 2))")
+    m = re.search(r"if \((addClassBot && master && .+?)\) \{ uint32 mixedGearScore = .*? "
+                  r"PlayerbotFactory (\w+)\(bot, master->GetLevel\(\), ITEM_QUALITY_LEGENDARY, mixedGearScore\); "
+                  r"\2\.Randomize\(false\); \}", flat)
+    _require(m is not None and m.group(1) == ADDCLASS_LOGIN_CONDITION,
+             f"OnBotLogin AddClass full-randomise condition changed: {m.group(1) if m else None!r}")
 
 
 def check_pb_no_legacy_config_namespace(src: Sources) -> None:
@@ -1209,12 +1654,14 @@ def check_ip_reads_exactly_the_sql_markers(src: Sources) -> None:
 
 
 def check_no_other_ip_sql_redefines_markers(src: Sources) -> None:
+    """Static gate: no other IP SQL statement may change a chain column of a stage-marker row,
+    or be undecidable while writing one (fail closed). NOT a SQL engine; see marker_sql_findings."""
+    rows = ip_marker_rows(src)
     findings: List[str] = []
     for rel, text in src.ip_sql_tree.items():
         if rel == IP_FILES["progression_sql"]:
             continue
-        for hit in statements_touching_ids(text, ("quest_template", "quest_template_addon"), EXPECTED_STAGE_MARKERS):
-            findings.append(f"{rel}: {hit}")
+        findings.extend(f"{rel}: {hit}" for hit in marker_sql_findings(text, rows))
     _require(not findings, "other IP SQL touches stage-marker quest rows: " + "; ".join(findings))
 
 
@@ -1247,6 +1694,8 @@ ALL_CHECKS: Tuple[Callable[[Sources], None], ...] = (
     check_pb_gm_initself_full_reset_routes,
     check_pb_level_mgr_full_reset_routes_default_off,
     check_pb_no_legacy_config_namespace,
+    check_pb_tree_wide_full_reset_call_inventory,
+    check_pb_addclass_login_full_reset_route,
     check_core_get_quest_status_rewarded_semantics,
     check_core_reward_and_remove_bookkeeping,
     check_core_save_persists_rewarded_delete,

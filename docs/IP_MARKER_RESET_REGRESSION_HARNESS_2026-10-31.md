@@ -1,10 +1,11 @@
 # IP progression-marker reset regression harness (C1) — 2026-10-31
 
-**Author:** CS03-IP (Claude, IP coding developer). **Coordination:** [Naxxramas-Server-Coordination Issue #13](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13); C1 design decision stays in [Issue #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9).
+**Project owner:** CosmicCuddle. Review and testing are coordinated in [Naxxramas-Server-Coordination Issue #13](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13); the C1 design decision stays in [Issue #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9).
 **Type:** TEST-ONLY. No change to `src/`, `data/`, `conf/`, `optional/`, Playerbots, the character DB, F14 or any live server.
 **Base:** `develop/cosmic-ip` @ `edd639b0a6eba858830876e987def510450f438a`.
 **Register entry:** `IP-TEST-C1-001`.
 **Revision 2** (same date): addresses the [CS02-IP review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6543427658) as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6543457181). See [Revision 2 changes](#revision-2-changes).
+**Revision 3** (same date): addresses the [CS02-IP rev-2 re-review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544136049) as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544205778). See [Revision 3 changes](#revision-3-changes).
 
 ## What it checks
 
@@ -35,7 +36,11 @@ Pinned inputs (public, read-only):
    | `RandomBotLevelMgr::SkipBotLevel` (L852, call L865) ← `OnBotLogin`, `OnBotLevelChanged` | level skip | same flag | same |
 
    - The `initself` row is a **historical source risk for a real GM character's saved IP stage**. It is not runtime evidence and not proof that any GM has used it. Do **not** run `initself` on a character with saved progression.
-   - The bot `init=*` variants in `PlayerbotHolder::ProcessBotCommand` (defined at L722; `Randomize(false)` at L815–857) and the bot-login path at L650 are restricted to AddClass bots (the L782 "You can only use this command on addclass bots" return, and the `addClassBot` check at L639). They are **not** inventoried as contracts because the owner reports no AddClass use; that report is unverified.
+   - **AddClass-only routes** (the owner reports no AddClass use; unverified):
+     - The bot `init=*` variants in `PlayerbotHolder::ProcessBotCommand` (defined at L722; `Randomize(false)` at L815–857) sit behind the L782 "You can only use this command on addclass bots" return.
+     - The bot `random` command (L883–887) also sits behind that return. It calls `sRandomPlayerbotMgr.Randomize(bot)`, so the trigger matrix above decides whether it is a full reset.
+     - **Automatic after Core login:** `PlayerbotHolder::OnBotLogin` L639–650 fully randomises when the account is AddClass (`IsAccountType(accountId, 2)`), a master exists, and `abs(master level − bot level) > 3`. Contract: `check_pb_addclass_login_full_reset_route`, plus a derived matrix (type 2 with gap 5 or −10 → full reset; gap 3, no master, type 1 or type 0 → no).
+   - **Tree-wide inventory:** `check_pb_tree_wide_full_reset_call_inventory` maps every call of `.Randomize(false)`, unqualified `Randomize(<player>)`, `sRandomPlayerbotMgr.Randomize(`, `RandomizeFirst(`, `RandomizeMin(` and `ClearEverything(` across all 1,423 PB `src/` files to (file, enclosing function). The multiset must equal a frozen table, which includes header declarations on purpose. A new caller in **any** file, or a removed one, turns it red.
 
 2. **`PlayerbotFactory::Randomize(bool incremental)`** calls `ResetQuests()` only inside `if (!incremental)`.
 3. **`PlayerbotFactory::ResetQuests()`** loops over **every** loaded quest template. The loop body is exactly five top-level statements:
@@ -109,7 +114,7 @@ Making the markers repeatable would hide them from `ResetQuests`. It would **als
 
 | Level | What runs | What a pass means |
 | --- | --- | --- |
-| **A — source contract** | 19 `check_*` contracts in `tests/ip_marker_reset_extract.py`. Comment-aware C++ function and enum extraction (fails closed on conditional preprocessor directives inside an extracted body); top-level statement splitting; call-site inventory; MySQL tuple parsing (fails closed on unparseable inserts on marker tables); evaluation of extracted branch conditions; whole-`src/` scans | The pinned text still has exactly the recorded chain. Commented-out or `#if 0` code never satisfies a contract. |
+| **A — source contract** | 21 `check_*` contracts in `tests/ip_marker_reset_extract.py`. Comment-aware C++ function and enum extraction (fails closed on conditional preprocessor directives inside an extracted body); top-level statement splitting; call-site inventory; a marker-table SQL static gate (see [SQL static gate](#sql-static-gate-revision-3)); evaluation of extracted branch conditions; whole-`src/` scans | The pinned text still has exactly the recorded chain. Commented-out or `#if 0` code never satisfies a contract. |
 | **A′ — review-only comparison** | `ConfigNamespaceAudit` reads the `037c0141` checkout for key names, defaults and the clamp only | Documents the rename. **Not** evidence about the owner's installed revision. |
 | **B — compiled extracted bodies** | The **verbatim** pinned bodies of `ResetQuests`, `GetQuestStatus`, `RemoveActiveQuest`, `RemoveRewardedQuest`, `SetRewardedQuest`, the rewarded loop of `_SaveQuestStatus`, Core `QuestFlags`, `Quest::HasFlag`/`IsRepeatable`/`IsSeasonal`, `Player::IsQuestRewarded` and IP `GetPlayerProgressionFromQuests`, compiled against minimal stand-ins (`tests/marker_reset_harness/harness_stubs.h`) with SQL-derived flags; 86 expectations | Those exact bodies, executed, wipe stages 1–18 to 0 and queue one DB delete per marker. Controls: stage 0, no-reset save, repeatable quest kept, PvP and ordinary collateral. |
 | **Not covered** | Worldserver, a real DB, Playerbots scheduling and timing, the owner's installed revisions, configs, environment and SQL overrides, actual GM command use | — |
@@ -134,6 +139,22 @@ Making the markers repeatable would hide them from `ResetQuests`. It would **als
   - a legacy `"AiPlayerbot.*"` option anywhere under PB `src/` (detected) versus one only in a comment (not flagged);
   - a partial PB `src/` checkout (fails closed);
   - IP code touching `CONFIG_MAX_PLAYER_LEVEL` (detected).
+- **Revision 3 fixtures:**
+  - 9 SQL static-gate negatives, each asserting its reason text:
+    - `UPDATE` without `WHERE`;
+    - `ID > 66000`;
+    - `ID IN (SELECT …)`;
+    - lower-case `id` insert;
+    - `DELETE … WHERE QuestSortID = 0`;
+    - `TRUNCATE`;
+    - `WHERE` only inside a string literal;
+    - a multi-table `JOIN` update writing `Flags`;
+    - an insert without an ID column.
+  - 6 SQL controls that must stay clean: `ID = 9999`, PvP `BETWEEN 66101 AND 66114`, PvP `IN (66101, 66102)`, the real broad `RewardFactionOverride1` baseline statement, a marker table that is only read in a sub-select, and `NOT … BETWEEN 66001 AND 66018`.
+  - `ResetQuests` early return and post-loop restore, each rejected with exactly `MSG_RESET_FUNCTION_CHANGED`.
+  - The `initself` contract tolerates a variable rename but still counts any extra factory built on `master`.
+  - Tree-wide inventory: a new caller in another file and a removed caller are detected; a caller only inside a comment is not counted.
+  - AddClass login condition: a changed threshold or account type is detected, and the 6-row outcome matrix is evaluated.
 - **Layer B, 2 compiled mutations:**
   - `ResetQuests` skipping 66001–66018;
   - **`ResetQuests` guarding removal with `!quest->HasFlag(QUEST_FLAGS_TRACKING)`**. This compiles with the verbatim `HasFlag`/`QuestFlags` and fails *on behaviour*: markers (`Flags = 1024`) survive, while ordinary quests are still deleted.
@@ -161,12 +182,38 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
   tests/marker_reset_harness/harness_main.cpp -o build/marker-reset/harness && build/marker-reset/harness
 ```
 
+## SQL static gate (revision 3)
+
+`check_no_other_ip_sql_redefines_markers` applies a **narrow static gate** to every SQL file under `data/sql` and `optional/sql` except `player_progression.sql`. It is **not a SQL engine and not a game or DB test.**
+
+- **Tokens are quote-aware.** A `WHERE` inside a string literal is never treated as a clause.
+- **Chain-relevant columns** (case-insensitive) are `ID`, `Flags` and `QuestSortID` on `quest_template`, and `ID` and `SpecialFlags` on `quest_template_addon`. These are the only columns the contracts depend on.
+- **`UPDATE`:**
+  - If the `SET` list writes **no** chain-relevant column, it passes. This is the documented allowlist. It is needed because the real baseline statement `UPDATE quest_template SET RewardFactionOverride1 = 0 WHERE RewardFactionId1=0` matches all 18 marker rows.
+  - Otherwise the `WHERE` clause is evaluated with three-valued logic against the **actual 18 stage-marker rows parsed from `player_progression.sql`**.
+  - The grammar is limited to columns, integer and string literals, `= != <> < > <= >=`, `[NOT] IN (literal list)`, `[NOT] BETWEEN … AND …`, `IS [NOT] NULL`, `AND`/`OR`/`NOT` and parentheses.
+  - It reports a finding for: no `WHERE`; any marker row TRUE; anything undecidable (sub-query, other operator or unknown column), which fails closed; or a multi-table/`JOIN` update that writes a chain column.
+- **`DELETE`:** the same `WHERE` evaluation applies, and there is no column allowlist. Multi-table forms fail closed.
+- **`INSERT`/`REPLACE`:** the ID column is matched case-insensitively.
+  - A literal stage ID is a finding.
+  - A non-literal ID, a missing ID column, `INSERT … SELECT` or unreadable rows fail closed.
+  - Column-less `VALUES` use ID in column 0.
+- **`TRUNCATE`, `DROP`, `ALTER` and `RENAME`** on a marker table are findings.
+- **Stage markers only.** PvP markers 66101–66114 are intentionally *not* frozen, so legitimate PvP changes stay allowed.
+- **Limits:**
+  - Statement order and earlier writes are not modelled; rows are taken as `player_progression.sql` defines them.
+  - Live-DB or owner-local SQL is out of scope.
+  - MySQL string/number coercion is treated as undecidable, which fails closed.
+  - The baseline IP tree produces **0 findings**.
+
 ## CI: two jobs (`contents: read`; no `pull_request_target`, secrets, merge or deploy)
 
 | Job | Runs when | Purpose |
 | --- | --- | --- |
 | `pr17-frozen-scope-guard` | **only** for head branch `claude/azerothcore-ip-fork-hoqu8m` of this repo (PR or push); otherwise **skipped**, not red | The original 7-path allowlist against `edd639b0`, `src/`/`data/`/`conf/`/`optional/` byte-identical, append-only register |
-| `marker-reset-chain` | any PR or push run touching the harness files, `src/IndividualProgression*`, `data/sql/**` or `optional/sql/**` | Pinned + legacy checkouts with SHA and clean-tree verification, the full unittest (g++ C++17), then clang++ C++17 and g++ C++20 builds and `check` |
+| `marker-reset-chain` | pull requests touching the harness files, `src/**`, `conf/**`, `data/sql/**` or `optional/sql/**`; pushes with the same paths to `claude/azerothcore-ip-fork-hoqu8m` or **`develop/cosmic-ip`**; manual dispatch | Pinned + legacy checkouts with SHA and clean-tree verification, the full unittest (g++ C++17), then clang++ C++17 and g++ C++20 builds and `check` |
+
+**Not a required check.** Nothing here configures GitHub branch protection. Whether `marker-reset-chain` becomes a *required* status check on `develop/cosmic-ip` is a separate owner decision, and the current branch-protection settings are **unverified**. Until then a red run is a signal, not a merge block.
 
 **Which future PRs actually run the reusable job:** GitHub uses the workflow file from the PR's own head. So it runs only on PRs whose branch **contains this workflow**: branches stacked on PR #17, or any branch after an owner-approved merge of #17 into `develop/cosmic-ip`. Until then, PRs on other existing branches (#1, #3, #10, #13–#16) do **not** run it. A future PR that *intentionally* changes the chain (for example an approved C1 Option A) turns `marker-reset-chain` red **by design**, and must update the named expectations in the same reviewed PR.
 
@@ -183,7 +230,8 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
 ## Risks and limits
 
 - **Not runtime.** The stand-ins (`ObjectMgr`, `CharacterDatabase`, `Player` containers) are minimal, and behaviour outside the extracted bodies is not exercised.
-- **Text-based.** Contracts assert specific source shapes, so a pure upstream refactor will fail the harness. That is intended (re-verify, then update), but a red result is not automatically a regression.
+- **Text-based.** Contracts assert specific source shapes, so a pure upstream refactor will fail the harness. That is intended (re-verify, then update), but a red result is not automatically a regression. For example, rewriting the `ResetQuests` iterator loop as a range-`for` reports `MSG_REMOVE_NOT_UNCONDITIONAL`, `MSG_RESET_FUNCTION_CHANGED` or an extraction error even though behaviour is unchanged.
+- **Inventories are pin-specific.** The tree-wide call table and the per-file inventories are frozen for `e88cc409`. Bumping the PB pin requires re-deriving them, which is deliberate.
 - The IP SQL scan covers `data/sql` and `optional/sql` in this repository only. Live DB overrides and owner-local SQL are unknown.
 - **Deferred (CS02-IP finding 6; not in this revision; neither occurs at the pins):**
   - `!` precedence in `cpp_condition_to_python` (`!a < b`). Unmodelled symbols are still rejected.
@@ -198,6 +246,16 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
 | 3 / F4 mutation loophole | top-level five-statement loop contract with a specific failure message; 3 guarded-removal fixtures; compiled TRACKING-flag mutation |
 | 4 / F3 reusable CI | workflow split into a PR17-only frozen guard and a reusable chain job; IP `src/` and SQL path triggers |
 | 5 / F6, F7 (narrow subset) | clean-tree pin checks; fail closed on conditional preprocessor directives in extracted bodies and on unparseable or column-less marker-table inserts |
+
+## Revision 3 changes
+
+| CS01-IP priority / CS02-IP rev-2 finding | Change |
+| --- | --- |
+| P1 / Medium CI coverage | Triggers widened to `src/**` and `conf/**` (plus `data/sql/**`, `optional/sql/**`, harness); `develop/cosmic-ip` added to `push.branches`. The frozen PR17 guard is unchanged and skipped elsewhere. The comments and memo now state the real coverage and that this is not a required check. |
+| P2 / Medium SQL false negative | Quote-aware SQL static gate: chain-column allowlist, three-valued `WHERE` evaluation against the real marker rows, case-insensitive ID, fail-closed DDL, sub-query, multi-table and non-literal cases; 9 negatives plus 6 controls |
+| P3 / docs | Role-neutral header crediting the project owner; corrected CI trigger claims; `random` command (L883–887) and AddClass routes added to the inventory |
+| Low / route inventory | Tree-wide (file, enclosing function, callee) multiset over all PB `src/`; AddClass `OnBotLogin` condition contract with an outcome matrix; `initself` regex tolerates a variable rename |
+| Low / outside-loop changes | `ResetQuests` function-level top-level statements pinned (`MSG_RESET_FUNCTION_CHANGED`) |
 
 ## Rollback
 

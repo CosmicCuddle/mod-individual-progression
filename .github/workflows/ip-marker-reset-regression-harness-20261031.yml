@@ -1,12 +1,15 @@
 name: IP marker-reset regression harness (C1, test-only, no runtime)
 
-# Two jobs (CS01-IP item 4 / CS02-IP finding 3):
+# Two jobs (CS01-IP item 4 / CS02-IP finding 3, trigger scope corrected in revision 3):
 #  * pr17-frozen-scope-guard - the original PR #17 seven-path / frozen-base / append-only
-#    register guard. Runs ONLY for the PR #17 head branch; on any other branch it is SKIPPED
-#    (not red), so it can never block unrelated PRs.
-#  * marker-reset-chain - the reusable source contracts + compiled extracted bodies. Runs for
-#    harness changes AND for IP changes to src/IndividualProgression*, data/sql/** and
-#    optional/sql/**, on any branch that contains this workflow file. No frozen-diff dependence.
+#    register guard. Runs ONLY for the PR #17 head branch of this repository; on every other
+#    branch the JOB is SKIPPED (not red), so it can never block unrelated PRs.
+#  * marker-reset-chain - the reusable source contracts + compiled extracted bodies, with no
+#    frozen-diff dependence. It runs for pull requests touching the harness, src/**, conf/**,
+#    data/sql/** or optional/sql/**, and for pushes to this PR branch or develop/cosmic-ip.
+# Coverage limits: GitHub reads the workflow from the branch being tested, so a branch or PR
+# that does not CONTAIN this file runs nothing. This check is NOT configured as a required
+# branch-protection status check (not verified; owner decision). It only signals.
 # Read-only: contents: read, no pull_request_target, no secrets, no merge/deploy automation.
 
 on:
@@ -17,19 +20,22 @@ on:
       - tests/test_ip_marker_reset_chain_source.py
       - tests/marker_reset_harness/**
       - docs/IP_MARKER_RESET_REGRESSION_HARNESS_2026-10-31.md
-      - src/IndividualProgression*
+      - src/**
+      - conf/**
       - data/sql/**
       - optional/sql/**
   push:
     branches:
       - claude/azerothcore-ip-fork-hoqu8m
+      - develop/cosmic-ip
     paths:
       - .github/workflows/ip-marker-reset-regression-harness-20261031.yml
       - tests/ip_marker_reset_extract.py
       - tests/test_ip_marker_reset_chain_source.py
       - tests/marker_reset_harness/**
       - docs/IP_MARKER_RESET_REGRESSION_HARNESS_2026-10-31.md
-      - src/IndividualProgression*
+      - src/**
+      - conf/**
       - data/sql/**
       - optional/sql/**
   workflow_dispatch:

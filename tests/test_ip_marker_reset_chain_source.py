@@ -323,6 +323,28 @@ class NegativeMutationFixtures(unittest.TestCase):
                     x.check_pb_reset_quests_removes_every_non_none_quest(mutated)
                 self.assertEqual(str(ctx.exception), x.MSG_REMOVE_NOT_UNCONDITIONAL)
 
+    def test_reset_function_changes_outside_the_loop_rejected_for_the_intended_reason(self):
+        """CS02-IP rev-2 Low: early return / post-loop restore outside the template loop."""
+        early = sub_once("    for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)",
+                         "    if (HasIpStage(bot))\n        return;\n    for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)")
+        restore = lambda t: t[:t.rindex("}")] + "    RestoreIpStageMarkers(bot);\n}"
+        for name, transform in (("early_return", early), ("post_loop_restore", restore)):
+            with self.subTest(fixture=name):
+                mutated = sources().with_edit("pb", "factory", in_function("PlayerbotFactory::ResetQuests", transform))
+                with self.assertRaises(x.ContractViolation) as ctx:
+                    x.check_pb_reset_quests_removes_every_non_none_quest(mutated)
+                self.assertEqual(str(ctx.exception), x.MSG_RESET_FUNCTION_CHANGED)
+
+    def test_initself_contract_tolerates_variable_rename_but_counts_any_factory_on_master(self):
+        rename = in_function("PlayerbotHolder::HandlePlayerbotCommand", sub_once(
+            "PlayerbotFactory factory(master, master->GetLevel(), ITEM_QUALITY_RARE);\n                factory.Randomize(false);",
+            "PlayerbotFactory rareFactory(master, master->GetLevel(), ITEM_QUALITY_RARE);\n                rareFactory.Randomize(false);"))
+        x.check_pb_gm_initself_full_reset_routes(sources().with_edit("pb", "playerbot_mgr", rename))
+        extra = in_function("PlayerbotHolder::HandlePlayerbotCommand", sub_once(
+            'if (!strcmp(cmd, "initself"))', 'PlayerbotFactory sneaky(master, 1);\n    if (!strcmp(cmd, "initself"))'))
+        with self.assertRaises(x.ContractViolation):
+            x.check_pb_gm_initself_full_reset_routes(sources().with_edit("pb", "playerbot_mgr", extra))
+
     def test_top_level_statement_splitter(self):
         block = ("a = 1; if (b) c(); if (d) { e(); } else { f(); } g(\";}\"); "
                  "for (int i = 0; i < 2; ++i) { h(); } k();")
@@ -352,7 +374,11 @@ class NegativeMutationFixtures(unittest.TestCase):
     def _sql_findings(self, sql: str):
         tree = dict(sources().ip_sql_tree)
         tree["data/sql/world/base/zz_fixture.sql"] = sql
-        return x.run_all(replace(sources(), ip_sql_tree=tree))["check_no_other_ip_sql_redefines_markers"]
+        try:
+            x.check_no_other_ip_sql_redefines_markers(replace(sources(), ip_sql_tree=tree))
+        except x.ContractViolation as exc:
+            return str(exc)
+        return None
 
     def test_column_less_insert_on_marker_is_detected(self):
         err = self._sql_findings("INSERT INTO `quest_template_addon` VALUES (66004, 0, 0, 1);\n")
@@ -367,6 +393,61 @@ class NegativeMutationFixtures(unittest.TestCase):
             "INSERT INTO `quest_template_addon` SELECT * FROM `quest_template_addon_backup` WHERE `ID` > 1;\n")
         self.assertIsNotNone(err)
         self.assertIn("UNPARSEABLE", err)
+
+    # CS02-IP rev-2 finding (Medium): former false negatives. Each must be reported, for the stated reason.
+    SQL_GATE_NEGATIVES = [
+        ("update_without_where", "UPDATE `quest_template_addon` SET `SpecialFlags` = 1;", "no WHERE"),
+        ("range_predicate", "UPDATE quest_template_addon SET SpecialFlags = 1 WHERE ID > 66000;",
+         "WHERE matches stage-marker row(s) 66001..66018 (18)"),
+        ("in_subquery", "UPDATE quest_template SET Flags = 4096 WHERE ID IN (SELECT ID FROM quest_backup);",
+         "not statically decidable"),
+        ("lower_case_id_insert", "INSERT INTO quest_template_addon (id, SpecialFlags) VALUES (66004, 1);",
+         "INSERT/REPLACE of stage-marker ID(s) [66004]"),
+        ("delete_by_sort_id", "DELETE FROM quest_template WHERE QuestSortID = 0;",
+         "DELETE FROM quest_template: WHERE matches stage-marker row(s)"),
+        ("truncate", "TRUNCATE TABLE quest_template_addon;", "TRUNCATE on a marker table"),
+        ("where_only_inside_string", "UPDATE quest_template SET Flags = 4096, LogTitle = 'x WHERE ID = 9999';",
+         "no WHERE"),
+        ("multi_table_chain_write",
+         "UPDATE quest_template q JOIN quest_template p ON p.ID = q.ID SET q.Flags = p.Flags WHERE q.ID = 9999;",
+         "multi-table UPDATE writing chain column(s)"),
+        ("insert_without_id_column", "INSERT INTO quest_template_addon (SpecialFlags) VALUES (1);",
+         "without exactly one ID column"),
+    ]
+    # Must stay clean: literal non-stage IDs, PvP markers 66101..66114, and broad writes of columns
+    # the chain does not read (this exact statement exists in vanilla_quest_reputations.sql and its
+    # WHERE matches all 18 marker rows).
+    SQL_GATE_CONTROLS = [
+        ("literal_other_id", "UPDATE quest_template_addon SET SpecialFlags = 1 WHERE ID = 9999;"),
+        ("pvp_range", "UPDATE quest_template_addon SET SpecialFlags = 1 WHERE ID BETWEEN 66101 AND 66114;"),
+        ("pvp_in_list", "UPDATE `quest_template` SET `Flags` = 0 WHERE `ID` IN (66101, 66102);"),
+        ("broad_irrelevant_column", "UPDATE quest_template SET RewardFactionOverride1 = 0 WHERE RewardFactionId1=0;"),
+        ("marker_table_only_read", "UPDATE creature_template SET x = 1 WHERE entry IN (SELECT ID FROM quest_template);"),
+        ("not_between_stage", "DELETE FROM quest_template WHERE ID = 9999 AND NOT ID BETWEEN 66001 AND 66018;"),
+    ]
+
+    def test_sql_gate_negatives_report_the_intended_reason(self):
+        for name, sql, reason in self.SQL_GATE_NEGATIVES:
+            with self.subTest(fixture=name):
+                err = self._sql_findings(sql + "\n")
+                self.assertIsNotNone(err, f"{name}: not reported")
+                self.assertIn(reason, err)
+
+    def test_sql_gate_controls_stay_clean(self):
+        for name, sql in self.SQL_GATE_CONTROLS:
+            with self.subTest(fixture=name):
+                self.assertIsNone(self._sql_findings(sql + "\n"))
+
+    def test_sql_gate_baseline_contains_the_broad_irrelevant_statement(self):
+        """Proves the allowlist control is a REAL baseline case, not a synthetic one."""
+        text = sources().ip_sql_tree["data/sql/world/base/vanilla_quest_reputations.sql"]
+        self.assertIn("UPDATE quest_template SET RewardFactionOverride1 = 0 WHERE RewardFactionId1=0", text)
+        rows = x.ip_marker_rows(sources())["quest_template"]
+        self.assertTrue(all(r["rewardfactionid1"] == 0 for r in rows))
+
+    def test_sql_tokens_are_quote_aware(self):
+        toks = x.sql_tokens("UPDATE t SET a = 'x WHERE y' WHERE ID = 1;")
+        self.assertEqual([t for t in toks if t[0] == "ident" and t[1].upper() == "WHERE"], [("ident", "WHERE")])
 
     def test_conditional_preprocessor_in_extracted_body_fails_closed(self):
         for name, group, key, fn, old in (
@@ -419,6 +500,56 @@ class TreeScanFixtures(unittest.TestCase):
         tree["src/IndividualProgressionCap.cpp"] = "uint32 c = sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);\n"
         with self.assertRaises(x.ContractViolation):
             x.check_ip_level_caps_are_xp_gates_not_world_cap(replace(sources(), ip_src_tree=tree))
+
+
+class OptionalRouteContracts(unittest.TestCase):
+    """Rev-3 optional items: tree-wide full-reset call inventory and the AddClass login route."""
+
+    def _tree_edit(self, rel: str, transform):
+        tree = dict(sources().pb_src_tree)
+        tree[rel] = transform(tree.get(rel, ""))
+        return replace(sources(), pb_src_tree=tree)
+
+    def test_new_full_reset_caller_in_another_file_is_detected(self):
+        mutated = self._tree_edit("src/Ai/NewFeature.cpp", lambda _: (
+            "void NewFeature::Run(Player* b)\n{\n    PlayerbotFactory f(b, 60);\n    f.Randomize(false);\n}\n"))
+        with self.assertRaises(x.ContractViolation) as ctx:
+            x.check_pb_tree_wide_full_reset_call_inventory(mutated)
+        self.assertIn("('src/Ai/NewFeature.cpp', 'NewFeature::Run', 'Randomize(false)')", str(ctx.exception))
+
+    def test_removed_full_reset_caller_is_detected(self):
+        rel = "src/Bot/RandomPlayerbotMgr.cpp"
+        mutated = self._tree_edit(rel, in_function("RandomPlayerbotMgr::Clear", sub_once(
+            "factory.ClearEverything();", "factory.Refresh();")))
+        with self.assertRaises(x.ContractViolation) as ctx:
+            x.check_pb_tree_wide_full_reset_call_inventory(mutated)
+        self.assertIn("RandomPlayerbotMgr::Clear", str(ctx.exception))
+
+    def test_comment_only_caller_is_not_counted(self):
+        mutated = self._tree_edit("src/Ai/Note.cpp", lambda _: "// f.Randomize(false); RandomizeFirst(bot);\n")
+        x.check_pb_tree_wide_full_reset_call_inventory(mutated)
+
+    def test_addclass_login_matrix_from_pinned_condition(self):
+        rows = [  # account type, master online, master level, bot level, expected full randomise
+            (2, True, 60, 55, True),    # AddClass, gap 5
+            (2, True, 50, 60, True),    # AddClass, master LOWER by 10 (abs)
+            (2, True, 60, 57, False),   # gap 3: not > 3
+            (2, False, 60, 10, False),  # no master
+            (1, True, 60, 10, False),   # RandomBot account type 1: never this route
+            (0, True, 60, 10, False),   # normal account
+        ]
+        for acct, master, mlvl, blvl, expected in rows:
+            with self.subTest(account_type=acct, master=master, gap=mlvl - blvl):
+                self.assertEqual(x.addclass_login_full_reset(acct, master, mlvl, blvl, sources()), expected)
+
+    def test_addclass_condition_change_is_detected(self):
+        for name, old, new in (("gap_threshold", "> 3)", "> 30)"),
+                               ("type1_included", "IsAccountType(accountId, 2)", "IsAccountType(accountId, 1)")):
+            with self.subTest(fixture=name):
+                mutated = sources().with_edit("pb", "playerbot_mgr",
+                                              in_function("PlayerbotHolder::OnBotLogin", sub_once(old, new)))
+                with self.assertRaises(x.ContractViolation):
+                    x.check_pb_addclass_login_full_reset_route(mutated)
 
 
 class ExtractorSelfTests(unittest.TestCase):

@@ -115,3 +115,15 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Config finding | PB renamed `AiPlayerbot.*` → `Playerbots.*` between `037c0141` and `e88cc409`, with **no fallback** at `e88cc409`. A stale `AiPlayerbot.DowngradeMaxLevelBot = 0` is silently ignored, so downgrade defaults to **true**. Exposure still needs bot level ≥ effective `RandomBotMaxLevel` (clamped to worldserver `MaxPlayerLevel`, which is distinct from IP's XP-only caps). **Owner config unverified.** |
 | CI | Split into a PR17-only frozen scope guard (skipped elsewhere) and a reusable chain job that also triggers on `src/IndividualProgression*`, `data/sql/**` and `optional/sql/**`. Read-only; the legacy PB checkout is used for key-name comparison only. |
 | Status | **DRAFT, test-only, unmerged, not deployed.** Deferred: `!` precedence and digit separators in the extractor. |
+
+### IP-TEST-C1-001 — revision 3 (2026-10-31, test/docs/CI only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-2 re-review (PASS, two Medium items)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544136049), scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544205778) |
+| Files | The same seven paths. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| CI | The reusable chain job now triggers on `src/**`, `conf/**`, `data/sql/**` and `optional/sql/**`, and on pushes to `develop/cosmic-ip`. The PR17 frozen guard is unchanged. **Not a required branch-protection check** (owner decision; settings unverified). Branches without the workflow are not covered. |
+| SQL gate | Quote-aware static gate (not a SQL engine): chain-column allowlist (`ID`, `Flags`, `QuestSortID`, `SpecialFlags`), three-valued `WHERE` evaluation against the 18 real stage-marker rows, case-insensitive ID, fail closed on DDL, sub-queries, multi-table writes and non-literal IDs. PvP 66101–66114 deliberately not frozen. Baseline: 0 findings. |
+| Route inventory | Tree-wide PB full-reset call-site multiset; AddClass `OnBotLogin` (type 2 + master + level gap > 3) source contract; `random` command documented (AddClass-restricted); `ResetQuests` function-level statements pinned |
+| Docs | Memo header made role-neutral, crediting the project owner |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |
