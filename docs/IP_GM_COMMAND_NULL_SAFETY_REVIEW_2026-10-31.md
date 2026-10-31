@@ -1,6 +1,6 @@
 # IP GM command target and session null-safety (independent DRAFT)
 
-**Owner:** CosmicCuddle. **Review source:** historical upstream and [Grok IP fork review (Coordination #11)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11).  
+**Owner:** CosmicCuddle. **Review source:** historical upstream and [Grok IP fork review (Coordination #11)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11).
 **Scope:** Only `src/cs_individualProgression.cpp`, two GM commands. No change to IP progression stage formulas, F14 policy, group acceptance, achievements, SQL or any owner-host data.
 
 ## Confirmed historical defects
