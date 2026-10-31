@@ -1,0 +1,74 @@
+name: IP F14 verified RandomBot C++ stage safety (policy only)
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ip-f14-verified-stage-policy-20261031.yml
+      - src/IndividualProgressionRandomBotStagePolicy.h
+      - tests/f14_verified_rndbot_stage_policy.cpp
+      - docs/F14_VERIFIED_RNDBOT_CPP_STAGE_POLICY_2026-10-31.md
+      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  f14-policy-cxx:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source without runtime permissions
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Guard exact five paths, original compiled Hunter and grouping source
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=d3688e243a24441438eaff7b3488b05f41614deb
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
+          printf '%s\n' \
+            '.github/workflows/ip-f14-verified-stage-policy-20261031.yml' \
+            'src/IndividualProgressionRandomBotStagePolicy.h' \
+            'tests/f14_verified_rndbot_stage_policy.cpp' \
+            'docs/F14_VERIFIED_RNDBOT_CPP_STAGE_POLICY_2026-10-31.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/actual.txt
+          git diff --check "$BASE" HEAD
+          test "$(git rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
+          for f in src/IndividualProgression.cpp src/IndividualProgressionPlayer.cpp src/IndividualProgressionGroupPolicy.h src/cs_individualProgression.cpp; do
+            test "$(git rev-parse "HEAD:$f")" = "$(git rev-parse "$BASE:$f")"
+          done
+          echo 'PASS: original Hunter, grouping, player login and GM command C++ unchanged'
+      - name: Assert no live F14 hook falsely wired
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -l 'IndividualProgressionRandomBotStagePolicy' src/*.cpp; then
+            echo 'FAIL: an executable source refers to unapproved F14 policy'; exit 1
+          fi
+          echo 'PASS: policy header is not connected to any Worldserver character write'
+      - name: Compile and run actual F14 header in C++17 and C++20
+        shell: bash
+        run: |
+          set -euo pipefail
+          for standard in c++17 c++20; do
+            g++ "-std=$standard" -O2 -Wall -Wextra -Werror -pedantic \
+              tests/f14_verified_rndbot_stage_policy.cpp -o "/tmp/f14-$standard"
+            "/tmp/f14-$standard"
+          done
+      - name: Preserve Hunter and grouping source regression checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/check_hunter_autocast_source.py
+          python3 tests/check_group_expansion_source.py
+      - name: Explicit staged-only security boundary
+        if: always()
+        run: |
+          echo 'Policy C++ is NOT called by IP/Playerbots. This is NOT implemented F14.'
+          echo 'This job does not run or deploy Worldserver, spawn bots, inspect or edit SQL, or modify a pet.'
+          echo 'Positive type evidence, early login order, eligibility and owner gameplay approval remain prerequisites.'
