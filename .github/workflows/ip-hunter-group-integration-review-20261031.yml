@@ -1,0 +1,70 @@
+name: IP exact Hunter + grouping integration source and policy gate
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ip-hunter-group-integration-review-20261031.yml
+      - src/IndividualProgressionSpells.cpp
+      - tests/check_hunter_autocast_source.py
+      - docs/HUNTER_GROUPING_INTEGRATION_REVIEW_2026-10-31.md
+      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration-source-and-policy:
+    name: Exact committed Hunter C++ plus protected grouping source checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout complete review history only (NO host)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert source equality and exact five-file review delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=e0cd785f6b2090c8f099c824811077d0ab2a9de5
+          test "$(git rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
+          test "$(git rev-parse HEAD:tests/check_hunter_autocast_source.py)" = 6f2e26b2048790c2850ccbd8992e3fdd77f01828
+          for path in src/IndividualProgression.cpp src/IndividualProgressionPlayer.cpp src/IndividualProgressionGroupPolicy.h; do
+            test "$(git rev-parse "HEAD:$path")" = "$(git rev-parse "$BASE:$path")"
+          done
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
+          printf '%s\n' \
+            '.github/workflows/ip-hunter-group-integration-review-20261031.yml' \
+            'docs/HUNTER_GROUPING_INTEGRATION_REVIEW_2026-10-31.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'src/IndividualProgressionSpells.cpp' \
+            'tests/check_hunter_autocast_source.py' | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/actual.txt
+          git diff --check "$BASE" HEAD
+          echo 'PASS: exact unchanged Hunter C++ blob and frozen grouped source, five-path review delta only.'
+      - name: Hunter original source-preservation regression checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show origin/develop/cosmic-ip:src/IndividualProgressionSpells.cpp > /dev/null
+          python3 tests/check_hunter_autocast_source.py
+      - name: Grouping source guards and C++17/C++20 policy matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/check_group_expansion_source.py
+          for standard in c++17 c++20; do
+            g++ -std="$standard" -O2 -Wall -Wextra -Werror \
+              tests/group_expansion_policy.cpp -o "/tmp/ip-group-policy-$standard"
+            "/tmp/ip-group-policy-$standard"
+          done
+      - name: Preserve compile/provenance boundary
+        if: always()
+        run: |
+          echo 'Exact combined executable Hunter and grouping source already passed isolated native Worldserver link in CI run 41145398854.'
+          echo 'This PR does not start a second native job, install a binary or deploy anything.'
+          echo 'Group direct pre-add enforcement and F14 positively identified rndbot floor/visibility are NOT fixed.'
+          echo 'Actual owner installed sources, gameplay, restorable backup and merge approval remain unverified.'
