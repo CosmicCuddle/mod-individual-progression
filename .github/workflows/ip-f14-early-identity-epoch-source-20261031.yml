@@ -1,0 +1,74 @@
+name: IP F14 pre-login identity & boot-epoch source contract (no runtime)
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ip-f14-early-identity-epoch-source-20261031.yml
+      - tests/test_f14_early_identity_source_contract.py
+      - docs/F14_EARLY_IDENTITY_EPOCH_REVIEW_2026-10-31.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-identity-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact IP test source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify three test-only changed paths and parent policy unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=d4ff9374a0b89c42d93e0f57fdc3fc720cfec785
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
+          printf '%s\n' \
+            '.github/workflows/ip-f14-early-identity-epoch-source-20261031.yml' \
+            'tests/test_f14_early_identity_source_contract.py' \
+            'docs/F14_EARLY_IDENTITY_EPOCH_REVIEW_2026-10-31.md' | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/actual.txt
+          git diff --check "$BASE" HEAD
+          for f in src/IndividualProgression.cpp src/IndividualProgressionPlayer.cpp src/IndividualProgression.h src/cs_individualProgression.cpp src/IndividualProgressionSpells.cpp src/IndividualProgressionGroupPolicy.h src/IndividualProgressionRandomBotStagePolicy.h; do
+            test "$(git rev-parse "HEAD:$f")" = "$(git rev-parse "$BASE:$f")"
+          done
+          echo 'PASS: no live code, account/character/SQL/config or compiled source changed'
+      - name: Checkout exact historical Playerbots as READ ONLY source
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: historical-playerbots
+          persist-credentials: false
+      - name: Checkout exact historical AzerothCore as READ ONLY source
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          path: historical-core
+          persist-credentials: false
+      - name: Verify frozen source SHAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C historical-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          test "$(git -C historical-core rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
+          echo 'PASS: exact historical source versions, not claimed owner installed revisions'
+      - name: Run account-type / current-selection / restart / pre-login Python guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          PINNED_PLAYERBOTS_ROOT=historical-playerbots \
+          PINNED_CORE_ROOT=historical-core \
+          PINNED_IP_ROOT=. \
+          python3 -m unittest discover -s tests -p 'test_f14_early_identity_source_contract.py' -v
+      - name: Safety boundary
+        if: always()
+        shell: bash
+        run: |
+          echo 'Source test ONLY. A green run does not mean a typed snapshot exists or a live bot is protected.'
+          echo 'No Worldserver launch, deployed binary, bot account write, SQL, registration, gameplay or backup.'
