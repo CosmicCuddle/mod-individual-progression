@@ -158,6 +158,7 @@ jobs:
         run: |
           cmake -S acore -B acore-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_CXX_FLAGS="-DCOSMIC_IP_F14_REQUIRE_PLAYERBOTS" \
             -DMODULES=static -DSCRIPTS=static \
             -DAPPS_BUILD=world-only -DTOOLS_BUILD=none \
             -DUSE_COREPCH=ON -DUSE_SCRIPTPCH=ON
@@ -170,6 +171,10 @@ jobs:
           for name in ('IndividualProgression.cpp', 'IndividualProgressionPlayer.cpp', 'IndividualProgressionSpells.cpp'):
               sources = [x for x in cc if x.get('file','').replace('\\','/').endswith('/mod-individual-progression/src/'+name)]
               assert len(sources)==1, f'Expected one compiled {name}, got {len(sources)}'
+              if name == 'IndividualProgressionPlayer.cpp':
+                  command = sources[0].get('command') or ' '.join(sources[0].get('arguments', []))
+                  assert '-DCOSMIC_IP_F14_REQUIRE_PLAYERBOTS' in command, 'F14 Playerbots-required compile proof missing'
+                  print('PASS: F14 executable login translation unit REQUIRES Playerbots header')
               print('PASS:',name)
           PY
       - name: Actual full Worldserver compile and link (NEVER LAUNCH)
