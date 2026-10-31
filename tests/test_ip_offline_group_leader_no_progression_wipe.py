@@ -17,8 +17,8 @@ SECTION = SRC.split("bool OnPlayerCanGroupAccept(Player* player, Group* group) o
 
 def missing_leader_decision(ip_enabled, enforce):
     if not ip_enabled:
-        return True
-    return not enforce
+        return True, False
+    return (not enforce), False
 
 
 class OfflineLeaderSafety(unittest.TestCase):
@@ -44,11 +44,11 @@ class OfflineLeaderSafety(unittest.TestCase):
         for enabled, enforced, join_stage, leader_valid in product(
                 (False, True), (False, True), range(19), (False, True)):
             if not leader_valid:
-                permitted=missing_leader_decision(enabled,enforced)
+                permitted, may_write = missing_leader_decision(enabled, enforced)
                 self.assertEqual(permitted, not (enabled and enforced))
                 # Both acceptance and denial must happen before ANY
                 # progression write when the leader stage is unknowable.
-                self.assertFalse(False, "Unreachable: model intentionally has no write")
+                self.assertFalse(may_write)
 
     def test_normal_present_leader_sync_logic_unmodified(self):
         self.assertIn("if (!sIndividualProgression->isNormalAccount(player))", SECTION)
