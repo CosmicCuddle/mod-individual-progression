@@ -8,6 +8,7 @@ on:
       - docs/CUSTOM_MODIFICATIONS_REGISTER.md
       - tests/test_ip_combined_offline_leader_guard.py
       - .github/workflows/ip-combined-offline-leader-source-20261031.yml
+      - .github/workflows/ip-hunter-group-integration-review-20261031.yml
   workflow_dispatch:
 
 permissions:
@@ -28,7 +29,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Strict five-file delta vs original combined Hunter/grouping parent
+      - name: Strict six-file delta vs original combined Hunter/grouping parent
         shell: bash
         run: |
           set -euo pipefail
@@ -38,11 +39,15 @@ jobs:
           git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
           printf '%s\n' \
             '.github/workflows/ip-combined-offline-leader-source-20261031.yml' \
+            '.github/workflows/ip-hunter-group-integration-review-20261031.yml' \
             'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
             'docs/IP_COMBINED_HUNTER_GROUP_OFFLINE_LEADER_PORT_2026-10-31.md' \
             'src/IndividualProgressionPlayer.cpp' \
             'tests/test_ip_combined_offline_leader_guard.py' | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/actual.txt
+          # Exact five-file parent guard still runs only on its own PR.
+          grep -F "github.head_ref == 'integration/hunter-grouping-candidate-20261031'" .github/workflows/ip-hunter-group-integration-review-20261031.yml
+          grep -F "github.ref == 'refs/heads/integration/hunter-grouping-candidate-20261031'" .github/workflows/ip-hunter-group-integration-review-20261031.yml
           for file in src/cs_individualProgression.cpp src/IndividualProgressionGroupPolicy.h src/IndividualProgression.cpp src/IndividualProgressionSpells.cpp; do
             test "$(git rev-parse "HEAD:$file")" = "$(git rev-parse "$BASE:$file")"
           done
