@@ -37,7 +37,9 @@ jobs:
             test "$(git rev-parse "HEAD:$path")" = "$(git rev-parse "$BASE:$path")"
           done
           git merge-base --is-ancestor "$BASE" HEAD
-          # Keep Hunter+grouping five-path proof pinned at its approved candidate.\n          # Stacked F14 additions are independently guarded in their own workflow.\n          git diff --name-only "$BASE" "$FROZEN" | sort > /tmp/actual.txt
+          # Keep Hunter+grouping five-path proof pinned at its approved candidate.
+          # Stacked F14 additions are independently guarded in their own workflow.
+          git diff --name-only "$BASE" "$FROZEN" | sort > /tmp/actual.txt
           printf '%s\n' \
             '.github/workflows/ip-hunter-group-integration-review-20261031.yml' \
             'docs/HUNTER_GROUPING_INTEGRATION_REVIEW_2026-10-31.md' \
@@ -45,7 +47,8 @@ jobs:
             'src/IndividualProgressionSpells.cpp' \
             'tests/check_hunter_autocast_source.py' | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/actual.txt
-          git diff --check "$BASE" "$FROZEN"\n          git diff --check "$FROZEN" HEAD
+          git diff --check "$BASE" "$FROZEN"
+          git diff --check "$FROZEN" HEAD
           echo 'PASS: frozen five-file Hunter+grouping candidate remains identical across stacked review PRs.'
       - name: Hunter original source-preservation regression checks
         shell: bash
