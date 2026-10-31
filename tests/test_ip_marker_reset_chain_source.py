@@ -563,6 +563,68 @@ class NegativeMutationFixtures(unittest.TestCase):
         ("pvp_insert", "INSERT INTO quest_template_addon (ID, SpecialFlags) VALUES (66101, 256);"),
     ]
 
+    # Revision 6: CS02-IP G1 (double-quoted marker names anywhere) and G2 (EXPLAIN ANALYZE / write verb).
+    G1_REASON = "(ANSI_QUOTES; effective SQL mode unverified) (fail closed)"
+    G2_REASON = "with ANALYZE or a write verb on a marker table (engine behaviour unverified) (fail closed)"
+    SQL_REV6_NEGATIVES = [
+        ("g1_join", 'UPDATE creature_template c JOIN "quest_template" q ON q.ID=c.entry SET q.Flags=0;',
+         'double-quoted marker-table identifier "quest_template" in UPDATE ' + G1_REASON),
+        ("g1_delete_alias", 'DELETE q FROM "quest_template" q WHERE q.ID=66001;',
+         'double-quoted marker-table identifier "quest_template" in DELETE ' + G1_REASON),
+        ("g1_load", 'LOAD DATA INFILE \'x\' REPLACE INTO TABLE "quest_template";',
+         'double-quoted marker-table identifier "quest_template" in LOAD ' + G1_REASON),
+        ("g1_truncate", 'TRUNCATE TABLE "quest_template_addon";',
+         'double-quoted marker-table identifier "quest_template_addon" in TRUNCATE ' + G1_REASON),
+        ("g1_rename", 'RENAME TABLE "quest_template" TO old;',
+         'double-quoted marker-table identifier "quest_template" in RENAME ' + G1_REASON),
+        ("g1_schema_qualified", 'UPDATE "world"."quest_template" SET Flags=0;',
+         'double-quoted marker-table identifier "quest_template" in UPDATE ' + G1_REASON),
+        ("g2_explain_analyze_update", "EXPLAIN ANALYZE UPDATE quest_template SET Flags=0 WHERE ID=66001;",
+         "EXPLAIN " + G2_REASON),
+        ("g2_explain_analyze_join",
+         "EXPLAIN ANALYZE UPDATE quest_template q JOIN quest_template_addon a ON a.ID=q.ID SET a.SpecialFlags=0;",
+         "EXPLAIN " + G2_REASON),
+        ("g2_explain_update", "EXPLAIN UPDATE quest_template SET Flags=0;", "EXPLAIN " + G2_REASON),
+        ("g2_format_analyze_delete", "EXPLAIN FORMAT=TREE ANALYZE DELETE FROM quest_template WHERE ID=66001;",
+         "EXPLAIN " + G2_REASON),
+    ]
+    SQL_REV6_CONTROLS = [
+        ("explain_select", "EXPLAIN SELECT * FROM quest_template;"),
+        ("explain_write_other_table", "EXPLAIN UPDATE creature_template SET x=1;"),
+        ("describe_marker_table", "DESCRIBE quest_template;"),
+        ("single_quoted_marker_name", "UPDATE creature_template SET subname = 'quest_template' WHERE entry = 1;"),
+        # 74 real baseline UPDATEs carry double-quoted quest text like this; they must stay clean.
+        ("double_quoted_quest_text",
+         'UPDATE `quest_template` SET `LogDescription` = "Collect 4 Frostmaul Shards." WHERE `ID` = 9999;'),
+        ("read_only_double_quoted_name", 'SELECT ID FROM "quest_template";'),
+    ]
+
+    def test_sql_rev6_negatives_report_the_intended_reason(self):
+        for name, sql, reason in self.SQL_REV6_NEGATIVES:
+            with self.subTest(fixture=name):
+                err = self._sql_findings(sql + "\n")
+                self.assertIsNotNone(err, f"{name}: not reported")
+                self.assertIn(reason, err)
+
+    def test_sql_rev6_controls_stay_clean(self):
+        for name, sql in self.SQL_REV6_CONTROLS:
+            with self.subTest(fixture=name):
+                self.assertIsNone(self._sql_findings(sql + "\n"))
+
+    def test_baseline_double_quoted_values_are_real_and_never_marker_names(self):
+        """Bounds G1: double-quoted VALUES exist in the real tree, but none equals a marker-table name."""
+        with_dq, dq_marker = 0, 0
+        for rel, text in sources().ip_sql_tree.items():
+            for stmt in x.iter_sql_statements(text):
+                if not x._MARKER_TABLE_TEXT_RE.search(stmt):
+                    continue
+                toks = x.sql_tokens(stmt) or []
+                dq = [t[1] for t in toks if t[0] == "str" and t[1].startswith('"')]
+                with_dq += bool(dq)
+                dq_marker += any(v[1:-1].strip().lower() in x.MARKER_TABLES for v in dq)
+        self.assertGreater(with_dq, 50)
+        self.assertEqual(dq_marker, 0)
+
     def test_sql_rev5_negatives_report_the_intended_reason(self):
         for name, sql, reason in self.SQL_REV5_NEGATIVES:
             with self.subTest(fixture=name):

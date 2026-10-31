@@ -8,6 +8,7 @@
 **Revision 3** (same date): addresses the [CS02-IP rev-2 re-review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544136049) as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544205778). See [Revision 3 changes](#revision-3-changes).
 **Revision 4** (same date): addresses the [CS02-IP rev-3 re-review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544624580) (N1–N4) and the [`drop` finding](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6545502850), as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544844601). See [Revision 4 changes](#revision-4-changes).
 **Revision 5** (same date): closes CS02-IP rev-4 findings F1/F2 and self-review S1–S3, as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6546542325). See [Revision 5 changes](#revision-5-changes).
+**Revision 6** (same date): closes CS02-IP rev-5 findings G1/G2, as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547206443). See [Revision 6 changes](#revision-6-changes).
 
 ## What it checks
 
@@ -182,6 +183,10 @@ Making the markers repeatable would hide them from `ResetQuests`. It would **als
 - **Revision 5 fixtures:**
   - 9 negatives with asserted reasons: `LOAD DATA`, `LOAD XML`, `WITH … UPDATE` with and without a sub-select, ODKU `ID = 66001`, ODKU `ID = ID + 1`, ODKU chain column, ANSI-quoted `UPDATE`, ANSI-quoted `INSERT`.
   - 9 controls: `SET @var := (SELECT …)` (a real baseline form), `SELECT`, `HANDLER`, `EXPLAIN`, a marker name only inside a string (twice), a non-chain ODKU with `VALUES(c)`, a plain unrelated insert, a PvP insert.
+- **Revision 6 fixtures:**
+  - 10 negatives with asserted reasons: Grok's 5 G1 statements, plus `"world"."quest_template"`, and 4 G2 statements, including `EXPLAIN UPDATE` and `EXPLAIN FORMAT=TREE ANALYZE DELETE`.
+  - 6 controls: `EXPLAIN SELECT`, `EXPLAIN UPDATE` of a non-marker table, `DESCRIBE`, a single-quoted marker name, double-quoted quest text, and a read-only `SELECT … FROM "quest_template"`.
+  - A baseline test bounds G1 to marker-name tokens.
 - **Layer B, 2 compiled mutations:**
   - `ResetQuests` skipping 66001–66018;
   - **`ResetQuests` guarding removal with `!quest->HasFlag(QUEST_FLAGS_TRACKING)`**. This compiles with the verbatim `HasFlag`/`QuestFlags` and fails *on behaviour*: markers (`Flags = 1024`) survive, while ordinary quests are still deleted.
@@ -249,7 +254,11 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
     - assigning `ID` a stage literal or an expression is a finding;
     - assigning any other chain column fails closed, because ODKU rewrites whichever row already holds the key;
     - rows are parsed only from the part before ODKU, so `c = VALUES(c)` no longer raises a parser error.
-  - A double-quoted table name in a write target (`UPDATE "quest_template" …`) fails closed, because it is an identifier under `sql_mode=ANSI_QUOTES`. The owner's SQL mode is unverified.
+  - **Double-quoted marker-table names (revision 6, G1):** under `sql_mode=ANSI_QUOTES` a double-quoted token is an identifier, and the owner's effective SQL mode is unverified.
+    - A double-quoted token whose content **is** a marker-table name, or whose last dotted segment is one (`"world"."quest_template"`), fails closed **anywhere** in a statement whose verb is not read-only: JOIN alias, `DELETE q FROM`, `LOAD`, `TRUNCATE`, `RENAME` and so on.
+    - Ordinary double-quoted text values never match. The real tree has 74 `UPDATE`s with double-quoted quest text and 0 double-quoted marker names, which is asserted.
+    - **Accepted conservative false positive:** a write statement whose double-quoted *value* is literally `"quest_template"` or `"quest_template_addon"` fails closed.
+  - **`EXPLAIN`/`DESCRIBE`/`DESC` (revision 6, G2):** these fail closed when followed (after an optional `FORMAT=…`) by `ANALYZE` or a write verb in a statement naming a marker table. The vendor and version (MySQL 8 vs MariaDB) are unverified and are not inferred. `EXPLAIN SELECT` and `DESCRIBE <table>` stay clean.
 - **Known conservative false positive (CS02-IP F3, accepted):** Pass B flags a chain write whose `WHERE` references a baseline-mutable column even when another conjunct pins a non-stage row (e.g. `WHERE ID = 12345 AND AllowableRaces = 1`). Narrowing conjuncts are not used to clear a dependency.
 - **Limits and non-guarantees (CS02-IP F4):**
   - Statement **values** are not modelled, only which columns may change.
@@ -331,6 +340,13 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
 | P2 / F2 + ODKU parser error | ODKU assignments checked (`ID` stage literal or expression, other chain columns); rows parsed before ODKU, so `VALUES(c)` no longer errors |
 | P3 / S3 ANSI_QUOTES | A double-quoted marker-table write target fails closed; string literals stay clean |
 | F3 / F4 | Documented as an accepted conservative false positive and as explicit non-guarantees |
+
+## Revision 6 changes
+
+| CS01-IP item / finding | Change |
+| --- | --- |
+| G1 double-quoted marker names beyond the first target | Any double-quoted token equal to a marker-table name (or last dotted segment) fails closed in non-read-only statements; the rev-5 first-target check is subsumed; `.` added as an operator token so qualified quoted names are analysed by design |
+| G2 `EXPLAIN ANALYZE` / `EXPLAIN <write>` | Fail closed when the statement names a marker table; vendor/version not inferred |
 
 ## Rollback
 

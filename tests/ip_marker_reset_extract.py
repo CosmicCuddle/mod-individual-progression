@@ -502,13 +502,14 @@ _STORED_OR_DYNAMIC_SQL_KEYWORDS = frozenset({"CREATE", "PREPARE", "TRIGGER", "PR
 # Every other unmodelled verb (LOAD DATA/XML, a leading WITH ... UPDATE, future syntax) fails closed.
 _READ_ONLY_VERBS = frozenset({"SELECT", "SET", "SHOW", "HANDLER", "DESCRIBE", "DESC", "EXPLAIN"})
 _WRITE_VERBS = ("INSERT", "REPLACE", "UPDATE", "DELETE")
+_EXPLAIN_VERBS = frozenset({"EXPLAIN", "DESCRIBE", "DESC"})
 _EXECUTABLE_COMMENT_RE = re.compile(r"/\*!(?P<body>.*?)\*/", re.DOTALL)
 
 _SQL_TOKEN_RE = re.compile(r"""\s*(?:
     (?P<str>'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*")
   | (?P<num>\d+(?:\.\d+)?)
   | (?P<ident>(?:`[^`]+`|[A-Za-z_@][\w$@]*)(?:\s*\.\s*(?:`[^`]+`|[A-Za-z_][\w$]*))*)
-  | (?P<op><=|>=|<>|!=|:=|\|\||&&|[=<>(),;*+\-/&|^~%])
+  | (?P<op><=|>=|<>|!=|:=|\|\||&&|[=<>(),;*+\-/&|^~%.])
 )""", re.VERBOSE)
 
 
@@ -796,14 +797,25 @@ def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str
         # inside a string literal) cannot be analysed statically -> fail closed.
         return [f"{'/'.join(sorted(keywords.intersection(_STORED_OR_DYNAMIC_SQL_KEYWORDS)))} naming a marker "
                 f"table (stored/dynamic SQL, fail closed): {short}"]
-    if verb in _WRITE_VERBS:
-        # Revision 5 (S3): under sql_mode=ANSI_QUOTES a double-quoted name is an identifier.
-        j = _skip_modifiers(toks, 1, "LOW_PRIORITY", "DELAYED", "HIGH_PRIORITY", "IGNORE", "QUICK", "INTO", "FROM")
-        if j < len(toks) and toks[j][0] == "str" and toks[j][1].startswith('"') \
-                and toks[j][1][1:-1].strip().lower() in MARKER_TABLES:
-            return [f"double-quoted marker-table identifier {toks[j][1]} in {verb} (ANSI_QUOTES; owner SQL mode "
-                    f"unverified) (fail closed): {short}"]
+    # Under sql_mode=ANSI_QUOTES a double-quoted token is an IDENTIFIER. Only tokens whose content IS
+    # a marker-table name count (e.g. "quest_template", "world"."quest_template"); ordinary
+    # double-quoted text values such as LogDescription = "Collect ..." never match.
+    dq_markers = [t[1] for t in toks if t[0] == "str" and t[1].startswith('"')
+                  and t[1][1:-1].strip().lower() in MARKER_TABLES]
     names = {_ident_name(t[1]) for t in toks if t[0] == "ident"}
+    if verb in _EXPLAIN_VERBS and (dq_markers or names.intersection(MARKER_TABLES)):
+        # Revision 6 (CS02-IP G2): EXPLAIN ANALYZE executes the statement on some engines; an
+        # EXPLAIN of a write verb is not a plain read either. Engine/version unverified -> fail closed.
+        k = 1
+        if k + 2 < len(toks) and _is_kw(toks[k], "FORMAT") and toks[k + 1][1] == "=":
+            k += 3
+        if k < len(toks) and (_is_kw(toks[k], "ANALYZE") or _is_kw(toks[k], *_WRITE_VERBS)):
+            return [f"{verb} with ANALYZE or a write verb on a marker table (engine behaviour unverified) "
+                    f"(fail closed): {short}"]
+    if dq_markers and verb not in _READ_ONLY_VERBS:
+        # Revision 6 (CS02-IP G1): anywhere in the statement, not only the first write target.
+        return [f"double-quoted marker-table identifier {dq_markers[0]} in {verb or toks[0][1]} (ANSI_QUOTES; "
+                f"effective SQL mode unverified) (fail closed): {short}"]
     if not names.intersection(MARKER_TABLES):
         return []
 

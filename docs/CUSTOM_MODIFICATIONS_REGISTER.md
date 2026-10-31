@@ -147,3 +147,12 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | SQL gate | Unmodelled verbs naming a marker table fail closed (read-only allowlist). ODKU `ID` and chain-column assignments are findings. A double-quoted (ANSI_QUOTES) marker-table write target fails closed. Baseline: 0 findings. |
 | Limits | Accepted conservative false positive F3. Non-guarantees F4: concatenated or hex-built dynamic SQL, procedures defined elsewhere, views. |
 | Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 6 (2026-10-31, test/docs only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-5 conditional review (G1, G2)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6547096179), fix selected by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547206443) |
+| Files | The same seven paths; workflow and C++ harness unchanged. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| SQL gate | A double-quoted marker-table name anywhere in a non-read-only statement fails closed (ANSI_QUOTES; SQL mode unverified). `EXPLAIN`/`DESCRIBE` with `ANALYZE` or a write verb on a marker table fails closed (vendor/version unverified). Ordinary double-quoted text values stay clean. Baseline: 0 findings. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |
