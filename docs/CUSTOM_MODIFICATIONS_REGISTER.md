@@ -99,6 +99,20 @@ On 2026-10-30 CosmicCuddle updated Core and Playerbots before the Hunter local b
 | Known risks / decisions | Blocked: direct Playerbots `AddMember` preflight missing, offline-party policy owner undecided, arena/BG special groups undecided, F14 positive race10/11 RandomBot stage8 protection and observer filtering unimplemented; Hunter OFF/default ambiguity and two-pet relog/stable need actual acceptance; Chromaggus upstream removal not approved |
 | Rollback / release gate | Development-only revert of committed integration branch possible; production requires restorable owner backups, source/binary fingerprints, matched build, real group/pet tests, single reconciled Custom Modifications Register, and CosmicCuddle's separate explicit approval to merge and deploy |
 
+## IP-F14-003 — C++ RandomBot progression pre-write contract (TEST-ONLY, NO RUNTIME HOOK)
+
+| Field | Record |
+| --- | --- |
+| Feature / goal | Implement a reusable **pure C++17** decision for a verified Blood Elf/Draenei RandomBot stage-8 minimum, preserving saved stage8+ on relog/restore, rejecting downgrades and over-cap writes before side effects |
+| Owner / component | CosmicCuddle Individual Progression fork; source `src/IndividualProgressionRandomBotStagePolicy.h`, test `tests/f14_verified_rndbot_stage_policy.cpp`, source-test workflow and [policy memo](F14_VERIFIED_RNDBOT_CPP_STAGE_POLICY_2026-10-31.md) |
+| Source provenance | Stacked on [combined Hunter+group candidate PR #10](https://github.com/CosmicCuddle/mod-individual-progression/pull/10) HEAD `d3688e243a24441438eaff7b3488b05f41614deb`; reuses `IndividualProgressionGroupPolicy.h` race/stage definitions; does **not** change executable Hunter/group/login/GM implementation |
+| Inputs and identity | Requires **external verified RandomBot identity** and explicit TBC access, saved/new stage evidence, ingress route and progression cap. Human/Altbot/Selfbot/verified other defer; Unknown race10/11 identity is unresolved, **not write permission** |
+| Configuration/SQL/DBC | Uses existing cap semantics (0 unlimited, positive cap enforced); no new config key, SQL, DBC or client patch, no in-game write API |
+| Tests | Actual header compiled/tested under C++17/20 in isolated GitHub workflow with identity, race, stage and cap matrix. **Exact-head CI status must be verified separately**; no full Wordserver/build/gameplay outcome claimed for new (unwired) policy |
+| Live status | **UNWIRED DRAFT, NOT IMPLEMENTED IN GAME**. No user host or actual character altered |
+| Risks and missing work | Early source-matched positive identity before Core script login stage0 reset, preserved `add` bot restore, stage0 legacy saved-character migration decision, command-side achievement guard, rndbot-only observer visibility, owner Core/Playerbots source compatibility, gameplay matrix |
+| Rollback/approval | Reject/revert isolated draft without changes to installed code. Real integration later needs approved interface, restorable backups, full native link and game regressions, plus CosmicCuddle's explicit merge/deploy decisions |
+
 ## Other existing custom changes — inventory not yet complete
 
 The protected `develop/cosmic-ip` baseline already contains individual progression rules and prior local behaviour. **Those changes are not yet individually enumerated here.** They must be recorded after comparing the owner-installed core/IP/Playerbots/module revisions and custom working-tree modifications. Do not treat this initial register as a licence to reset, overwrite, rebase, prune or upgrade them. See [coordination #4](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/4) for the evidence gate.
