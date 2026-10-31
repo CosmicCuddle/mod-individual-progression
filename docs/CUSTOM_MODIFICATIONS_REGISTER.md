@@ -175,3 +175,14 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | SQL gate | MySQL `/*!` and MariaDB `/*M!` executable comments naming a marker table fail closed (version conditions not evaluated). `EXECUTE IMMEDIATE` naming a marker table, even inside the literal, fails closed. `EXECUTE @stmt` prepared elsewhere is an explicit F4 non-guarantee. Baseline: 0 findings. |
 | Stop criterion | Further dynamic-SQL gaps go to F4 unless a concrete, supported, dangerous miss is reproduced and approved. |
 | Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 8 independent review clarification (2026-10-31, documentation only)
+
+| Field | Record |
+| --- | --- |
+| Reviewer | [CS02-IP Grok exact-head rev8 CONDITIONAL review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6548178875) of frozen `8725cd6adbe7c055954171413eaa1bf7b3370f0a`; CS01 acknowledges distinct source/SQL-model limits. |
+| Scope | **Documentation clarification only**, on isolated child branch of PR #17. No Python scanner, C++, CI workflow, SQL, config, runtime, module or gameplay changes. |
+| F4-L1 | A user variable may contain a **literal stage-marker SQL write in the same file**, then be passed to `PREPARE p FROM @sql; EXECUTE p` (or MariaDB `EXECUTE IMMEDIATE @sql`). The existing scanner does not link assignments to later dynamic execution. Clean means *unmodelled*, **not safe**. No real SQL engine test. |
+| F4-M1 | `SET STATEMENT ... FOR EXECUTE IMMEDIATE '...quest_template...'` is a reproduced rev8 scanner miss; whether a real MariaDB version accepts/executes this combined wrapper is **unverified**. Do not claim a live exploit or actual data loss. |
+| Stop/rollback | Preserve revision 8's bounded-parser stop criterion; unmodelled future SQL requires manual review. Rollback **this child documentation amendment only** without deleting the permanent prior Custom Modifications Register or changing frozen PR #17. |
+| Status | **DRAFT, docs-only, stacked on rev8; not merged or deployed.** |
