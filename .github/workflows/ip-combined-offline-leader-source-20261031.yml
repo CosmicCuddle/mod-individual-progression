@@ -30,6 +30,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Strict six-file delta vs original combined Hunter/grouping parent
+        # Frozen exact-path delta belongs to #16's own head only; every regression
+        # step below still runs on child PRs (same pattern as the #10/#11 steps).
+        if: >-
+          (github.event_name == 'pull_request' && github.head_ref == 'integration/hunter-grouping-offline-leader-guard-20261031') ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/hunter-grouping-offline-leader-guard-20261031')
         shell: bash
         run: |
           set -euo pipefail
