@@ -503,7 +503,9 @@ _STORED_OR_DYNAMIC_SQL_KEYWORDS = frozenset({"CREATE", "PREPARE", "TRIGGER", "PR
 _READ_ONLY_VERBS = frozenset({"SELECT", "SET", "SHOW", "HANDLER", "DESCRIBE", "DESC", "EXPLAIN"})
 _WRITE_VERBS = ("INSERT", "REPLACE", "UPDATE", "DELETE")
 _EXPLAIN_VERBS = frozenset({"EXPLAIN", "DESCRIBE", "DESC"})
-_EXECUTABLE_COMMENT_RE = re.compile(r"/\*!(?P<body>.*?)\*/", re.DOTALL)
+# MySQL /*! ... */ and /*!NNNNN ... */, MariaDB /*M! ... */ and /*M!NNNNNN ... */ (revision 8, CS02-IP K1).
+# Recognition is conservative: version conditions are NOT evaluated (vendor/version unverified).
+_EXECUTABLE_COMMENT_RE = re.compile(r"/\*(?:!|[Mm]!)(?P<body>.*?)\*/", re.DOTALL)
 
 _SQL_TOKEN_RE = re.compile(r"""\s*(?:
     (?P<str>'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*")
@@ -804,6 +806,12 @@ def _analyse_marker_statement(stmt: str, rows_by_table: Dict[str, Tuple[Dict[str
                   and t[1][1:-1].strip().lower() in MARKER_TABLES]
     names = {_ident_name(t[1]) for t in toks if t[0] == "ident"}
     names_marker = bool(dq_markers or names.intersection(MARKER_TABLES))
+    if verb == "EXECUTE" and len(toks) > 1 and _is_kw(toks[1], "IMMEDIATE"):
+        # Revision 8 (CS02-IP K2): MariaDB EXECUTE IMMEDIATE prepares AND runs its argument in one
+        # step. The caller only reaches here when the statement text names a marker table, which for
+        # a literal argument means INSIDE the string. Execution cannot be judged statically -> fail
+        # closed (also for read text). EXECUTE @stmt prepared elsewhere is unobservable (F4).
+        return [f"EXECUTE IMMEDIATE naming marker table (MariaDB dynamic SQL; fail closed): {short}"]
     if verb == "SET" and names_marker and (
             (len(toks) > 1 and _is_kw(toks[1], "STATEMENT")) or _top_level_index(toks, "FOR", start=1) >= 0):
         # Revision 7 (CS02-IP H1): MariaDB `SET STATEMENT var=val FOR <stmt>` EXECUTES <stmt>, so SET
@@ -941,9 +949,10 @@ def _marker_sql_findings_cached(sql_text: str, rows_key: Tuple) -> Tuple[str, ..
     hits: List[str] = []
     for m in _EXECUTABLE_COMMENT_RE.finditer(sql_text):
         if _MARKER_TABLE_TEXT_RE.search(m.group("body")):
-            # N2: MySQL runs /*! ... */ bodies, but iter_sql_statements drops comments -> fail closed.
-            hits.append(f"MySQL executable comment naming a marker table (fail closed): "
-                        f"{normalize_ws(m.group(0))[:80]}")
+            # N2/K1: MySQL and MariaDB run executable-comment bodies, but iter_sql_statements drops
+            # comments -> fail closed.
+            hits.append(f"SQL executable comment naming a marker table (MySQL /*! or MariaDB /*M!; version "
+                        f"condition not evaluated) (fail closed): {normalize_ws(m.group(0))[:80]}")
     for stmt in iter_sql_statements(sql_text):
         if _MARKER_TABLE_TEXT_RE.search(stmt):
             hits.extend(_analyse_marker_statement(stmt, rows_by_table))

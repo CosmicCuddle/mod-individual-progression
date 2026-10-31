@@ -165,3 +165,13 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Files | The same seven paths; workflow and C++ harness unchanged. Still no `src/`, `data/`, `conf/` or `optional/` change. |
 | SQL gate | MariaDB `SET STATEMENT … FOR` naming a marker table fails closed (engine unverified). Any top-level `ANALYZE` or write verb after `EXPLAIN`/`DESC`/`DESCRIBE` on a marker table fails closed. `EXPLAIN ANALYZE SELECT`, leading `(SELECT …)` and `EXPLAIN SELECT … FOR UPDATE` are intentional false positives, locked by tests. Baseline: 0 findings. |
 | Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 8 (2026-10-31, test/docs only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-7 conditional review (K1, K2)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6547793820), decision and stop criterion by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547816217) |
+| Files | The same seven paths; workflow and C++ harness unchanged. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| SQL gate | MySQL `/*!` and MariaDB `/*M!` executable comments naming a marker table fail closed (version conditions not evaluated). `EXECUTE IMMEDIATE` naming a marker table, even inside the literal, fails closed. `EXECUTE @stmt` prepared elsewhere is an explicit F4 non-guarantee. Baseline: 0 findings. |
+| Stop criterion | Further dynamic-SQL gaps go to F4 unless a concrete, supported, dangerous miss is reproduced and approved. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |

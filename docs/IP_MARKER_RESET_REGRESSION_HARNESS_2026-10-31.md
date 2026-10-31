@@ -10,6 +10,7 @@
 **Revision 5** (same date): closes CS02-IP rev-4 findings F1/F2 and self-review S1–S3, as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6546542325). See [Revision 5 changes](#revision-5-changes).
 **Revision 6** (same date): closes CS02-IP rev-5 findings G1/G2, as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547206443). See [Revision 6 changes](#revision-6-changes).
 **Revision 7** (same date): closes CS02-IP rev-6 findings H1/H2 and documents H3, as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547639162). See [Revision 7 changes](#revision-7-changes).
+**Revision 8** (same date): closes CS02-IP rev-7 findings K1/K2 and records the CS01-IP stop criterion, as scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547816217). See [Revision 8 changes](#revision-8-changes).
 
 ## What it checks
 
@@ -192,6 +193,10 @@ Making the markers repeatable would hide them from `ResetQuests`. It would **als
   - 9 negatives with asserted reasons: Grok's 4 H1 statements and 5 H2 statements.
   - 4 locked false positives (H3 and `FOR UPDATE`).
   - 5 controls: both real `SET @BK_RACES` reads, `SET @note = 'quest_template'`, a nested `FOR UPDATE` inside `SET @x := (SELECT …)`, and `UPDATE` only inside a string in an `EXPLAIN SELECT`.
+- **Revision 8 fixtures:**
+  - 7 negatives with asserted reasons: Grok's 3 MariaDB `/*M!` statements, the MySQL `/*!100000 …*/` form still detected, and `EXECUTE IMMEDIATE` (`DELETE` on `quest_template`, `UPDATE` on `quest_template_addon`, double-quoted literal).
+  - 4 controls: a plain comment with a marker write, an ordinary comment mentioning `M!` and a version, `EXECUTE IMMEDIATE 'SELECT 1'`, and `SELECT 'DELETE FROM quest_template'`.
+  - An explicit F4 non-guarantee test: `EXECUTE @stmt` and a `CONCAT`-built `PREPARE` are clean because they are unobservable.
 - **Layer B, 2 compiled mutations:**
   - `ResetQuests` skipping 66001–66018;
   - **`ResetQuests` guarding removal with `!quest->HasFlag(QUEST_FLAGS_TRACKING)`**. This compiles with the verbatim `HasFlag`/`QuestFlags` and fails *on behaviour*: markers (`Flags = 1024`) survive, while ordinary quests are still deleted.
@@ -249,7 +254,11 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
 - **Mutable columns in the real baseline:** `quest_template.RewardFactionOverride1..5` (`vanilla_quest_reputations.sql`) and `AllowableRaces` (`zz_optional_custom_races.sql`; its `& N` predicates are undecidable, so they are treated as touching). None is a chain column, so the baseline stays clean. **A future chain write filtering on one of these columns fails closed by design**, even where values would not actually match. This is a deliberate false positive, asserted by `test_baseline_mutable_columns_are_documented`.
 - **Revision 4 — other fail-closed rules:**
   - `SET ID = <stage literal>` is a finding regardless of `WHERE` (N4a), and `SET ID = <expression>` fails closed. Literal non-stage or PvP IDs stay clean.
-  - MySQL executable comments `/*! … */` naming a marker table are findings (N2). Ordinary comments are ignored.
+  - **Executable comments** naming a marker table are findings (N2; extended to MariaDB in revision 8, K1). This covers MySQL `/*! … */` and `/*!NNNNN … */` as well as MariaDB `/*M! … */` and `/*M!NNNNNN … */`.
+    - Version conditions are **not evaluated**, so recognition is conservative.
+    - There is no claim that a given versioned body runs on the owner's unknown engine.
+    - Ordinary `/* … */` comments are ignored, even when they mention `M!` or a version number.
+  - **`EXECUTE IMMEDIATE …` (revision 8, K2):** MariaDB prepares and runs the argument in one step. When the statement text names a marker table (for a literal argument, inside the string), it fails closed with `EXECUTE IMMEDIATE naming marker table (MariaDB dynamic SQL; fail closed)`. This applies even to read text, because execution cannot be judged statically. `EXECUTE IMMEDIATE 'SELECT 1'` stays clean.
   - Statements containing the keywords `CREATE`, `PREPARE`, `TRIGGER` or `PROCEDURE` (outside string literals) that name a marker table anywhere, including inside a string, are findings.
 - **Revision 5 — verb allowlist, ODKU and quoted identifiers:**
   - A statement that names a marker table **as an identifier** is analysed only if its verb is modelled: `INSERT`/`REPLACE`/`UPDATE`/`DELETE`, the DDL rule, or the stored/dynamic SQL rule.
@@ -278,6 +287,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
 - **Limits and non-guarantees (CS02-IP F4):**
   - Statement **values** are not modelled, only which columns may change.
   - Dynamic SQL **built** without naming a marker table literally (e.g. `CONCAT('UPDATE quest_', 'template …')`, hex-encoded names) is invisible.
+  - `EXECUTE @stmt` of a statement prepared elsewhere or built at runtime carries no SQL text and is **unobservable**. A clean result there means "not seen", not "safe"; this is asserted by a test.
   - So are `CALL` of a procedure defined elsewhere and writes through a **view**. That is why the analysis is conservative.
   - `CALL` of a procedure defined outside these files, `EXECUTE` of a statement prepared elsewhere, and dynamic SQL that never names a marker table cannot be seen.
   - Only IP's `data/sql/**` and `optional/sql/**` are inputs. Core custom SQL, other modules, manual overlays and live DB history are **not** audited.
@@ -370,6 +380,18 @@ g++ -std=c++17 -Wall -Wextra -Werror -I build/marker-reset -I tests/marker_reset
 | H1 (Medium) MariaDB `SET STATEMENT … FOR` | Fails closed before the read-only return when it names a marker table; real `SET @var` statements stay clean |
 | H2 (bounded) EXPLAIN modifiers | Any top-level `ANALYZE` or write-verb token after `EXPLAIN`/`DESC`/`DESCRIBE` fails closed (covers `EXTENDED`, `PARTITIONS`, `FORMAT=…`, `WITH`, `INTO`) |
 | H3 (docs) | `EXPLAIN ANALYZE SELECT`, leading `(SELECT …)` and `EXPLAIN SELECT … FOR UPDATE` documented as intentional false positives and locked by tests |
+
+## Revision 8 changes
+
+| CS01-IP item / finding | Change |
+| --- | --- |
+| K1 (Medium) MariaDB `/*M! … */` executable comments | Vendor-neutral executable-comment recognition (`/*!`, `/*M!`, with or without version digits); reason now `SQL executable comment …`; version conditions not evaluated |
+| K2 (Low) `EXECUTE IMMEDIATE '<literal>'` | Fails closed when the text names a marker table, including inside the string |
+| F4 | `EXECUTE @stmt` prepared elsewhere added explicitly; asserted as unobservable |
+
+## Stop criterion (CS01-IP, revision 8)
+
+This harness is a **bounded static test gate, not a SQL parser or interpreter**. After revision 8's exact-head CI and independent review, residual unmodelled dynamic or vendor-specific SQL belongs in the documented F4 non-guarantees. It is not to be chased with further parser expansion, unless a **concrete, dialect-supported, dangerous false negative** against the documented rule is reproduced and approved for a bounded fix.
 
 ## Rollback
 

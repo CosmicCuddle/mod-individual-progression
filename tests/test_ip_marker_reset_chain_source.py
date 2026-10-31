@@ -449,7 +449,7 @@ class NegativeMutationFixtures(unittest.TestCase):
     # Revision 4, CS02-IP N2 / N4a.
     SQL_REV4_NEGATIVES = [
         ("executable_comment", "/*!50000 UPDATE quest_template_addon SET SpecialFlags=1 */;",
-         "MySQL executable comment naming a marker table"),
+         "SQL executable comment naming a marker table (MySQL /*! or MariaDB /*M!"),
         ("create_trigger",
          "CREATE TRIGGER t BEFORE UPDATE ON quest_template_addon FOR EACH ROW SET NEW.SpecialFlags = 1;",
          "stored/dynamic SQL, fail closed"),
@@ -640,6 +640,46 @@ class NegativeMutationFixtures(unittest.TestCase):
         ("set_variable_nested_for_update", "SET @x := (SELECT ID FROM quest_template WHERE ID = 1 FOR UPDATE);"),
         ("explain_keyword_only_in_string", "EXPLAIN SELECT * FROM quest_template WHERE LogTitle = 'UPDATE';"),
     ]
+
+    # Revision 8: CS02-IP K1 (MariaDB /*M! executable comments) and K2 (EXECUTE IMMEDIATE literal SQL).
+    K1_REASON = "SQL executable comment naming a marker table (MySQL /*! or MariaDB /*M!; version condition not evaluated)"
+    K2_REASON = "EXECUTE IMMEDIATE naming marker table (MariaDB dynamic SQL; fail closed)"
+    SQL_REV8_NEGATIVES = [
+        ("k1_mariadb_versioned_set_statement",
+         "/*M!100000 SET STATEMENT max_statement_time=1 FOR DELETE FROM quest_template WHERE ID=66001 */;", K1_REASON),
+        ("k1_mariadb_unversioned_update", "/*M! UPDATE quest_template SET Flags=0 WHERE ID=66001 */;", K1_REASON),
+        ("k1_mariadb_versioned_delete_addon", "/*M!100500 DELETE FROM quest_template_addon */;", K1_REASON),
+        ("k1_mysql_versioned_still_detected",
+         "/*!100000 SET STATEMENT max_statement_time=1 FOR DELETE FROM quest_template WHERE ID=66001 */;", K1_REASON),
+        ("k2_execute_immediate_delete", "EXECUTE IMMEDIATE 'DELETE FROM quest_template WHERE ID=66001';", K2_REASON),
+        ("k2_execute_immediate_update_addon",
+         "EXECUTE IMMEDIATE 'UPDATE quest_template_addon SET SpecialFlags=0';", K2_REASON),
+        ("k2_execute_immediate_double_quoted", 'EXECUTE IMMEDIATE "DELETE FROM quest_template";', K2_REASON),
+    ]
+    SQL_REV8_CONTROLS = [
+        ("plain_comment_with_marker_write", "/* DELETE FROM quest_template WHERE ID=66001 */ SELECT 1;"),
+        ("ordinary_comment_mentioning_version_marker", "/* MariaDB uses M! 100000 comments; quest_template */ SELECT 1;"),
+        ("execute_immediate_without_marker", "EXECUTE IMMEDIATE 'SELECT 1';"),
+        ("select_string_with_marker_write", "SELECT 'DELETE FROM quest_template';"),
+    ]
+
+    def test_sql_rev8_negatives_report_the_intended_reason(self):
+        for name, sql, reason in self.SQL_REV8_NEGATIVES:
+            with self.subTest(fixture=name):
+                err = self._sql_findings(sql + "\n")
+                self.assertIsNotNone(err, f"{name}: not reported")
+                self.assertIn(reason, err)
+
+    def test_sql_rev8_controls_stay_clean(self):
+        for name, sql in self.SQL_REV8_CONTROLS:
+            with self.subTest(fixture=name):
+                self.assertIsNone(self._sql_findings(sql + "\n"))
+
+    def test_execute_of_statement_prepared_elsewhere_is_an_explicit_non_guarantee(self):
+        """F4: `EXECUTE @stmt` carries no SQL text, so the static gate CANNOT see it. Clean here
+        means UNOBSERVABLE, not safe; the memo lists it under F4."""
+        self.assertIsNone(self._sql_findings("EXECUTE @stmt;\n"))
+        self.assertIsNone(self._sql_findings("SET @s = CONCAT('DELETE FROM quest_', 'template');\nPREPARE p FROM @s;\n"))
 
     def test_sql_rev7_negatives_report_the_intended_reason(self):
         for name, sql, reason in self.SQL_REV7_NEGATIVES:
