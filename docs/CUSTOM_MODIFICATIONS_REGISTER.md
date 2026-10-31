@@ -88,3 +88,90 @@ The protected `develop/cosmic-ip` baseline already contains individual progressi
 ## Upstream integration checklist
 
 Before every proposed Grimfeather update: identify actual installed commits and dirty files; compare upstream paths and ABI; cross-check this register and live issue decisions; propose a conflict-preservation plan; compile in a separate environment; test game outcomes and custom regressions; document backup and rollback; and request CosmicCuddle's approval before merge or production change.
+
+## IP-TEST-C1-001 — Playerbots quest-reset vs IP stage-marker regression harness (TEST-ONLY)
+
+| Field | Record |
+| --- | --- |
+| Purpose | Make accidental loss of IP stage markers 66001–66018 through Playerbots' full randomisation detectable in repeatable automated tests against exact pinned source. **Detection only; this is not a fix.** |
+| Owner / reference | CosmicCuddle's assignment to CS03-IP in [Coordination #13](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13). The C1 design decision remains open in [Coordination #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9). |
+| Branch / base | `claude/azerothcore-ip-fork-hoqu8m` based on `develop/cosmic-ip` @ `edd639b0a6eba858830876e987def510450f438a` |
+| Files (new, test/doc only) | `tests/ip_marker_reset_extract.py`, `tests/test_ip_marker_reset_chain_source.py`, `tests/marker_reset_harness/harness_stubs.h`, `tests/marker_reset_harness/harness_main.cpp`, `.github/workflows/ip-marker-reset-regression-harness-20261031.yml`, `docs/IP_MARKER_RESET_REGRESSION_HARNESS_2026-10-31.md`; this append-only entry |
+| Runtime impact | **None.** No `src/`, `data/`, `conf/` or `optional/` change, enforced by the CI guard. Not compiled into or loaded by Worldserver. No new config key, SQL, schema, DBC or client dependency. |
+| Pinned inputs | mod-playerbots `e88cc4099e69f35126b28942a412ca702d20453b`; Grimfeather AzerothCore `8daffdabe9202c228e45d833c9a1d399597a15cd`. These are **historical pins, not the owner-installed revisions.** |
+| Evidence levels | (A) source contracts with 17 negative mutation fixtures plus foreign-SQL fixtures; (B) verbatim pinned function bodies compiled (g++ C++17, clang++ C++17, g++ C++20) against stand-in types and executed: 86 expectations including controls. **No Worldserver, DB or gameplay test.** |
+| Findings recorded | The full reset also comes from console `rndbot clear` (`ClearEverything`) and `rndbot init`. The delete is persisted by `_SaveQuestStatus` (`CHAR_DEL_CHAR_QUESTSTATUS_REWARDED_BY_QUEST`). `DowngradeMaxLevelBot` code default is `true` when the key is absent (conf.dist ships 0). `RandomBotMaxLevel` is clamped to `MaxPlayerLevel`, so on a level-60 cap with downgrade on, level-60 RandomBots are fully reset periodically. Making markers repeatable would hide them from IP itself, so it is not a mitigation. PvP markers 661xx are collateral. |
+| Owner-side unknowns | Effective `MaxPlayerLevel`, `Playerbots.RandomBotMaxLevel`, `Playerbots.DowngradeMaxLevelBot` (present or absent), installed PB/Core/IP revisions and any live quest_template overrides |
+| Status | **DRAFT, test-only, unmerged, not deployed.** Awaiting CS01-IP integration review and optional CS02-IP independent review |
+| Rollback | Delete the files above and this section. Nothing else depends on them. |
+
+### IP-TEST-C1-001 — revision 2 (2026-10-31, test/docs/CI only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP review of PR #17](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6543427658), scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6543457181) and claimed by CS03-IP in Issue #13 |
+| Files | The same seven paths. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| Coverage added | GM `initself` × 6 full-reset routes (a **real GM character** source risk) and `RandomBotLevelMgr` × 3 routes (default OFF behind `Playerbots.LevelBrackets.Enabled` / `Playerbots.ResetBotLevel.Enabled`). Five-statement unconditional removal contract that closes the guarded-removal loophole. Fail closed on preprocessor conditionals and on unparseable marker-table SQL. Clean-tree pin checks. |
+| Config finding | PB renamed `AiPlayerbot.*` → `Playerbots.*` between `037c0141` and `e88cc409`, with **no fallback** at `e88cc409`. A stale `AiPlayerbot.DowngradeMaxLevelBot = 0` is silently ignored, so downgrade defaults to **true**. Exposure still needs bot level ≥ effective `RandomBotMaxLevel` (clamped to worldserver `MaxPlayerLevel`, which is distinct from IP's XP-only caps). **Owner config unverified.** |
+| CI | Split into a PR17-only frozen scope guard (skipped elsewhere) and a reusable chain job that also triggers on `src/IndividualProgression*`, `data/sql/**` and `optional/sql/**`. Read-only; the legacy PB checkout is used for key-name comparison only. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** Deferred: `!` precedence and digit separators in the extractor. |
+
+### IP-TEST-C1-001 — revision 3 (2026-10-31, test/docs/CI only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-2 re-review (PASS, two Medium items)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544136049), scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544205778) |
+| Files | The same seven paths. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| CI | The reusable chain job now triggers on `src/**`, `conf/**`, `data/sql/**` and `optional/sql/**`, and on pushes to `develop/cosmic-ip`. The PR17 frozen guard is unchanged. **Not a required branch-protection check** (owner decision; settings unverified). Branches without the workflow are not covered. |
+| SQL gate | Quote-aware static gate (not a SQL engine): chain-column allowlist (`ID`, `Flags`, `QuestSortID`, `SpecialFlags`), three-valued `WHERE` evaluation against the 18 real stage-marker rows, case-insensitive ID, fail closed on DDL, sub-queries, multi-table writes and non-literal IDs. PvP 66101–66114 deliberately not frozen. Baseline: 0 findings. |
+| Route inventory | Tree-wide PB full-reset call-site multiset; AddClass `OnBotLogin` (type 2 + master + level gap > 3) source contract; `random` command documented (AddClass-restricted); `ResetQuests` function-level statements pinned |
+| Docs | Memo header made role-neutral, crediting the project owner |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 4 (2026-10-31, test/docs only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-3 re-review (PASS; N1 Medium, N2–N4 Low)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6544624580) and the [`drop` route finding](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6545502850), scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6544844601) |
+| Files | The same seven paths. The workflow is unchanged in this revision. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| SQL gate | Whole-tree cross-statement and cross-file dependency analysis (fail closed). `SET ID = <stage literal or expression>`, MySQL `/*! … */` comments and stored or dynamic SQL naming a marker table are findings. Real-baseline mutable non-chain columns (`RewardFactionOverride1..5`, `AllowableRaces`) are documented. Baseline: 0 findings. |
+| Route inventory | Pointer-style (`->`) calls counted. `RemoveRewardedQuest` caller inventory (4 PB sites). `DropQuestAction::Execute` contract: master `drop <quest link>` removes a rewarded marker with no log slot, without any reset ([SRC] only; chat reachability untested). Stage and PvP sets are tracked separately; no preservation policy is implied. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 5 (2026-10-31, test/docs only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-4 conditional review (F1, F2)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6546511038) and CS03-IP self-review S1–S3, scoped by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6546542325) |
+| Files | The same seven paths; workflow and C++ harness unchanged. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| SQL gate | Unmodelled verbs naming a marker table fail closed (read-only allowlist). ODKU `ID` and chain-column assignments are findings. A double-quoted (ANSI_QUOTES) marker-table write target fails closed. Baseline: 0 findings. |
+| Limits | Accepted conservative false positive F3. Non-guarantees F4: concatenated or hex-built dynamic SQL, procedures defined elsewhere, views. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 6 (2026-10-31, test/docs only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-5 conditional review (G1, G2)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6547096179), fix selected by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547206443) |
+| Files | The same seven paths; workflow and C++ harness unchanged. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| SQL gate | A double-quoted marker-table name anywhere in a non-read-only statement fails closed (ANSI_QUOTES; SQL mode unverified). `EXPLAIN`/`DESCRIBE` with `ANALYZE` or a write verb on a marker table fails closed (vendor/version unverified). Ordinary double-quoted text values stay clean. Baseline: 0 findings. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 7 (2026-10-31, test/docs only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-6 conditional review (H1–H3)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6547601495), decisions by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547639162) |
+| Files | The same seven paths; workflow and C++ harness unchanged. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| SQL gate | MariaDB `SET STATEMENT … FOR` naming a marker table fails closed (engine unverified). Any top-level `ANALYZE` or write verb after `EXPLAIN`/`DESC`/`DESCRIBE` on a marker table fails closed. `EXPLAIN ANALYZE SELECT`, leading `(SELECT …)` and `EXPLAIN SELECT … FOR UPDATE` are intentional false positives, locked by tests. Baseline: 0 findings. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |
+
+### IP-TEST-C1-001 — revision 8 (2026-10-31, test/docs only)
+
+| Field | Record |
+| --- | --- |
+| Trigger | [CS02-IP rev-7 conditional review (K1, K2)](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6547793820), decision and stop criterion by [CS01-IP](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13#issuecomment-6547816217) |
+| Files | The same seven paths; workflow and C++ harness unchanged. Still no `src/`, `data/`, `conf/` or `optional/` change. |
+| SQL gate | MySQL `/*!` and MariaDB `/*M!` executable comments naming a marker table fail closed (version conditions not evaluated). `EXECUTE IMMEDIATE` naming a marker table, even inside the literal, fails closed. `EXECUTE @stmt` prepared elsewhere is an explicit F4 non-guarantee. Baseline: 0 findings. |
+| Stop criterion | Further dynamic-SQL gaps go to F4 unless a concrete, supported, dangerous miss is reproduced and approved. |
+| Status | **DRAFT, test-only, unmerged, not deployed.** |
