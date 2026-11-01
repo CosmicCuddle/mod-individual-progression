@@ -98,7 +98,7 @@
 - [ ] **CS-09 — Document ownership and upstream maintenance**: fork README, `CUSTOM_MODIFICATIONS_REGISTER.md` or equivalent for the Character Services fork, changelog, upstream updates/merge guidance and dependency matrix; link this task list.
 - [ ] **CS-10 — Get approval before merging/installing**: owner's fork/branch review, backups, staged test and rollback plan. Never replace the installed module or NPC automatically.
 
-**Historical ZIP provenance:** The uploaded `mod-character-services.zip` has 23 actual files under one module directory (directory entries excluded); two changed tracked file blobs relative to checked [Grimfeather upstream](https://github.com/Grimfeather/mod-character-services). See the precise blob IDs and preservation issues in [coordination #18](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/18). Treat that public evidence as source comparison only; do not upload private operational configs or database dumps into GitHub.
+**Historical ZIP provenance:** The uploaded `mod-character-services.zip` has **22 actual regular files** under one module directory (directory entries excluded), as verified by a fresh ZIP file listing and Git blob comparison; two changed tracked file blobs relative to checked [Grimfeather upstream](https://github.com/Grimfeather/mod-character-services). See the precise blob IDs and preservation issues in [coordination #18](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/18). Treat that public evidence as source comparison only; do not upload private operational configs or database dumps into GitHub.
 
 ## 5. Cross-dependency and task ownership
 
