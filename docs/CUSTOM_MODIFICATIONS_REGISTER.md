@@ -146,3 +146,16 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Tests / runtime / status | **DRAFT child/unmerged/not deployed.** The original #14 historical full native build passed, but this child's exact joint compile/link and gameplay must be evidenced separately before claiming success. Command name/GUID/selected target, console, offline and numeric parser cases remain **NOT GAME-TESTED**. |
 | Risks and dependencies | Known unchecked intentional valid-path GM stage writes can remove rewarded quest markers; C1 Playerbots `ResetQuests` and direct drop unprotected; expansion-group OFF pre-accept write/direct PB add hazards remain; full F14 RandomBot tier8 initialization and WHO/population remain missing; owner-installed Core/PB/IP/Naxx/SQL config, backup and restore unknown. |
 | Decision and rollback | No owner merge/release approval. [Composed review memo](IP_GM_COMPOSED_REVIEW_2026-11-01.md). Do not silently overwrite this port in later upstream sync. Discard/revert only new child branch for source rollback. Before any approved staging, privately capture restorable character/world DB backups; binary/source rollback cannot restore deleted rewarded-stage rows. |
+
+## IP-F14-005 — F19 level floor and progression limit for the F14 saved-stage login guard (1 Nov 2026; DRAFT, F14 flag OFF, NOT MERGED)
+
+| Field | Record |
+| --- | --- |
+| Feature / intended behaviour | With the default-OFF F14 login safeguard ON, keep a verified bot's saved stage only if it is at least the original level-based login stage (≤60 → 0, 61–70 → 8, 71+ → 13) and not above a nonzero `progressionLimit`; otherwise run the original write. Turning the safeguard ON can then never leave a bot below the original behaviour. |
+| Owner / coordination | CosmicCuddle. Independent review findings F19-1/2/6 and Maintenance decision in [Coordination #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11); claim in [Coordination #13](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13). |
+| Branch / parent | `fix/ip-f19-login-preserve-level-floor-20261101`, created from [DRAFT #20](https://github.com/CosmicCuddle/mod-individual-progression/pull/20) `5fe0f9105d55d249aa55a25510d3fa23e3d84148`. #19 and #20 unchanged. |
+| Executable source | New pure `src/IndividualProgressionF14LoginPolicy.h`; `src/IndividualProgressionPlayer.cpp` gains one include, one extra guard condition and a corrected comment. Nothing else changes. |
+| Config / SQL / DBC / client | None. The existing `IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0` stays the default. |
+| Supporting files | [F19 memo](IP_F19_LOGIN_FLOOR_2026-11-01.md), `tests/f14_login_preserve_policy.cpp`, `tests/test_ip_f19_login_floor_source.py`, workflow `ip-f19-login-floor-20261101.yml`. Declared deviations: #20's frozen six-path step scoped to #20's head; #19's test reverts only the documented F19 lines before its strict comparisons. |
+| CI / runtime status | Results are recorded in the PR and Coordination #13. **No launch, no gameplay test, no owner-installed proof.** |
+| Merge / rollback | Do not merge automatically. Leave the F14 flag at 0, or revert this branch. |
