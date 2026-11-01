@@ -2,6 +2,8 @@
 #include "ScriptMgr.h"
 #include "Tokenize.h"
 #include "IndividualProgression.h"
+#include "IndividualProgressionGmCommandAccessPolicy.h"
+#include "Log.h"
 #include "naxxramas_40.h"
 
 using namespace Acore::ChatCommands;
@@ -49,7 +51,7 @@ public:
     {
         static ChatCommandTable ipTable =
         {
-            { "get",    HandleGetIndividualProgressionCommand,    SEC_GAMEMASTER,    Console::Yes },
+            { "get",    HandleGetIndividualProgressionCommand,    SEC_PLAYER,        Console::Yes },
             { "set",    HandleSetIndividualProgressionCommand,    SEC_GAMEMASTER,    Console::Yes },
             { "pet",    HandlePetIndividualProgressionCommand,    SEC_GAMEMASTER,    Console::Yes },
             { "tele",   HandleTeleIndividualProgressionCommand,   SEC_GAMEMASTER,    Console::Yes },
@@ -102,26 +104,56 @@ public:
 
     static bool HandleGetIndividualProgressionCommand(ChatHandler* handler, Optional<PlayerIdentifier> player)
     {
-        if (!player)
-            player = PlayerIdentifier::FromTargetOrSelf(handler);
+        using namespace IndividualProgressionGmCommandAccessPolicy;
 
-        if (!player)
+        WorldSession* session = handler->GetSession();
+        Player* issuer = session ? session->GetPlayer() : nullptr;
+        bool const gmOrHigher = session && session->GetSecurity() >= SEC_GAMEMASTER;
+        bool const namedSelf = issuer && player && player->GetConnectedPlayer() == issuer;
+        Lookup const access = DecideGetTarget(session != nullptr, gmOrHigher,
+                                              static_cast<bool>(player), namedSelf);
+        if (access == Lookup::Refuse)
         {
-            handler->SendSysMessage("Player not found.");
+            handler->SendSysMessage("You can only view your own progression.");
             return false;
         }
 
-        std::string playername = player->GetName();
-        Player* target = player->GetConnectedPlayer();
-        if (!target)
+        Player* target = nullptr;
+        if (access == Lookup::UseSelf)
         {
-            handler->PSendSysMessage("Player |cff00ffff{}|r is not online.", playername);
+            // Do not honor a selected other player when an ordinary player
+            // invokes .ip get without a name. Only the session owner is read.
+            target = issuer;
+        }
+        else
+        {
+            // Preserve the historical GM/console named/selected-target route.
+            if (!player)
+                player = PlayerIdentifier::FromTargetOrSelf(handler);
+            if (!player)
+            {
+                handler->SendSysMessage("Player not found.");
+                return false;
+            }
+            target = player->GetConnectedPlayer();
+        }
+
+        if (!target || !target->IsInWorld())
+        {
+            handler->SendSysMessage("Player not found or not online.");
             return false;
         }
 
+        std::string playername = target->GetName();
         uint32 progressionLevel = sIndividualProgression->GetPlayerProgressionFromQuests(target);
-
+        // Keep the established raw-stage line word-for-word when paid mode is OFF.
         handler->PSendSysMessage("Progression Level for |cff00ffff{}|r = |cff00ffff{}|r", playername, progressionLevel);
+
+        // Access display is informative only, never a stage/entitlement grant.
+        if (sIndividualProgression->IsPaidExpansionActive() &&
+            sIndividualProgression->isNormalAccount(target))
+            handler->PSendSysMessage("Earned progression stage: {} | Current access stage: {}",
+                progressionLevel, sIndividualProgression->GetEffectiveProgression(target));
         return true;
     }
 
@@ -157,6 +189,14 @@ public:
         std::string playername = target->GetName();
         uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(target);
         uint32 currentArea = target->GetAreaId();
+        // Audit manual GM progression grants in paid mode, without ever
+        // creating a purchase flag or changing GM recovery privileges.
+        bool const paidAudit = sIndividualProgression->IsPaidExpansionActive() &&
+                               sIndividualProgression->isNormalAccount(target);
+        bool const beforeTbc = paidAudit && sIndividualProgression->HasExpansionEntitlement(
+            target, IndividualProgressionExpansionPolicy::Era::Tbc);
+        bool const beforeWrath = paidAudit && sIndividualProgression->HasExpansionEntitlement(
+            target, IndividualProgressionExpansionPolicy::Era::Wrath);
 
         if (progressionLevel < currentState)
         {
@@ -165,6 +205,28 @@ public:
 
         sIndividualProgression->ForceUpdateProgressionState(target, static_cast<ProgressionState>(progressionLevel));
         sIndividualProgression->checkIPPhasing(target, currentArea);
+
+        if (paidAudit)
+        {
+            bool const afterTbc = sIndividualProgression->HasExpansionEntitlement(
+                target, IndividualProgressionExpansionPolicy::Era::Tbc);
+            bool const afterWrath = sIndividualProgression->HasExpansionEntitlement(
+                target, IndividualProgressionExpansionPolicy::Era::Wrath);
+            if (IndividualProgressionGmCommandAccessPolicy::NeedsPaidGrantAudit(
+                    true, true, beforeTbc, afterTbc, beforeWrath, afterWrath))
+            {
+                // This override is deliberately not a paid entitlement purchase.
+                handler->SendSysMessage("WARNING: GM progression override granted expansion access without payment. No paid entitlement flag was written.");
+                WorldSession* issuerSession = handler->GetSession();
+                Player* actor = issuerSession ? issuerSession->GetPlayer() : nullptr;
+                std::string const actorName = actor ? actor->GetName() : "console";
+                uint32 const actorAccount = issuerSession ? issuerSession->GetAccountId() : 0u;
+                LOG_INFO("module",
+                    "IP GM override issuer={} account={} target_guid={} raw={}=>{} TBC={}=>{} Wrath={}=>{} paid_marker_unchanged=1",
+                    actorName, actorAccount, target->GetGUID().GetCounter(),
+                    currentState, progressionLevel, beforeTbc, afterTbc, beforeWrath, afterWrath);
+            }
+        }
 
         handler->PSendSysMessage("Updated Progression Level for |cff00ffff{}|r = |cff00ffff{}|r", playername, progressionLevel);
         return true;

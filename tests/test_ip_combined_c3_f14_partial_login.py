@@ -110,10 +110,10 @@ class PreservedParentSource(unittest.TestCase):
                 self.assertEqual(git("diff", "--name-only", PARENT_16, "--", path).strip(), "", path)
 
     def test_gm_source_is_exactly_the_previously_reviewed_fix(self):
-        # This child intentionally ports #14's GM fix. All other executable
+        # This child preserves #14's GM fix, with CS01's separately reviewed self-only get and paid-mode set audit. All other executable
         # protections remain identical to frozen #19.
         self.assertEqual(git("rev-parse", "HEAD:src/cs_individualProgression.cpp").strip(),
-                         "654119d29e0519600d50b179ccd5a9c5df8695b0")
+                         "278aaa48dc5fb7770bd6013e659e4872752d4b03")
 
     def test_hunter_blob_is_the_reviewed_one(self):
         self.assertEqual(git("rev-parse", "HEAD:src/IndividualProgressionSpells.cpp").strip(),

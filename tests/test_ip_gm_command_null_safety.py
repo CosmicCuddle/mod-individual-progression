@@ -27,7 +27,9 @@ ATTUNE = SRC.split("static bool HandleAttuneIndividualProgressionCommand(", 1)[1
 class Scope(unittest.TestCase):
     def test_get_command_preserved(self):
         self.assertIn("PlayerIdentifier::FromTargetOrSelf(handler)", GET)
-        self.assertIn("Player |cff00ffff{}|r is not online.", GET)
+        # Explicit #25 privacy-scope exception: .ip get intentionally uses a
+        # non-identifying offline response instead of the old named-player text.
+        self.assertIn("Player not found or not online.", GET)
 
     def test_set_optional_name_not_overwritten(self):
         self.assertIn("if (!player)\n            player = PlayerIdentifier::FromTargetOrSelf(handler);", SET)
