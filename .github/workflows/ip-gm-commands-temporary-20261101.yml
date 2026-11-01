@@ -1,0 +1,56 @@
+name: "IP GM self-only get + paid-grant audit (DRAFT, NO HOST)"
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - "src/cs_individualProgression.cpp"
+      - "src/IndividualProgressionGmPolicy.h"
+      - "tests/ip_gm_policy.cpp"
+      - "tests/test_ip_gm_paid_commands_source.py"
+      - "docs/IP_GM_COMMANDS_TEMPORARY_2026-11-01.md"
+      - ".github/workflows/ip-gm-commands-temporary-20261101.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pure-and-wiring:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check exact source head
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Compile and run pure GM access/entitlement policy
+        run: |
+          set -euo pipefail
+          ${{ matrix.compiler }} -std=${{ matrix.standard }} -Wall -Wextra -Werror -pedantic \
+            tests/ip_gm_policy.cpp -o /tmp/ip-gm-policy
+          /tmp/ip-gm-policy | tee /tmp/ip-gm-policy.log
+          grep -Fqx 'GM policy: 13/13 passed' /tmp/ip-gm-policy.log
+      - name: Assert original commands are staff-only except player-self get
+        run: |
+          python3 -m unittest discover -s tests -p test_ip_gm_paid_commands_source.py -v
+      - name: Default-OFF / no paid-bit mutation source check
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path("src/cs_individualProgression.cpp").read_text()
+          policy=Path("src/IndividualProgressionGmPolicy.h").read_text()
+          assert "IsPaidExpansionActive()" in s and "SEC_PLAYER" in s
+          assert "SetPaidExpansionFlag(" not in s
+          assert "UpdatePlayerSetting(" not in s
+          assert "CanViewTarget(" in policy and "NewlyGrantedEra(" in policy
+          print("PASS source-only GM policy gate; full native build still required")
+          PY
