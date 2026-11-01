@@ -140,6 +140,36 @@ uint8 IndividualProgression::GetMaxServiceGrantableStage(Player* player)
     return MaxServiceGrantableStage(GetExpansionFacts(player));
 }
 
+uint8 IndividualProgression::GetAccountEffectiveProgression(uint32 accountId)
+{
+    if (!sIndividualProgression->IsPaidExpansionActive())
+        return GetAccountProgression(accountId);
+
+    // Same characters and markers as GetAccountProgression, plus each
+    // character's stored purchase slots.
+    QueryResult result = CharacterDatabase.Query(
+        "SELECT MAX(q.quest), s.data FROM characters c "
+        "JOIN character_queststatus_rewarded q ON q.guid = c.guid AND q.quest BETWEEN {} AND {} "
+        "LEFT JOIN character_settings s ON s.guid = c.guid AND s.source = '{}' "
+        "WHERE c.account = {} GROUP BY c.guid, s.data;",
+        66000 + PROGRESSION_MOLTEN_CORE, 66000 + PROGRESSION_WOTLK_TIER_5, PaidExpansionSettingSource, accountId);
+
+    uint8 best = 0;
+    if (result)
+    {
+        do
+        {
+            Field* fields = result->Fetch();
+            uint8 const raw = static_cast<uint8>(fields[0].Get<uint32>() - 66000);
+            std::string const data = fields[1].IsNull() ? std::string() : fields[1].Get<std::string>();
+            uint8 const stage = EffectiveAccountStage(raw, SettingsSlotSet(data, SettingWrath));
+            if (stage > best)
+                best = stage;
+        } while (result->NextRow());
+    }
+    return best;
+}
+
 void IndividualProgression::SetPaidExpansionFlag(Player* player, uint32 index, uint32 value)
 {
     player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);

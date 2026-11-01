@@ -174,8 +174,19 @@ class AccessWiring(unittest.TestCase):
         removed = [l[1:] for l in git("diff", "-U0", PARENT_20, "--", "src/IndividualProgressionPlayer.cpp").splitlines()
                    if l.startswith("-") and not l.startswith("---")]
         for line in removed:
-            self.assertRegex(line, r"GetPlayerProgressionFromQuests\(|joiningState, player->getRace\(\), (leaderState|memberState)", line)
-        self.assertEqual(len(removed), 6, removed)
+            self.assertRegex(line, r"GetPlayerProgressionFromQuests\(|GetAccountProgression\(accountId\)|joiningState, player->getRace\(\), (leaderState|memberState)", line)
+        self.assertEqual(len(removed), 8, removed)
+
+    def test_account_unlocks_use_effective_account_ceiling(self):
+        self.assertEqual(PLAYER.count("sIndividualProgression->GetAccountEffectiveProgression(accountId)"), 2)
+        self.assertNotIn("sIndividualProgression->GetAccountProgression(", PLAYER)
+        acct = code(body(EXP, "uint8 IndividualProgression::GetAccountEffectiveProgression(uint32 accountId)"))
+        self.assertIn("if (!sIndividualProgression->IsPaidExpansionActive())\n        return GetAccountProgression(accountId);", acct)
+        self.assertIn("EffectiveAccountStage(raw, SettingsSlotSet(data, SettingWrath))", acct)
+        self.assertIn("LEFT JOIN character_settings s ON s.guid = c.guid AND s.source = '{}'", acct)
+        # The raw account reader stays unchanged for every other caller.
+        sig = "uint8 IndividualProgression::GetAccountProgression(uint32 accountId)"
+        self.assertEqual(body(CORE, sig), body(git_show(PARENT_20, "src/IndividualProgression.cpp"), sig))
 
 
 class PurchaseSequence(unittest.TestCase):
@@ -254,7 +265,7 @@ class StorageAndThreads(unittest.TestCase):
 class PolicyHeader(unittest.TestCase):
     def test_pure_header(self):
         includes = re.findall(r'#include [<"]([^>"]+)[>"]', POLICY)
-        self.assertEqual(includes, ["cstdint"])
+        self.assertEqual(includes, ["cstddef", "cstdint", "string_view"])
 
     def test_stage_constants_match_ip_enum(self):
         for name, value in (("PROGRESSION_NAXX40", 7), ("PROGRESSION_PRE_TBC", 8),

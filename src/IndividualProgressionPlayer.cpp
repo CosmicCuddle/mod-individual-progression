@@ -278,7 +278,7 @@ public:
             if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_PRE_TBC))
             {
                 uint32 accountId = player->GetSession()->GetAccountId();
-                uint8 highestProgression = sIndividualProgression->GetAccountProgression(accountId);
+                uint8 highestProgression = sIndividualProgression->GetAccountEffectiveProgression(accountId);
 
                 if ((highestProgression < sIndividualProgression->tbcRacesProgressionLevel) && (player->getRace() != RACE_DRAENEI && player->getRace() != RACE_BLOODELF))
                 {
@@ -932,7 +932,7 @@ public:
         if (sIndividualProgression->isBotAccount(accountId) || sIndividualProgression->isExcludedAccount(accountId))
             return true;
 
-        uint8 highestProgression = sIndividualProgression->GetAccountProgression(accountId);
+        uint8 highestProgression = sIndividualProgression->GetAccountEffectiveProgression(accountId);
         bool allowed = true;
         
         if ((charRace == RACE_DRAENEI || charRace == RACE_BLOODELF) && sIndividualProgression->tbcRacesProgressionLevel != 0)

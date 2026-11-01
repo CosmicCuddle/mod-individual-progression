@@ -75,6 +75,7 @@ All functions live on `sIndividualProgression`. Rules are in `src/IndividualProg
 | `CanPurchaseExpansion(player, era, costCopper)` | Pre-check for the gossip menu. It never charges |
 | `PurchaseExpansion(player, era, costCopper)` | The only purchase path |
 | `GetMaxServiceGrantableStage(player)` | Cap for any catch-up/tier service: 6 before TBC is owned, 12 before Wrath is owned |
+| `GetAccountEffectiveProgression(accountId)` | Account maximum for unlock checks (e.g. a vendor's account-unlock ceiling): equal to `GetAccountProgression` when OFF; an unpaid stage 13 counts as 12 when ON |
 
 **`PurchaseExpansion` steps:**
 1. Revalidate everything.
@@ -106,7 +107,7 @@ That integration belongs to the Character Services fork and is not part of this 
 
 ## Tests
 
-- `tests/expansion_purchase_policy.cpp` covers the real policy header, both eras, under GCC and Clang, C++17 and C++20 (291 checks). Cases:
+- `tests/expansion_purchase_policy.cpp` covers the real policy header, both eras, under GCC and Clang, C++17 and C++20 (341 checks). Cases:
   - feature OFF identity for every stage;
   - bots and excluded accounts unchanged;
   - boss-only leaves the character unpaid;
@@ -123,7 +124,7 @@ That integration belongs to the Character Services fork and is not part of this 
   - grandfathering applies once only.
 
   The section marked **M** is a labelled model of the purchase sequence, not AzerothCore code.
-- `tests/test_ip_paid_expansion_source.py` (30 checks) covers wiring:
+- `tests/test_ip_paid_expansion_source.py` (31 checks) covers wiring:
   - default OFF;
   - forced OFF without the settings store;
   - startup-only switch;
@@ -156,7 +157,7 @@ Changes requested by the reviewer and made on this branch:
 
 Open, needing an owner/CS01 decision before `Enable = 1` (not changed here):
 1. **Database conditions read the raw marker.** About 360 `conditions` rows of type QUESTREWARDED on quest 66013 (mostly vendor stock, some phasing gossip) are evaluated by Core directly, so an unpaid stage-13 character still passes them. Options: accept as a known limit; hold back 66013 until purchase (changes the Kil'jaeden meaning, needs a design pass); or a separate "Wrath paid" marker with retargeted conditions (an SQL migration).
-2. **Start privileges grant an era without payment.** A configured DK start of 13 (code default) or TBC-race start of 8 counts as owning that era, and DK creation is unlocked by the raw account maximum. One unpaid stage-13 character can therefore unlock a DK who owns Wrath. Intended, or should start privileges and the account-unlock check use entitlement?
+2. **Start privileges grant an era without payment.** A configured DK start of 13 (code default) or TBC-race start of 8 counts as owning that era. **Partly closed:** with the feature ON, DK / TBC-race creation and the low-stage Outland start-zone check now use `GetAccountEffectiveProgression`, where an unpaid stage 13 counts as 12. An unpaid 13 can no longer unlock a DK who would own Wrath; a paid or 14+ character on the account still can. Existing characters keep their start privileges. Still for the owner: whether a DK or TBC-race start should own the era at all. Also, with `TbcRacesUnlockProgression` ≤ 7, an unpaid Kel'Thuzad kill still unlocks a Blood Elf/Draenei who starts at 8; setting it to ≥ 8 needs a TBC purchase on the account.
 3. **GM `.ip set`** uses `ForceUpdateProgressionState`: setting 8+ or 14+ grants TBC or Wrath with no flag, and there is no GM command to show, grant or revoke a purchase. `cs_individualProgression.cpp` is a reviewed, protected file, so a GM command would be a separate draft.
 4. **`.ip tele` (GM) reads the raw stage** for its Naxx40/Onyxia check, while the instance gate uses the effective stage. Same protected-file constraint.
 5. **Rollback after refusals.** A character who completed Into the Breach while TBC was unpaid stays at stage 7 if the feature is later turned OFF; they need a GM `.ip set 8`. No automatic repair is added, because it could override a GM's deliberate setting or `DisableDefaultProgression`.

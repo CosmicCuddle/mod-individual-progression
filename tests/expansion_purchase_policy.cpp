@@ -217,6 +217,29 @@ int main()
         Check(broken.money, static_cast<std::uint32_t>(5000), "M: missing template not charged");
     }
 
+    // ---- 10. Effective account ceiling for unlocks (DK / TBC-race creation) ----
+    for (int raw = 0; raw <= LastSupportedStage; ++raw)
+    {
+        std::uint8_t const r = static_cast<std::uint8_t>(raw);
+        std::uint8_t const unpaid = raw == 13 ? UnpaidWrathAccessCap : r;
+        Check(EffectiveAccountStage(r, false), unpaid, "account stage " + std::to_string(raw) + " unpaid");
+        Check(EffectiveAccountStage(r, true), r, "account stage " + std::to_string(raw) + " paid");
+    }
+    // A DK unlock at 13 needs a paid (or 14+) character on the account.
+    Check(EffectiveAccountStage(13, false) >= 13, false, "unpaid 13 cannot unlock a 13-level DK");
+    Check(EffectiveAccountStage(13, true) >= 13, true, "paid 13 unlocks it");
+    Check(EffectiveAccountStage(14, false) >= 13, true, "completed Wrath tier unlocks it");
+    // character_settings data parsing (Core writes "v0 v1 v2 ").
+    Check(SettingsSlotSet("0 1 0 ", 1), true, "slot 1 set");
+    Check(SettingsSlotSet("0 2 1 ", 1), true, "slot 1 grandfathered");
+    Check(SettingsSlotSet("1 0 1 ", 1), false, "slot 1 clear");
+    Check(SettingsSlotSet("1 ", 1), false, "slot missing");
+    Check(SettingsSlotSet("", 1), false, "empty data");
+    Check(SettingsSlotSet("  0   10  ", 1), true, "extra spaces, multi-digit");
+    Check(SettingsSlotSet("0 00 ", 1), false, "zero with leading zero");
+    Check(SettingsSlotSet("0 x ", 1), false, "non-numeric is not set");
+    Check(SettingsSlotSet("1 0 0 ", 0), true, "slot 0 set");
+
     // ---- L. MODEL of the config / store lifecycle (labelled) ----
     // Uses the real header rules; models Core's EnablePlayerSettings switch,
     // .reload config and the login-time purchase cache.

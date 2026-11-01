@@ -66,6 +66,7 @@ def without_paid_expansion_group_reads(src: str) -> str:
     ):
         src = src.replace(comment, "")
     src = src.replace("joiningEra", "joiningState").replace("leaderEra", "leaderState")
+    src = src.replace("GetAccountEffectiveProgression(", "GetAccountProgression(")
     return src.replace("GetEffectiveProgression(", "GetPlayerProgressionFromQuests(")
 
 

@@ -476,6 +476,9 @@ public:
     IndividualProgressionExpansionPolicy::PurchaseResult CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper);
     IndividualProgressionExpansionPolicy::PurchaseResult PurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper);
     uint8 GetMaxServiceGrantableStage(Player* player);
+    // Account maximum for unlock checks: identical to GetAccountProgression
+    // when the feature is OFF; an unpaid stage 13 counts as 12 when ON.
+    static uint8 GetAccountEffectiveProgression(uint32 accountId);
     void LoadPaidExpansionEntitlement(Player* player);
     void EvaluatePaidExpansionGrandfather(Player* player);
     void SendPaidExpansionReminder(Player* player);

@@ -19,7 +19,9 @@
 #ifndef INDIVIDUAL_PROGRESSION_EXPANSION_POLICY_H
 #define INDIVIDUAL_PROGRESSION_EXPANSION_POLICY_H
 
+#include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace IndividualProgressionExpansionPolicy
 {
@@ -207,6 +209,44 @@ namespace IndividualProgressionExpansionPolicy
     constexpr bool StoreWritesAllowed(bool featureActive, bool storeSaving)
     {
         return featureActive && storeSaving;
+    }
+
+    // Account unlocks (DK / TBC-race creation, Outland start zone) with the
+    // feature ON: an unpaid stage 13 counts as 12, so it cannot unlock a
+    // character whose start privilege would own Wrath. Paid = stored Wrath
+    // flag or stage 14+. Start privileges do not raise the account ceiling.
+    constexpr std::uint8_t EffectiveAccountStage(std::uint8_t rawStage, bool wrathFlag)
+    {
+        return rawStage >= WrathAccessStage && rawStage < WrathFirstCompletionStage && !wrathFlag
+            ? UnpaidWrathAccessCap : rawStage;
+    }
+
+    // Reads slot `slot` of a Core character_settings data string
+    // ("v0 v1 v2 ..."); true when that value is present and nonzero.
+    inline bool SettingsSlotSet(std::string_view data, std::size_t slot)
+    {
+        std::size_t index = 0;
+        std::size_t pos = 0;
+        while (pos < data.size())
+        {
+            while (pos < data.size() && data[pos] == ' ')
+                ++pos;
+            if (pos >= data.size())
+                break;
+            std::size_t end = pos;
+            while (end < data.size() && data[end] != ' ')
+                ++end;
+            if (index == slot)
+            {
+                for (std::size_t i = pos; i < end; ++i)
+                    if (data[i] != '0')
+                        return data[i] >= '1' && data[i] <= '9';
+                return false;
+            }
+            ++index;
+            pos = end;
+        }
+        return false;
     }
 
     // Optional owner-controlled migration: on a character's first evaluation,
