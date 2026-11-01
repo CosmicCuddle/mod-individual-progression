@@ -135,6 +135,31 @@ class DefaultOff(unittest.TestCase):
         self.assertIn("may give TBC without a purchase", block)
         self.assertIn("may give Wrath without a purchase", block)
 
+    def test_cpp_warning_guards_match_exact_cross_era_predicates(self):
+        # Unlike the synthetic matrix below, validate the whole C++ condition:
+        # both operands, parentheses, matching tier, and LOG_WARN as its body.
+        after = body(CORE, "void OnAfterConfigLoad(bool reload) override")
+        block = after[after.index("if (!reload && sIndividualProgression->paidExpansionEnabled)"):]
+        block = block[:block.index("\n        }\n") + 10]
+        shape = re.compile(
+            r'if\s*\(\s*ip->(?P<start>deathKnightStartingProgression|tbcRacesStartingProgression)'
+            r'\s*>=\s*IndividualProgressionExpansionPolicy::(?P<era>TbcEntryStage|WrathAccessStage)'
+            r'\s*&&\s*\(\s*ip->(?P<unlock>deathKnightProgressionLevel|tbcRacesProgressionLevel)'
+            r'\s*==\s*0\s*\|\|\s*ip->(?P=unlock)\s*<\s*'
+            r'IndividualProgressionExpansionPolicy::(?P=era)\s*\)\s*\)\s*LOG_WARN\("module",'
+        )
+        matched = {(m.group("start"), m.group("era"), m.group("unlock"))
+                   for m in shape.finditer(block)}
+        expected = {
+            ("deathKnightStartingProgression", "TbcEntryStage", "deathKnightProgressionLevel"),
+            ("deathKnightStartingProgression", "WrathAccessStage", "deathKnightProgressionLevel"),
+            ("tbcRacesStartingProgression", "TbcEntryStage", "tbcRacesProgressionLevel"),
+            ("tbcRacesStartingProgression", "WrathAccessStage", "tbcRacesProgressionLevel"),
+        }
+        self.assertEqual(matched, expected)
+        # Prevent duplicate matches from being hidden by the set comparison.
+        self.assertEqual(len(list(shape.finditer(block))), 4)
+
     def test_warning_cross_era_start_threshold_matrix(self):
         # Synthetic truth-table model of the four warning conditions.
         # This does not execute the AzerothCore C++ start/creation path.
@@ -147,9 +172,11 @@ class DefaultOff(unittest.TestCase):
             ("DK free TBC", 8, 7, True, False),
             ("DK free Wrath", 13, 12, False, True),
             ("DK no unlock", 13, 0, True, True),
+            ("DK both eras below unlock", 13, 7, True, True),
             ("safe race TBC", 8, 8, False, False),
             ("race free TBC", 8, 7, True, False),
             ("race free Wrath", 13, 12, False, True),
+            ("race no unlock", 13, 0, True, True),
             ("safe race Wrath", 13, 13, False, False),
         )
         for name, start, unlock, tbc, wrath in cases:
