@@ -1,0 +1,45 @@
+name: IP player-self get and paid-mode GM audit checks (DRAFT, no host)
+on:
+  pull_request:
+    paths:
+      - 'src/cs_individualProgression.cpp'
+      - 'src/IndividualProgressionGmCommandAccessPolicy.h'
+      - 'tests/ip_gm_command_access_policy.cpp'
+      - 'tests/test_ip_gm_self_audit_source.py'
+      - '.github/workflows/ip-cs01-gm-self-audit-20261101.yml'
+  push:
+    paths:
+      - 'src/cs_individualProgression.cpp'
+      - 'src/IndividualProgressionGmCommandAccessPolicy.h'
+      - 'tests/ip_gm_command_access_policy.cpp'
+      - 'tests/test_ip_gm_self_audit_source.py'
+      - '.github/workflows/ip-cs01-gm-self-audit-20261101.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  gm-source-and-portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify command authorization and original GM teleport semantics
+        run: python3 -m unittest discover -s tests -p test_ip_gm_self_audit_source.py -v
+      - name: Execute pure C++ command policy with GCC and Clang
+        run: |
+          set -eu
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              tmp="$(mktemp)"
+              "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -o "$tmp" tests/ip_gm_command_access_policy.cpp
+              "$tmp"
+              rm -f "$tmp"
+            done
+          done
+      - name: Prove command source pin changed, unchanged IP APIs retained
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD:src/cs_individualProgression.cpp)" = 278aaa48dc5fb7770bd6013e659e4872752d4b03
+          grep -Fq 'GetEffectiveProgression(Player* player)' src/IndividualProgression.h
+          echo 'DRAFT command source and policy checked. NO gameplay or production operation.'
