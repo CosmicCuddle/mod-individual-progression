@@ -29,6 +29,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Exact frozen PR19 parent, six paths, append-only register
+        # Frozen exact-path delta belongs to #20's own head only; the GM tests
+        # below still run on child PRs (same pattern as the #10/#11/#16 steps).
+        if: >-
+          (github.event_name == 'pull_request' && github.head_ref == 'integration/ip19-gm-null-safety-20261101') ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/ip19-gm-null-safety-20261101')
         shell: bash
         run: |
           set -euo pipefail

@@ -53,6 +53,22 @@ LOGIN_ANCHOR = "            // F14 partial safeguard, OFF by default."
 LOGIN_END = "        else // normal account"
 
 
+def without_paid_expansion_group_reads(src: str) -> str:
+    """Reverse ONLY the documented paid-expansion group substitutions made by a
+    child PR (IP-11D: effective stage in enforcement-ON era checks). Anything
+    else that differs from the parents still fails the strict comparisons."""
+    for comment in (
+        "        // Paid expansion (default OFF): eras compare by effective stage, so an\n"
+        "        // unpaid stage-13 character groups as TBC. Identical to raw when OFF.\n",
+        "            // Paid expansion (default OFF): compare eras by effective stage.\n"
+        "            uint8 const joiningEra = sIndividualProgression->GetEffectiveProgression(player);\n"
+        "            uint8 const leaderEra = sIndividualProgression->GetEffectiveProgression(leader);\n",
+    ):
+        src = src.replace(comment, "")
+    src = src.replace("joiningEra", "joiningState").replace("leaderEra", "leaderState")
+    return src.replace("GetEffectiveProgression(", "GetPlayerProgressionFromQuests(")
+
+
 def login_region(src: str) -> str:
     start = src.index(LOGIN_ANCHOR)
     return src[start:src.index(LOGIN_END, start)]
@@ -107,10 +123,11 @@ class PreservedParentSource(unittest.TestCase):
 
     def test_c3_group_accept_callback_byte_identical_to_16(self):
         anchor = "bool OnPlayerCanGroupAccept"
-        self.assertEqual(balanced_block(PLAYER, anchor), balanced_block(git_show(PARENT_16, "src/IndividualProgressionPlayer.cpp"), anchor))
+        self.assertEqual(balanced_block(without_paid_expansion_group_reads(PLAYER), anchor),
+                         balanced_block(git_show(PARENT_16, "src/IndividualProgressionPlayer.cpp"), anchor))
 
     def test_c3_leader_guard_precedes_both_quest_reads(self):
-        block = re.sub(r"//[^\n]*", "", balanced_block(PLAYER, "bool OnPlayerCanGroupAccept"))  # code only
+        block = re.sub(r"//[^\n]*", "", balanced_block(without_paid_expansion_group_reads(PLAYER), "bool OnPlayerCanGroupAccept"))  # code only
         guard = block.index("if (!leader || !leader->IsInWorld())")
         self.assertIn("return !sIndividualProgression->enforceGroupRules;", block[guard:guard + 120])
         reads = [m.start() for m in re.finditer(r"GetPlayerProgressionFromQuests\(", block)]
@@ -119,8 +136,10 @@ class PreservedParentSource(unittest.TestCase):
         self.assertNotIn("ForceUpdateProgressionState", block[:guard])
 
     def test_only_two_hunks_changed_in_player_cpp(self):
-        hunks = [l for l in git("diff", "-U0", PARENT_16, "--", "src/IndividualProgressionPlayer.cpp").splitlines()
-                 if l.startswith("@@")]
+        import difflib
+        parent = git_show(PARENT_16, "src/IndividualProgressionPlayer.cpp").splitlines()
+        current = without_paid_expansion_group_reads(PLAYER).splitlines()
+        hunks = [l for l in difflib.unified_diff(parent, current, n=0, lineterm="") if l.startswith("@@")]
         self.assertEqual(len(hunks), 2, hunks)
 
 

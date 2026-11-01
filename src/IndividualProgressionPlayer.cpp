@@ -543,7 +543,9 @@ public:
         if (!invitee || !invitee->IsInWorld())
             return false; // Cannot establish the target's effective expansion safely.
 
-        uint8 const targetState = sIndividualProgression->GetPlayerProgressionFromQuests(invitee);
+        // Paid expansion (default OFF): eras compare by effective stage, so an
+        // unpaid stage-13 character groups as TBC. Identical to raw when OFF.
+        uint8 const targetState = sIndividualProgression->GetEffectiveProgression(invitee);
         int32 const limit = sIndividualProgression->progressionLimit;
 
         // Validate all stored group members, not just those online, to prevent
@@ -558,7 +560,7 @@ public:
                 if (!member || !member->IsInWorld())
                     return false;
 
-                uint8 const memberState = sIndividualProgression->GetPlayerProgressionFromQuests(member);
+                uint8 const memberState = sIndividualProgression->GetEffectiveProgression(member);
                 if (!IndividualProgressionGroupPolicy::MayGroup(
                         memberState, member->getRace(), targetState, invitee->getRace(), limit))
                     return false;
@@ -566,7 +568,7 @@ public:
         }
 
         return IndividualProgressionGroupPolicy::MayGroup(
-            sIndividualProgression->GetPlayerProgressionFromQuests(player),
+            sIndividualProgression->GetEffectiveProgression(player),
             player->getRace(), targetState, invitee->getRace(), limit);
     }
 
@@ -593,8 +595,11 @@ public:
         if (sIndividualProgression->enforceGroupRules)
         {
             int32 const limit = sIndividualProgression->progressionLimit;
+            // Paid expansion (default OFF): compare eras by effective stage.
+            uint8 const joiningEra = sIndividualProgression->GetEffectiveProgression(player);
+            uint8 const leaderEra = sIndividualProgression->GetEffectiveProgression(leader);
             if (!IndividualProgressionGroupPolicy::MayGroup(
-                    joiningState, player->getRace(), leaderState, leader->getRace(), limit))
+                    joiningEra, player->getRace(), leaderEra, leader->getRace(), limit))
                 return false;
 
             // Offline members have no verified IP tier in this callback:
@@ -605,9 +610,9 @@ public:
                 if (!member || !member->IsInWorld())
                     return false;
 
-                uint8 const memberState = sIndividualProgression->GetPlayerProgressionFromQuests(member);
+                uint8 const memberState = sIndividualProgression->GetEffectiveProgression(member);
                 if (!IndividualProgressionGroupPolicy::MayGroup(
-                        joiningState, player->getRace(), memberState, member->getRace(), limit))
+                        joiningEra, player->getRace(), memberState, member->getRace(), limit))
                     return false;
             }
 

@@ -17,6 +17,7 @@
 #include "GameObject.h"
 #include "AreaDefines.h"
 #include "IWorld.h"
+#include "IndividualProgressionExpansionPolicy.h"
 #include <regex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -415,6 +416,13 @@ public:
     uint32 VanillaPvpKillRank1, VanillaPvpKillRank2, VanillaPvpKillRank3, VanillaPvpKillRank4, VanillaPvpKillRank5, VanillaPvpKillRank6, VanillaPvpKillRank7, VanillaPvpKillRank8, VanillaPvpKillRank9, VanillaPvpKillRank10, VanillaPvpKillRank11, VanillaPvpKillRank12, VanillaPvpKillRank13, VanillaPvpKillRank14;
     std::string excludedAccountsRegex, botAccountsRegex, sharedFactionIdsRegex;
 
+    // Paid expansion entitlement, default OFF (IndividualProgressionExpansionPolicy.h).
+    // An earned final milestone only makes a character eligible; buying from
+    // the expansion vendor opens the next era.
+    bool paidExpansionEnabled = false;
+    bool paidExpansionGrandfatherStage13 = false;
+    std::string paidExpansionVendorName;
+
     // progression is derived from rewarded hidden quests (IDs 66000 + progression)
     uint8 GetPlayerProgressionFromQuests(Player* player) const;
 
@@ -455,6 +463,20 @@ public:
     static float ComputeVanillaAdjustment(uint8 playerLevel, float configAdjustmentValue);
     static uint8 GetAccountProgression(uint32 accountId);
 
+    // Paid expansion entitlement API. Character Services (or any vendor) must
+    // call PurchaseExpansion instead of writing stage markers itself.
+    bool IsPaidExpansionActive() const;
+    uint8 GetEffectiveProgression(Player* player);
+    bool IsAutomaticGrantAllowed(Player* player, uint8 targetStage);
+    bool HasExpansionEntitlement(Player* player, IndividualProgressionExpansionPolicy::Era era);
+    IndividualProgressionExpansionPolicy::PurchaseResult CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper);
+    IndividualProgressionExpansionPolicy::PurchaseResult PurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper);
+    uint8 GetMaxServiceGrantableStage(Player* player);
+    void LoadPaidExpansionEntitlement(Player* player);
+    void ForgetPaidExpansionEntitlement(Player* player);
+    void EvaluatePaidExpansionGrandfather(Player* player);
+    void SendPaidExpansionReminder(Player* player);
+
 private:
     struct AccountMatch
     {
@@ -469,6 +491,15 @@ private:
     std::regex _excludedAccountsRegex, _botAccountsRegex;
     std::unordered_map<uint32, AccountMatch> _accountMatchCache;
     std::shared_mutex _accountMatchLock;
+
+    // Paid expansion flags per online character (low GUID -> PaidExpansionBit*).
+    // Filled on the login thread before the character enters a map, so the
+    // frequent access checks never touch the Core settings store.
+    IndividualProgressionExpansionPolicy::CharacterFacts GetExpansionFacts(Player* player);
+    uint8 GetConfiguredStartStage(Player* player) const;
+    void SetPaidExpansionFlag(Player* player, uint32 index, uint32 value);
+    std::unordered_map<uint32, uint8> _paidExpansionFlags;
+    std::shared_mutex _paidExpansionLock;
 };
 
 #define sIndividualProgression IndividualProgression::instance()

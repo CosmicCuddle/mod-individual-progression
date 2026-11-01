@@ -43,6 +43,41 @@ IndividualProgression.EnforceGroupRules = 0
 #
 IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0
 
+# IndividualProgression.PaidExpansion.Enable
+#
+#        DRAFT - paid expansion entitlement. Read at server start only.
+#        0 = OFF (default). Established progression is unchanged.
+#        1 = Earning the final milestone of an era (Kel'Thuzad 40 = stage 7,
+#            Kil'jaeden = stage 13) only makes a character ELIGIBLE. The next
+#            expansion opens after buying it from the expansion vendor, which
+#            must call IndividualProgression's PurchaseExpansion API.
+#            A TBC purchase grants stage 8 (start of TBC). A Wrath purchase
+#            grants no stage; an unpaid stage 13 counts as TBC (level 70 cap,
+#            no Northrend). Applies to normal accounts only; bot and excluded
+#            accounts, Death Knight / TBC-race / server start stages and
+#            characters already at stage 14+ keep their access.
+#        Requires worldserver EnablePlayerSettings = 1, otherwise the feature
+#        forces itself OFF and logs an error. Keep OFF pending owner approval,
+#        a matching vendor integration and staging tests.
+#
+IndividualProgression.PaidExpansion.Enable = 0
+
+# IndividualProgression.PaidExpansion.GrandfatherStage13
+#
+#        Owner decision. Only used when PaidExpansion.Enable = 1.
+#        0 = OFF (default). Characters already at stage 13 must buy Wrath.
+#        1 = On each character's first login with the feature on, a character
+#            already at stage 13 is recorded as owning Wrath. Characters who
+#            reach stage 13 later still need to buy it.
+#
+IndividualProgression.PaidExpansion.GrandfatherStage13 = 0
+
+# IndividualProgression.PaidExpansion.VendorName
+#
+#        NPC name shown in the yellow login reminder.
+#
+IndividualProgression.PaidExpansion.VendorName = "Chronomancer Vezrath"
+
 # IndividualProgression.VanillaPowerAdjustment
 #
 #        Description: Adjustment to player's attack power before completing Vanilla content and opening the Dark Portal
