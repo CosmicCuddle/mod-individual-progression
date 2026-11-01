@@ -5,7 +5,7 @@
 #ifndef COSMIC_IP_GM_COMMAND_ACCESS_POLICY_H
 #define COSMIC_IP_GM_COMMAND_ACCESS_POLICY_H
 
-namespace IndividualProgressionGmCommandPolicy
+namespace IndividualProgressionGmCommandAccessPolicy
 {
     enum class Lookup : unsigned char { UseOriginal, UseSelf, Refuse };
 
