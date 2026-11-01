@@ -102,6 +102,16 @@ class DefaultOff(unittest.TestCase):
         self.assertIn("if (!reload)\n                LOG_ERROR", after)
         self.assertIn("return reload ? requested : (requested && storeSaving);", POLICY)
 
+    def test_start_and_unlock_warnings_are_log_only(self):
+        after = body(CORE, "void OnAfterConfigLoad(bool reload) override")
+        block = after[after.index("if (!reload && sIndividualProgression->paidExpansionEnabled)"):]
+        block = block[:block.index("\n        }\n") + 10]
+        self.assertEqual(block.count("LOG_WARN("), 4)
+        for name in ("deathKnightStartingProgression", "tbcRacesStartingProgression", "startingProgression", "tbcRacesProgressionLevel"):
+            self.assertIn(name, block)
+        self.assertNotRegex(code(block), r"(ip|sIndividualProgression)->\w+\s*=(?!=)", "warnings must not change any setting")
+        self.assertIn("auto const* ip = sIndividualProgression;", block)
+
     def test_store_writes_need_saving_store(self):
         self.assertIn("return featureActive && storeSaving;", POLICY)
         gf = code(body(EXP, "void IndividualProgression::EvaluatePaidExpansionGrandfather(Player* player)"))

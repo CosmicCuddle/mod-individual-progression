@@ -147,6 +147,14 @@ That integration belongs to the Character Services fork and is not part of this 
 
 If the owner later folds this branch into #20 or #19, their frozen assertions must be rebaselined under review, not bypassed.
 
+## Operations runbook (when the owner approves enabling)
+
+1. Before the first start with `PaidExpansion.Enable = 1`: set worldserver `EnablePlayerSettings = 1`, decide `GrandfatherStage13`, and back up the character database.
+2. Read the startup log. Warnings name start and unlock settings that hand out an era without a purchase (DK start ≥ 13, TBC-race start ≥ 8, `StartingProgression` ≥ 8, `TbcRacesUnlockProgression` below 8). They are informational; nothing is changed.
+3. Never set `EnablePlayerSettings = 0` while the feature is on. If it happens and is reloaded, an error is logged: the gate stays on, purchases and grandfathering are refused, and paid characters who log in meanwhile read as unpaid. Restore it and restart; their stored purchases come back at next login.
+4. Purchases and refunds appear as `module` log lines naming the character GUID, era and copper.
+5. Rollback: set `Enable = 0` and restart. Characters whose Into the Breach grant was refused while unpaid stay at stage 7; a GM restores them with `.ip set <name> 8`.
+
 ## Independent review of `62e6828` (Coordination #11) and follow-up
 
 Changes requested by the reviewer and made on this branch:

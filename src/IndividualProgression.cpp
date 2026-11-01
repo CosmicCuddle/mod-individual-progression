@@ -1229,7 +1229,22 @@ public:
             if (!reload)
                 LOG_ERROR("module", "IndividualProgression.PaidExpansion.Enable requires worldserver EnablePlayerSettings = 1: paid expansion feature is NOT active; forcing OFF");
             else
-                LOG_ERROR("module", "IndividualProgression: EnablePlayerSettings was turned off by .reload while PaidExpansion is on: the paid gate stays on, purchases are refused and purchase flags are not saved until it is restored and the server restarted");
+                LOG_ERROR("module", "IndividualProgression: EnablePlayerSettings was turned off by .reload while PaidExpansion is on: the paid gate stays on, purchases are refused, and characters who log in meanwhile read as unpaid (fail closed) until it is restored and the server restarted");
+        }
+
+        // Owner-configured starts and unlocks that hand out an era without a
+        // purchase. Warn only; historical start behaviour is not changed.
+        if (!reload && sIndividualProgression->paidExpansionEnabled)
+        {
+            auto const* ip = sIndividualProgression;
+            if (ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: DeathKnightStartingProgression = {} gives new Death Knights Wrath without a purchase", ip->deathKnightStartingProgression);
+            if (ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: tbcRacesStartingProgression = {} gives new Blood Elves/Draenei TBC without a purchase", ip->tbcRacesStartingProgression);
+            if (ip->startingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: StartingProgression = {} gives every new character an expansion without a purchase", ip->startingProgression);
+            if (ip->tbcRacesProgressionLevel > 0 && ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: TbcRacesUnlockProgression = {} lets an unpaid account unlock Blood Elf/Draenei creation; set it to 8 or higher to require a TBC purchase", ip->tbcRacesProgressionLevel);
         }
 
         if (sIndividualProgression->simpleConfigOverride)
