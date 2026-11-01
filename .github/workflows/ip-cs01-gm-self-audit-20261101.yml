@@ -6,6 +6,9 @@ on:
       - 'src/IndividualProgressionGmCommandAccessPolicy.h'
       - 'tests/ip_gm_command_access_policy.cpp'
       - 'tests/test_ip_gm_self_audit_source.py'
+      # Re-run GM policy when combined paid-era source/contract changes.
+      - 'src/IndividualProgression.cpp'
+      - 'tests/test_ip_paid_expansion_source.py'
       - '.github/workflows/ip-cs01-gm-self-audit-20261101.yml'
   push:
     paths:
@@ -13,6 +16,9 @@ on:
       - 'src/IndividualProgressionGmCommandAccessPolicy.h'
       - 'tests/ip_gm_command_access_policy.cpp'
       - 'tests/test_ip_gm_self_audit_source.py'
+      # Re-run GM policy when combined paid-era source/contract changes.
+      - 'src/IndividualProgression.cpp'
+      - 'tests/test_ip_paid_expansion_source.py'
       - '.github/workflows/ip-cs01-gm-self-audit-20261101.yml'
 
 permissions:

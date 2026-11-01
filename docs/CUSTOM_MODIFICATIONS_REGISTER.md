@@ -170,3 +170,34 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 - **Dependencies/risks:** new API v1 methods `GetEffectiveProgression` and `HasExpansionEntitlement`; pinned Core command parser `Optional<PlayerIdentifier>`, `WorldSession::GetSecurity`, Core module logging. The standard `module` logger may not be durable without host logging configuration. Console, offline targets, privacy of identifiers, staging `.ip get` permission and native Core linking require verification. No new secret storage, SQL, DBC or client patch.
 - **Tests/evidence:** pure C++ policy compiled and executed GCC/Clang C++17/C++20 against exact Github header/test blobs (4/4 local PASS). New source-wiring tests and inherited exact-Git-blob contracts updated to the new `cs_` blob; hosted source/native CI, in-game command tests and actual owner account permissions remain NOT TESTED/PENDING.
 - **Status/approval:** only reviewable default-off development; no server process or configuration change, no merge, no production. Rollback: revert this separate PR to the #23 head; owner approval required before live changes. Source memo: `docs/IP_GM_SELF_AUDIT_CS01_2026-11-01.md`.
+
+### IP-11 review addendum — startup warning accuracy and storage-outage recovery (1 Nov 2026; DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Intended behaviour | Keep paid entitlement **OFF by default** and retain historical DK/TBC-race creation/unlock logic. Startup messages must warn only when a high starting stage is **combined with** an absent/too-low account creation threshold. No operator should lower historical DK start 13 to quiet a false warning. |
+| Ownership / source | Maintenance child of [IP paid entitlement DRAFT #23](https://github.com/CosmicCuddle/mod-individual-progression/pull/23) at `8dc16ffb3ca7f70a9c7ddc7cfbe6c5bd40088e37`; [Grok independent #23 delta review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6561460786). |
+| Files | `src/IndividualProgression.cpp` (log-warning guards only), `tests/test_ip_paid_expansion_source.py` (exact warning contracts), `docs/IP_PAID_EXPANSION_ENTITLEMENT_2026-11-01.md` (storage-outage and rollback runbook), this register. |
+| Dependencies | `PaidExpansion.Enable` stays OFF by default; `EnablePlayerSettings` must remain ON for future owner-authorized paid feature. No migration, SQL, DBC, Core, Playerbots, vendor, character or bot state change. |
+| Known risk | During settings-store downtime, a character who temporarily reads unpaid may have an automatic cross-era progression grant refused; recovery of stored purchase bits does **not** replay missed grants. Source does not produce per-character refusal audit logs. Manual repairs require verified affected players, owner approval, character backups and rollback. No live situation claimed. |
+| Test / status | Source/CI checks are pending at the new draft SHA; no actual Worldserver compilation, in-game account creation, interrupted-store acceptance, GM remediation or live deployment is established by this addendum. |
+| Rollback | Revert this child branch to recover the original warnings and text; owner must separately approve any future binary change. Turning the paid switch OFF restores historical raw-stage access and must not be represented as entitlement validation. |
+
+### IP-11 PR #27 addendum — cross-era start warning coverage (1 Nov 2026; DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Source and review | [Grok review of #27 exact `cbc51cf4`](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6562168799) found two warning-only gaps; this addendum updates the same CS01-owned [draft #27](https://github.com/CosmicCuddle/mod-individual-progression/pull/27), not #23 or #25. |
+| Intended behaviour | Check both TBC and Wrath access for **each** DK and TBC-race start/unlock combination; DK 8/7 and race 13/12 must warn, while historical default DK 13/13 and gated race 8/8 remain quiet. Two logs may occur if a configuration bypasses both eras. |
+| Changed code | `src/IndividualProgression.cpp` adds two `LOG_WARN`-only guards, no stage/purchase/character/account writes; `tests/test_ip_paid_expansion_source.py` increases warning count to six, asserts both era thresholds and adds a labelled synthetic matrix; runbook updates example combinations. |
+| Dependencies and risks | Owner-specific actual config still UNKNOWN; `PaidExpansion.Enable = 0` by default. No SQL, DBC, Core/Playerbots/vendor change, account race-creation rule change or installation. Warnings are startup-only and cannot establish live bypasses. |
+| Tests, release, rollback | Source/matrix CI pending; native compile/gameplay and owner-host logging NOT verified. Revert the same child draft diff if declined; never overwrite #23, and obtain owner approval plus backup and rollback before any live deployment. |
+
+### IP-11 integrated candidate — CS01 GM self-audit + cross-era warning delta (DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Intent | Compose separately reviewed [IP #25](https://github.com/CosmicCuddle/mod-individual-progression/pull/25) player-self/GM audit with [IP #27](https://github.com/CosmicCuddle/mod-individual-progression/pull/27) warning-only fixes, on a separate child branch. Preserve original parent #23 and both review branches unchanged. |
+| Runtime boundaries | New GM self-only get / paid-mode set warning from #25, plus six operator-only startup log warnings from #27. No other runtime code, SQL, vendor, Core, Playerbots, paid-flag default or owner config modification. |
+| Collision resolution | Retained #25 exact `cs_individualProgression.cpp` blob pin and the repaired explicit GM-exception test, while layering #27's six-log source contract and synthetic matrix. Register retains both separate changes append-only. |
+| Evidence | Combined review/source/CI pending. No Worldserver native link, GM gameplay, vendor purchase or owner-host deployment proven. Default paid switch OFF; rollback by dropping this integration child. |

@@ -109,11 +109,79 @@ class DefaultOff(unittest.TestCase):
         after = body(CORE, "void OnAfterConfigLoad(bool reload) override")
         block = after[after.index("if (!reload && sIndividualProgression->paidExpansionEnabled)"):]
         block = block[:block.index("\n        }\n") + 10]
-        self.assertEqual(block.count("LOG_WARN("), 4)
+        self.assertEqual(block.count("LOG_WARN("), 6)
         for name in ("deathKnightStartingProgression", "tbcRacesStartingProgression", "startingProgression", "tbcRacesProgressionLevel"):
             self.assertIn(name, block)
         self.assertNotRegex(code(block), r"(ip|sIndividualProgression)->\w+\s*=(?!=)", "warnings must not change any setting")
         self.assertIn("auto const* ip = sIndividualProgression;", block)
+        # A starting stage alone is not a bypass if account creation requires
+        # the matching purchased era. Preserve both conditions in the warning.
+        self.assertIn("ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage &&", block)
+        self.assertIn("ip->deathKnightProgressionLevel == 0 ||", block)
+        self.assertIn("ip->deathKnightProgressionLevel < IndividualProgressionExpansionPolicy::WrathAccessStage", block)
+        self.assertIn("ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage &&", block)
+        self.assertIn("ip->tbcRacesProgressionLevel == 0 ||", block)
+        self.assertIn("ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage", block)
+        # No warning should tell the operator that the default 13/13 DK
+        # or fully gated 8/8 race pair itself grants free access.
+        self.assertIn("with DeathKnightUnlockProgression = {}", block)
+        self.assertIn("with TbcRacesUnlockProgression = {}", block)
+        # Both starting race/class paths must check *both* era thresholds,
+        # not only their most typical expansion.
+        self.assertIn("ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage &&", block)
+        self.assertIn("ip->deathKnightProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage", block)
+        self.assertIn("ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage &&", block)
+        self.assertIn("ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::WrathAccessStage", block)
+        self.assertIn("may give TBC without a purchase", block)
+        self.assertIn("may give Wrath without a purchase", block)
+
+    def test_cpp_warning_guards_match_exact_cross_era_predicates(self):
+        # Unlike the synthetic matrix below, validate the whole C++ condition:
+        # both operands, parentheses, matching tier, and LOG_WARN as its body.
+        after = body(CORE, "void OnAfterConfigLoad(bool reload) override")
+        block = after[after.index("if (!reload && sIndividualProgression->paidExpansionEnabled)"):]
+        block = block[:block.index("\n        }\n") + 10]
+        shape = re.compile(
+            r'if\s*\(\s*ip->(?P<start>deathKnightStartingProgression|tbcRacesStartingProgression)'
+            r'\s*>=\s*IndividualProgressionExpansionPolicy::(?P<era>TbcEntryStage|WrathAccessStage)'
+            r'\s*&&\s*\(\s*ip->(?P<unlock>deathKnightProgressionLevel|tbcRacesProgressionLevel)'
+            r'\s*==\s*0\s*\|\|\s*ip->(?P=unlock)\s*<\s*'
+            r'IndividualProgressionExpansionPolicy::(?P=era)\s*\)\s*\)\s*LOG_WARN\("module",'
+        )
+        matched = {(m.group("start"), m.group("era"), m.group("unlock"))
+                   for m in shape.finditer(block)}
+        expected = {
+            ("deathKnightStartingProgression", "TbcEntryStage", "deathKnightProgressionLevel"),
+            ("deathKnightStartingProgression", "WrathAccessStage", "deathKnightProgressionLevel"),
+            ("tbcRacesStartingProgression", "TbcEntryStage", "tbcRacesProgressionLevel"),
+            ("tbcRacesStartingProgression", "WrathAccessStage", "tbcRacesProgressionLevel"),
+        }
+        self.assertEqual(matched, expected)
+        # Prevent duplicate matches from being hidden by the set comparison.
+        self.assertEqual(len(list(shape.finditer(block))), 4)
+
+    def test_warning_cross_era_start_threshold_matrix(self):
+        # Synthetic truth-table model of the four warning conditions.
+        # This does not execute the AzerothCore C++ start/creation path.
+        def warns(start, unlock, target):
+            return start >= target and (unlock == 0 or unlock < target)
+
+        cases = (
+            ("default DK", 13, 13, False, False),
+            ("DK safe TBC", 8, 8, False, False),
+            ("DK free TBC", 8, 7, True, False),
+            ("DK free Wrath", 13, 12, False, True),
+            ("DK no unlock", 13, 0, True, True),
+            ("DK both eras below unlock", 13, 7, True, True),
+            ("safe race TBC", 8, 8, False, False),
+            ("race free TBC", 8, 7, True, False),
+            ("race free Wrath", 13, 12, False, True),
+            ("race no unlock", 13, 0, True, True),
+            ("safe race Wrath", 13, 13, False, False),
+        )
+        for name, start, unlock, tbc, wrath in cases:
+            with self.subTest(case=name):
+                self.assertEqual((warns(start, unlock, 8), warns(start, unlock, 13)), (tbc, wrath))
 
     def test_store_writes_need_saving_store(self):
         self.assertIn("return featureActive && storeSaving;", POLICY)
