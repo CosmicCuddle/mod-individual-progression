@@ -164,7 +164,8 @@ jobs:
           grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' "$ip/conf/individualProgression.conf.dist"
           grep -Fqx 'IndividualProgression.PaidExpansion.GrandfatherStage13 = 0' "$ip/conf/individualProgression.conf.dist"
           grep -Fq 'GetOption<bool>("IndividualProgression.PaidExpansion.Enable", false)' "$ip/src/IndividualProgression.cpp"
-          test "$(git -C "$ip" rev-parse HEAD:src/cs_individualProgression.cpp)" = 654119d29e0519600d50b179ccd5a9c5df8695b0
+          # The isolated later GM-child has a distinct reviewed command blob; frozen #23 scope remains separately guarded.
+          test "$(git -C "$ip" rev-parse HEAD:src/cs_individualProgression.cpp)" = 6926fdebf727496b8bdbdcd0626a5ca24c97b1f0
       - name: Apply exactly two historical Playerbots compatibility substitutions on runner only
         shell: bash
         run: |
