@@ -66,7 +66,7 @@ class Provenance(unittest.TestCase):
         self.assertEqual(git("rev-parse", "HEAD:src/IndividualProgressionSpells.cpp").strip(),
                          "6ee93e1174b5aef6c5d61c9ea31526506c9d08da")
         self.assertEqual(git("rev-parse", "HEAD:src/cs_individualProgression.cpp").strip(),
-                         "654119d29e0519600d50b179ccd5a9c5df8695b0")
+                         "278aaa48dc5fb7770bd6013e659e4872752d4b03")
 
     def test_no_sql_or_data_or_script_dir_change(self):
         self.assertEqual(git("diff", "--name-only", PARENT_20, "--", "data", "optional", "sql",
