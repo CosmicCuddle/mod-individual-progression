@@ -23,6 +23,12 @@ on:
       - tests/test_ip_combined_offline_leader_guard.py
       - tests/test_ip_f19_login_floor_source.py
       - tests/test_ip_gm_command_null_safety.py
+      # Combined paid + GM + F19 source contracts must trigger this full gate.
+      - docs/IP_PAID_EXPANSION_ENTITLEMENT_2026-11-01.md
+      - tests/test_ip_paid_expansion_source.py
+      - tests/test_ip_gm_self_audit_source.py
+      - tests/expansion_purchase_policy.cpp
+      - tests/ip_gm_command_access_policy.cpp
   workflow_dispatch:
 
 permissions:
@@ -34,7 +40,7 @@ concurrency:
 
 jobs:
   f19-source-and-policy:
-    name: F19 policy C++ tests, wiring contracts and every inherited regression
+    name: F19, paid expansion, GM and inherited policy/source tests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -94,7 +100,7 @@ jobs:
               "/tmp/f19-$cxx-$std"
             done
           done
-      - name: F19 wiring contracts and every inherited regression check
+      - name: F19, paid-expansion, GM and inherited regression checks
         shell: bash
         run: |
           set -euo pipefail
@@ -102,11 +108,21 @@ jobs:
           python3 -B -m unittest discover -s tests -p 'test_ip_combined_c3_f14_partial_login.py' -v
           python3 -B -m unittest discover -s tests -p 'test_ip_combined_offline_leader_guard.py' -v
           python3 -B -m unittest discover -s tests -p 'test_ip_gm_command_null_safety.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_gm_self_audit_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_paid_expansion_source.py' -v
           python3 -B tests/check_hunter_autocast_source.py
           python3 -B tests/check_group_expansion_source.py
           for std in c++17 c++20; do
             g++ "-std=$std" -O2 -Wall -Wextra -Werror -pedantic tests/group_expansion_policy.cpp -o "/tmp/group-$std"
             "/tmp/group-$std"
+          done
+          # Both pure policy helpers are runner-only binaries; never launch
+          # Worldserver or read owner character data in source-only jobs.
+          for std in c++17 c++20; do
+            g++ "-std=$std" -O2 -Wall -Wextra -Werror -pedantic tests/expansion_purchase_policy.cpp -o "/tmp/paid-$std"
+            "/tmp/paid-$std"
+            g++ "-std=$std" -O2 -Wall -Wextra -Werror -pedantic tests/ip_gm_command_access_policy.cpp -o "/tmp/gm-access-$std"
+            "/tmp/gm-access-$std"
           done
       - name: Source-only safety declaration
         run: |
