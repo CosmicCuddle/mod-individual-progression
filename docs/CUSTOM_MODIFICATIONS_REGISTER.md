@@ -161,3 +161,16 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | CI / runtime status | Source, policy and pinned full Worldserver link results are recorded in the PR and Coordination #13. **No launch, no gameplay test, no Character Services integration, no owner-installed proof.** |
 | Known risks / open decisions | Independent review (Coordination #11) open items: DB `conditions` on quest 66013 still pass for unpaid stage-13 characters (vendor stock, phasing gossip); DK / TBC-race start stages still grant their era (account unlocks now use an effective ceiling where an unpaid 13 counts as 12); no GM entitlement command; GM `.ip tele` reads the raw stage. Also: exact final requirements; grandfathering of existing stage-13 characters (decide before first enable); GM / Altbot exemptions; within-era catch-up; live prices; `/reload` is login-only. Character Services must switch from `ForceUpdateProgressionState(8/14)` to `PurchaseExpansion` and cap catch-up with `GetMaxServiceGrantableStage`. Bots remain ungated, and Playerbots `ResetQuests` (C1) can still remove bot stage markers. |
 | Merge / rollback | Do not merge automatically. Set `PaidExpansion.Enable = 0` and restart to return to parent behaviour; stored flags are then ignored. Revert this branch to remove the code. Gold is never refunded automatically; any live cleanup needs backups and owner approval. |
+
+## IP-GM-002 — Paid-mode `.ip set` audit and player self-only `.ip get` (1 Nov 2026; DRAFT, NOT MERGED)
+
+| Field | Record |
+| --- | --- |
+| Feature / intended behaviour | `.ip get` registered `SEC_PLAYER`: ordinary players read only their own progression (other names refused, selection ignored); GMs and console keep explicit/selected lookup. With paid expansions ON it also shows earned and current access stages. `.ip set` warns the GM and writes one `module` audit line when it newly grants TBC or Wrath without a purchase; it writes no purchase flag. |
+| Owner / coordination | CosmicCuddle's existing `.ip get` rule (recorded by Information) and Maintenance requests in [Coordination #13](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13). |
+| Branch / parent | `feature/ip-gm-commands-paid-audit-get-self-20261101`, created from [DRAFT #23](https://github.com/CosmicCuddle/mod-individual-progression/pull/23) `8dc16ffb3ca7f70a9c7ddc7cfbe6c5bd40088e37`. |
+| Executable source | `src/cs_individualProgression.cpp` (reviewed blob 654119d plus documented lines only); new `src/IndividualProgressionGmPolicy.h`, `src/IndividualProgressionGmTools.h/.cpp`. `.ip tele` unchanged (raw check, refuses unpaid stage 13). |
+| Config / SQL / DBC / client | None. |
+| Supporting files | [Memo](IP_GM_COMMANDS_PAID_2026-11-01.md), `tests/ip_gm_policy.cpp`, `tests/test_ip_gm_commands_paid_source.py`, `tests/ip_gm_cs_baseline.py`, workflow `ip-gm-commands-paid-20261101.yml`. Declared deviations: three pins of the exact GM blob now use the baseline check. |
+| CI / runtime status | Results recorded in the PR and Coordination #13. **No launch, no gameplay test.** |
+| Merge / rollback | Do not merge automatically. Revert this branch. |

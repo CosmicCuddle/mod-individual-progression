@@ -2,6 +2,7 @@
 #include "ScriptMgr.h"
 #include "Tokenize.h"
 #include "IndividualProgression.h"
+#include "IndividualProgressionGmTools.h"
 #include "naxxramas_40.h"
 
 using namespace Acore::ChatCommands;
@@ -49,7 +50,7 @@ public:
     {
         static ChatCommandTable ipTable =
         {
-            { "get",    HandleGetIndividualProgressionCommand,    SEC_GAMEMASTER,    Console::Yes },
+            { "get",    HandleGetIndividualProgressionCommand,    SEC_PLAYER,        Console::Yes },
             { "set",    HandleSetIndividualProgressionCommand,    SEC_GAMEMASTER,    Console::Yes },
             { "pet",    HandlePetIndividualProgressionCommand,    SEC_GAMEMASTER,    Console::Yes },
             { "tele",   HandleTeleIndividualProgressionCommand,   SEC_GAMEMASTER,    Console::Yes },
@@ -102,6 +103,10 @@ public:
 
     static bool HandleGetIndividualProgressionCommand(ChatHandler* handler, Optional<PlayerIdentifier> player)
     {
+        // Ordinary players may read only their own progression.
+        if (!IndividualProgressionGmTools::ResolveGetTarget(handler, player))
+            return false;
+
         if (!player)
             player = PlayerIdentifier::FromTargetOrSelf(handler);
 
@@ -122,6 +127,7 @@ public:
         uint32 progressionLevel = sIndividualProgression->GetPlayerProgressionFromQuests(target);
 
         handler->PSendSysMessage("Progression Level for |cff00ffff{}|r = |cff00ffff{}|r", playername, progressionLevel);
+        IndividualProgressionGmTools::SendAccessStage(handler, target);
         return true;
     }
 
@@ -163,8 +169,10 @@ public:
             CheckProgressionAchievements(target, currentState, progressionLevel);
         }
 
+        IndividualProgressionGmTools::SetAudit const paidAudit = IndividualProgressionGmTools::BeginSetAudit(target);
         sIndividualProgression->ForceUpdateProgressionState(target, static_cast<ProgressionState>(progressionLevel));
         sIndividualProgression->checkIPPhasing(target, currentArea);
+        IndividualProgressionGmTools::FinishSetAudit(handler, target, paidAudit, currentState, progressionLevel);
 
         handler->PSendSysMessage("Updated Progression Level for |cff00ffff{}|r = |cff00ffff{}|r", playername, progressionLevel);
         return true;

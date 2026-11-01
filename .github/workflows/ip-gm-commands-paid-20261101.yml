@@ -1,0 +1,251 @@
+name: IP GM commands - paid-mode .ip set audit and player self-only .ip get
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ip-gm-commands-paid-20261101.yml
+      - .github/workflows/ip-paid-expansion-entitlement-20261101.yml
+      - conf/individualProgression.conf.dist
+      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
+      - docs/IP_GM_COMMANDS_PAID_2026-11-01.md
+      - src/IndividualProgression.cpp
+      - src/IndividualProgression.h
+      - src/IndividualProgressionExpansion.cpp
+      - src/IndividualProgressionExpansionPolicy.h
+      - src/IndividualProgressionGmPolicy.h
+      - src/IndividualProgressionGmTools.cpp
+      - src/IndividualProgressionGmTools.h
+      - src/IndividualProgressionGroupPolicy.h
+      - src/IndividualProgressionPlayer.cpp
+      - src/IndividualProgressionSpells.cpp
+      - src/cs_individualProgression.cpp
+      - tests/check_group_expansion_source.py
+      - tests/check_hunter_autocast_source.py
+      - tests/expansion_purchase_policy.cpp
+      - tests/group_expansion_policy.cpp
+      - tests/ip_gm_cs_baseline.py
+      - tests/ip_gm_policy.cpp
+      - tests/test_ip_combined_c3_f14_partial_login.py
+      - tests/test_ip_combined_offline_leader_guard.py
+      - tests/test_ip_gm_command_null_safety.py
+      - tests/test_ip_gm_commands_paid_source.py
+      - tests/test_ip_paid_expansion_source.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gm-commands-source-and-policy:
+    name: GM command policy C++ tests, wiring contracts and every inherited regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact invoking PR source and history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: "Make pinned parents available (PR 23 head, PR 20, PR 16 and PR 13 refs used by inherited tests)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for sha in 8dc16ffb3ca7f70a9c7ddc7cfbe6c5bd40088e37 5fe0f9105d55d249aa55a25510d3fa23e3d84148 c44c3320406670cdc8f25c963ebba13e9cf24b71 a18397bbb0c7054052030a83ac30b699ac382d38; do
+            git cat-file -e "$sha^{commit}" 2>/dev/null || git fetch --no-tags origin "$sha"
+            test "$(git cat-file -t "$sha")" = commit
+          done
+          git merge-base --is-ancestor 8dc16ffb3ca7f70a9c7ddc7cfbe6c5bd40088e37 HEAD
+      - name: "Strict thirteen-path delta vs PR 23 parent"
+        # Exact-path freeze belongs to this PR's own head only; every regression
+        # step below still runs on any later child PR.
+        if: >-
+          (github.event_name == 'pull_request' && github.head_ref == 'feature/ip-gm-commands-paid-audit-get-self-20261101') ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/ip-gm-commands-paid-audit-get-self-20261101')
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=8dc16ffb3ca7f70a9c7ddc7cfbe6c5bd40088e37
+          git diff --check "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
+          printf '%s\n' \
+            '.github/workflows/ip-gm-commands-paid-20261101.yml' \
+            '.github/workflows/ip-paid-expansion-entitlement-20261101.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/IP_GM_COMMANDS_PAID_2026-11-01.md' \
+            'src/IndividualProgressionGmPolicy.h' \
+            'src/IndividualProgressionGmTools.cpp' \
+            'src/IndividualProgressionGmTools.h' \
+            'src/cs_individualProgression.cpp' \
+            'tests/ip_gm_cs_baseline.py' \
+            'tests/ip_gm_policy.cpp' \
+            'tests/test_ip_combined_c3_f14_partial_login.py' \
+            'tests/test_ip_gm_commands_paid_source.py' \
+            'tests/test_ip_paid_expansion_source.py' | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/actual.txt
+          git show "$BASE:docs/CUSTOM_MODIFICATIONS_REGISTER.md" > /tmp/register-parent.md
+          head -c "$(wc -c < /tmp/register-parent.md)" docs/CUSTOM_MODIFICATIONS_REGISTER.md | cmp - /tmp/register-parent.md
+          test "$(git rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
+          python3 -B tests/ip_gm_cs_baseline.py src/cs_individualProgression.cpp
+          test -z "$(git diff --name-only "$BASE" HEAD -- data optional sql)"
+          for f in src/IndividualProgression.cpp src/IndividualProgression.h src/IndividualProgressionPlayer.cpp src/IndividualProgressionExpansion.cpp src/IndividualProgressionExpansionPolicy.h src/IndividualProgressionGroupPolicy.h conf/individualProgression.conf.dist; do
+            test "$(git rev-parse "HEAD:$f")" = "$(git rev-parse "$BASE:$f")"
+          done
+          echo 'PASS: thirteen reviewed paths; GM file = reviewed blob + documented lines; Hunter, paid expansion, core, conf and SQL/data unchanged'
+      - name: "GM command and paid expansion policy C++ tests (GCC and Clang, C++17 and C++20)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for cxx in g++ clang++; do
+            for std in c++17 c++20; do
+              "$cxx" "-std=$std" -O2 -Wall -Wextra -Werror -pedantic tests/ip_gm_policy.cpp -o "/tmp/gm-$cxx-$std"
+              "/tmp/gm-$cxx-$std"
+              "$cxx" "-std=$std" -O2 -Wall -Wextra -Werror -pedantic tests/expansion_purchase_policy.cpp -o "/tmp/ep-$cxx-$std"
+              "/tmp/ep-$cxx-$std"
+            done
+          done
+      - name: GM command wiring contracts and every inherited regression check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_gm_commands_paid_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_paid_expansion_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_combined_c3_f14_partial_login.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_combined_offline_leader_guard.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_gm_command_null_safety.py' -v
+          python3 -B tests/check_hunter_autocast_source.py
+          python3 -B tests/check_group_expansion_source.py
+          for std in c++17 c++20; do
+            g++ "-std=$std" -O2 -Wall -Wextra -Werror -pedantic tests/group_expansion_policy.cpp -o "/tmp/group-$std"
+            "/tmp/group-$std"
+          done
+      - name: Source-only safety declaration
+        run: |
+          echo 'Source, policy and model tests only. Not gameplay evidence.'
+          echo 'No owner host, game launch, SQL, character data, config enablement, payment or merge.'
+
+  full-native-gm-commands-off-by-default:
+    name: Build and link pinned Worldserver with GM command audit and .ip get self-only (NO LAUNCH)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 170
+    steps:
+      - name: Checkout fixed historical Core
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          path: acore
+          persist-credentials: false
+      - name: Checkout historical Playerbots
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: acore/modules/mod-playerbots
+          persist-credentials: false
+      - name: Checkout exact GM-command DRAFT source
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: acore/modules/mod-individual-progression
+          persist-credentials: false
+      - name: Checkout Naxx module historical compatibility pin
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/Mod-Naxxramas-Core
+          ref: 80e9de1c39a6dc995188a80c31a5e785d0f2a6f9
+          path: acore/modules/mod-naxxramas-core
+          persist-credentials: false
+      - name: Verify fixed Core, Playerbots, Naxx refs and feature default OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C acore rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
+          test "$(git -C acore/modules/mod-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          test "$(git -C acore/modules/mod-naxxramas-core rev-parse HEAD)" = 80e9de1c39a6dc995188a80c31a5e785d0f2a6f9
+          ip=acore/modules/mod-individual-progression
+          test "$(git -C "$ip" rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$(git -C "$ip" rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
+          grep -Fqx 'IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0' "$ip/conf/individualProgression.conf.dist"
+          grep -Fq 'GetOption<bool>("IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin", false)' "$ip/src/IndividualProgression.cpp"
+          test -f acore/modules/mod-playerbots/src/Bot/RandomPlayerbotMgr.h
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' "$ip/conf/individualProgression.conf.dist"
+          python3 "$ip/tests/ip_gm_cs_baseline.py" "$ip/src/cs_individualProgression.cpp"
+      - name: Apply exactly two historical Playerbots compatibility substitutions on runner only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('acore/modules/mod-playerbots')
+          changes = {
+            'src/Db/PlayerbotsDatabase.h': (
+              'MySQLConnection* CreateAsyncConnection(ProducerConsumerQueue<SQLOperation*>* queue,',
+              'MySQLConnection* CreateConnection(ProducerConsumerQueue<SQLOperation*>* queue,'
+            ),
+            'src/Util/LocaleColumns.h': (
+              'if (!IsLocaleRegistered(locale))', 'if (!localeNames[locale])'
+            )
+          }
+          for fn,(before,after) in changes.items():
+            file = root / fn
+            text = file.read_text()
+            assert text.count(before) == 1 and after not in text, fn
+            file.write_text(text.replace(before,after))
+          PY
+          git -C acore/modules/mod-playerbots diff --check
+          git -C acore/modules/mod-playerbots diff --name-only | sort > /tmp/pb-changed.txt
+          printf '%s\n' 'src/Db/PlayerbotsDatabase.h' 'src/Util/LocaleColumns.h' | sort > /tmp/pb-allowed.txt
+          diff -u /tmp/pb-allowed.txt /tmp/pb-changed.txt
+          git -C acore/modules/mod-playerbots diff --numstat
+      - name: Install compiler and library prerequisites only on disposable CI runner
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git cmake ninja-build g++ make pkg-config file \
+            libmysqlclient-dev libssl-dev libbz2-dev \
+            libreadline-dev libncurses-dev libboost-all-dev
+      - name: Configure full historical Worldserver with IP, PB and Naxx
+        run: |
+          cmake -S acore -B acore-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_CXX_FLAGS="-DCOSMIC_IP_F14_REQUIRE_PLAYERBOTS" \
+            -DMODULES=static -DSCRIPTS=static \
+            -DAPPS_BUILD=world-only -DTOOLS_BUILD=none \
+            -DUSE_COREPCH=ON -DUSE_SCRIPTPCH=ON
+      - name: Verify executable IP translation units in actual compile graph
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          cc = json.loads(Path('acore-build/compile_commands.json').read_text())
+          for name in ('IndividualProgression.cpp', 'IndividualProgressionPlayer.cpp', 'IndividualProgressionSpells.cpp', 'IndividualProgressionExpansion.cpp', 'IndividualProgressionGmTools.cpp', 'cs_individualProgression.cpp'):
+              sources = [x for x in cc if x.get('file','').replace('\\','/').endswith('/mod-individual-progression/src/'+name)]
+              assert len(sources)==1, f'Expected one compiled {name}, got {len(sources)}'
+              if name == 'IndividualProgressionPlayer.cpp':
+                  command = sources[0].get('command') or ' '.join(sources[0].get('arguments', []))
+                  assert '-DCOSMIC_IP_F14_REQUIRE_PLAYERBOTS' in command, 'F14 Playerbots-required compile proof missing'
+                  print('PASS: login/group translation unit REQUIRES Playerbots header')
+              print('PASS:',name)
+          PY
+      - name: Actual full Worldserver compile and link (NEVER LAUNCH)
+        run: cmake --build acore-build --target worldserver --parallel 2
+      - name: Verify binary on runner without upload or deployment
+        run: |
+          set -euo pipefail
+          test -s acore-build/src/server/apps/worldserver
+          test -x acore-build/src/server/apps/worldserver
+          echo 'PASS: Hunter + grouping + C3 + partial F14 + GM safety + paid expansion + GM audit Worldserver linked'
+          echo 'No owner host, execution, SQL/config writes or character changes'
+      - name: Preserve roll-back/release safety boundary
+        if: always()
+        run: |
+          echo 'Disposable CI only. Owner-host binary, config, DB engine and revisions are UNKNOWN.'
+          echo 'Feature flag is OFF by default. Successful compilation is not gameplay acceptance.'
+          echo 'Partial F14 is not full F14 and not C1 Playerbots ResetQuests protection.'
+          echo 'Paid expansion stays OFF by default; the GM audit only acts when it is on.'
+          echo 'No merge, production install, restart, SQL, character writes or backup claims.'

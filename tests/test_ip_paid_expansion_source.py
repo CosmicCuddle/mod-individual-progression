@@ -57,7 +57,7 @@ class Provenance(unittest.TestCase):
         subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", PARENT_20, "HEAD"], check=True)
 
     def test_protected_files_unchanged(self):
-        for path in ("src/IndividualProgressionSpells.cpp", "src/cs_individualProgression.cpp",
+        for path in ("src/IndividualProgressionSpells.cpp",
                      "src/IndividualProgressionGroupPolicy.h", "src/IndividualProgression_loader.cpp",
                      "src/IndividualProgressionAwareness.cpp", "src/IndividualProgressionPvP.cpp",
                      "src/IndividualProgressionBG.cpp"):
@@ -65,8 +65,9 @@ class Provenance(unittest.TestCase):
                 self.assertEqual(git("diff", "--name-only", PARENT_20, "--", path).strip(), "")
         self.assertEqual(git("rev-parse", "HEAD:src/IndividualProgressionSpells.cpp").strip(),
                          "6ee93e1174b5aef6c5d61c9ea31526506c9d08da")
-        self.assertEqual(git("rev-parse", "HEAD:src/cs_individualProgression.cpp").strip(),
-                         "654119d29e0519600d50b179ccd5a9c5df8695b0")
+        # Reviewed GM blob 654119d plus ONLY the documented GM-command DRAFT lines.
+        import ip_gm_cs_baseline
+        self.assertTrue(ip_gm_cs_baseline.matches_reviewed_blob(read("src/cs_individualProgression.cpp")))
 
     def test_no_sql_or_data_or_script_dir_change(self):
         self.assertEqual(git("diff", "--name-only", PARENT_20, "--", "data", "optional", "sql",

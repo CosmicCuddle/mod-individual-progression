@@ -164,7 +164,7 @@ jobs:
           grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' "$ip/conf/individualProgression.conf.dist"
           grep -Fqx 'IndividualProgression.PaidExpansion.GrandfatherStage13 = 0' "$ip/conf/individualProgression.conf.dist"
           grep -Fq 'GetOption<bool>("IndividualProgression.PaidExpansion.Enable", false)' "$ip/src/IndividualProgression.cpp"
-          test "$(git -C "$ip" rev-parse HEAD:src/cs_individualProgression.cpp)" = 654119d29e0519600d50b179ccd5a9c5df8695b0
+          python3 "$ip/tests/ip_gm_cs_baseline.py" "$ip/src/cs_individualProgression.cpp"
       - name: Apply exactly two historical Playerbots compatibility substitutions on runner only
         shell: bash
         run: |

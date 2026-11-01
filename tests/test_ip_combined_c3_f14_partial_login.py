@@ -112,8 +112,10 @@ class PreservedParentSource(unittest.TestCase):
     def test_gm_source_is_exactly_the_previously_reviewed_fix(self):
         # This child intentionally ports #14's GM fix. All other executable
         # protections remain identical to frozen #19.
-        self.assertEqual(git("rev-parse", "HEAD:src/cs_individualProgression.cpp").strip(),
-                         "654119d29e0519600d50b179ccd5a9c5df8695b0")
+        # Reviewed blob 654119d plus ONLY the documented GM-command DRAFT lines.
+        import ip_gm_cs_baseline
+        self.assertTrue(ip_gm_cs_baseline.matches_reviewed_blob(
+            (ROOT / "src/cs_individualProgression.cpp").read_text()))
 
     def test_hunter_blob_is_the_reviewed_one(self):
         self.assertEqual(git("rev-parse", "HEAD:src/IndividualProgressionSpells.cpp").strip(),
