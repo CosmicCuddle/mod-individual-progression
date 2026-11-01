@@ -161,3 +161,25 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | CI / runtime status | Source, policy and pinned full Worldserver link results are recorded in the PR and Coordination #13. **No launch, no gameplay test, no Character Services integration, no owner-installed proof.** |
 | Known risks / open decisions | Independent review (Coordination #11) open items: DB `conditions` on quest 66013 still pass for unpaid stage-13 characters (vendor stock, phasing gossip); DK / TBC-race start stages still grant their era (account unlocks now use an effective ceiling where an unpaid 13 counts as 12); no GM entitlement command; GM `.ip tele` reads the raw stage. Also: exact final requirements; grandfathering of existing stage-13 characters (decide before first enable); GM / Altbot exemptions; within-era catch-up; live prices; `/reload` is login-only. Character Services must switch from `ForceUpdateProgressionState(8/14)` to `PurchaseExpansion` and cap catch-up with `GetMaxServiceGrantableStage`. Bots remain ungated, and Playerbots `ResetQuests` (C1) can still remove bot stage markers. |
 | Merge / rollback | Do not merge automatically. Set `PaidExpansion.Enable = 0` and restart to return to parent behaviour; stored flags are then ignored. Revert this branch to remove the code. Gold is never refunded automatically; any live cleanup needs backups and owner approval. |
+
+### IP-11 review addendum — startup warning accuracy and storage-outage recovery (1 Nov 2026; DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Intended behaviour | Keep paid entitlement **OFF by default** and retain historical DK/TBC-race creation/unlock logic. Startup messages must warn only when a high starting stage is **combined with** an absent/too-low account creation threshold. No operator should lower historical DK start 13 to quiet a false warning. |
+| Ownership / source | Maintenance child of [IP paid entitlement DRAFT #23](https://github.com/CosmicCuddle/mod-individual-progression/pull/23) at `8dc16ffb3ca7f70a9c7ddc7cfbe6c5bd40088e37`; [Grok independent #23 delta review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6561460786). |
+| Files | `src/IndividualProgression.cpp` (log-warning guards only), `tests/test_ip_paid_expansion_source.py` (exact warning contracts), `docs/IP_PAID_EXPANSION_ENTITLEMENT_2026-11-01.md` (storage-outage and rollback runbook), this register. |
+| Dependencies | `PaidExpansion.Enable` stays OFF by default; `EnablePlayerSettings` must remain ON for future owner-authorized paid feature. No migration, SQL, DBC, Core, Playerbots, vendor, character or bot state change. |
+| Known risk | During settings-store downtime, a character who temporarily reads unpaid may have an automatic cross-era progression grant refused; recovery of stored purchase bits does **not** replay missed grants. Source does not produce per-character refusal audit logs. Manual repairs require verified affected players, owner approval, character backups and rollback. No live situation claimed. |
+| Test / status | Source/CI checks are pending at the new draft SHA; no actual Worldserver compilation, in-game account creation, interrupted-store acceptance, GM remediation or live deployment is established by this addendum. |
+| Rollback | Revert this child branch to recover the original warnings and text; owner must separately approve any future binary change. Turning the paid switch OFF restores historical raw-stage access and must not be represented as entitlement validation. |
+
+### IP-11 PR #27 addendum — cross-era start warning coverage (1 Nov 2026; DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Source and review | [Grok review of #27 exact `cbc51cf4`](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6562168799) found two warning-only gaps; this addendum updates the same CS01-owned [draft #27](https://github.com/CosmicCuddle/mod-individual-progression/pull/27), not #23 or #25. |
+| Intended behaviour | Check both TBC and Wrath access for **each** DK and TBC-race start/unlock combination; DK 8/7 and race 13/12 must warn, while historical default DK 13/13 and gated race 8/8 remain quiet. Two logs may occur if a configuration bypasses both eras. |
+| Changed code | `src/IndividualProgression.cpp` adds two `LOG_WARN`-only guards, no stage/purchase/character/account writes; `tests/test_ip_paid_expansion_source.py` increases warning count to six, asserts both era thresholds and adds a labelled synthetic matrix; runbook updates example combinations. |
+| Dependencies and risks | Owner-specific actual config still UNKNOWN; `PaidExpansion.Enable = 0` by default. No SQL, DBC, Core/Playerbots/vendor change, account race-creation rule change or installation. Warnings are startup-only and cannot establish live bypasses. |
+| Tests, release, rollback | Source/matrix CI pending; native compile/gameplay and owner-host logging NOT verified. Revert the same child draft diff if declined; never overwrite #23, and obtain owner approval plus backup and rollback before any live deployment. |
