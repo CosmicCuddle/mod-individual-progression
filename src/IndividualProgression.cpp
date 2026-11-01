@@ -1237,10 +1237,19 @@ public:
         if (!reload && sIndividualProgression->paidExpansionEnabled)
         {
             auto const* ip = sIndividualProgression;
-            if (ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage)
-                LOG_WARN("module", "IndividualProgression.PaidExpansion: DeathKnightStartingProgression = {} gives new Death Knights Wrath without a purchase", ip->deathKnightStartingProgression);
-            if (ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage)
-                LOG_WARN("module", "IndividualProgression.PaidExpansion: tbcRacesStartingProgression = {} gives new Blood Elves/Draenei TBC without a purchase", ip->tbcRacesStartingProgression);
+            // An account gated at stage 13 cannot create a Death Knight while
+            // unpaid (effective stage 12). Warn only if the unlock threshold
+            // is absent or below Wrath access and the DK would start in Wrath.
+            if (ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage &&
+                (ip->deathKnightProgressionLevel == 0 ||
+                 ip->deathKnightProgressionLevel < IndividualProgressionExpansionPolicy::WrathAccessStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: DeathKnightStartingProgression = {} with DeathKnightUnlockProgression = {} may give Wrath without a purchase", ip->deathKnightStartingProgression, ip->deathKnightProgressionLevel);
+            // With an account unlock threshold of stage 8, creation already
+            // requires TBC access. Only a lower/absent threshold bypasses it.
+            if (ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage &&
+                (ip->tbcRacesProgressionLevel == 0 ||
+                 ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: tbcRacesStartingProgression = {} with TbcRacesUnlockProgression = {} may give TBC without a purchase", ip->tbcRacesStartingProgression, ip->tbcRacesProgressionLevel);
             if (ip->startingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage)
                 LOG_WARN("module", "IndividualProgression.PaidExpansion: StartingProgression = {} gives every new character an expansion without a purchase", ip->startingProgression);
             if (ip->tbcRacesProgressionLevel > 0 && ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage)
