@@ -1244,12 +1244,24 @@ public:
                 (ip->deathKnightProgressionLevel == 0 ||
                  ip->deathKnightProgressionLevel < IndividualProgressionExpansionPolicy::WrathAccessStage))
                 LOG_WARN("module", "IndividualProgression.PaidExpansion: DeathKnightStartingProgression = {} with DeathKnightUnlockProgression = {} may give Wrath without a purchase", ip->deathKnightStartingProgression, ip->deathKnightProgressionLevel);
+            // Check TBC independently: a DK starting at 8..12 can bypass a
+            // lower account creation threshold without owning TBC.
+            if (ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage &&
+                (ip->deathKnightProgressionLevel == 0 ||
+                 ip->deathKnightProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: DeathKnightStartingProgression = {} with DeathKnightUnlockProgression = {} may give TBC without a purchase", ip->deathKnightStartingProgression, ip->deathKnightProgressionLevel);
             // With an account unlock threshold of stage 8, creation already
             // requires TBC access. Only a lower/absent threshold bypasses it.
             if (ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage &&
                 (ip->tbcRacesProgressionLevel == 0 ||
                  ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage))
                 LOG_WARN("module", "IndividualProgression.PaidExpansion: tbcRacesStartingProgression = {} with TbcRacesUnlockProgression = {} may give TBC without a purchase", ip->tbcRacesStartingProgression, ip->tbcRacesProgressionLevel);
+            // A TBC-only account can also create a character starting at 13
+            // unless the race unlock requires Wrath ownership independently.
+            if (ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage &&
+                (ip->tbcRacesProgressionLevel == 0 ||
+                 ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::WrathAccessStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: tbcRacesStartingProgression = {} with TbcRacesUnlockProgression = {} may give Wrath without a purchase", ip->tbcRacesStartingProgression, ip->tbcRacesProgressionLevel);
             if (ip->startingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage)
                 LOG_WARN("module", "IndividualProgression.PaidExpansion: StartingProgression = {} gives every new character an expansion without a purchase", ip->startingProgression);
             if (ip->tbcRacesProgressionLevel > 0 && ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage)
