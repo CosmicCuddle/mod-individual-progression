@@ -37,7 +37,9 @@ bool IndividualProgression::hasPassedProgression(Player* player, ProgressionStat
     if (progressionLimit && (state > progressionLimit))
         return false;
 
-    return sIndividualProgression->GetPlayerProgressionFromQuests(player) >= state;
+    // Same as the rewarded stage unless the paid expansion feature caps an
+    // unpaid Kil'jaeden (13) character to TBC access (12).
+    return sIndividualProgression->GetEffectiveProgression(player) >= state;
 }
 
 bool IndividualProgression::isBeforeProgression(Player* player, ProgressionState state)
@@ -45,7 +47,7 @@ bool IndividualProgression::isBeforeProgression(Player* player, ProgressionState
     if (!state || !player || !player->IsInWorld())
         return false;
 
-    return sIndividualProgression->GetPlayerProgressionFromQuests(player) < state;
+    return sIndividualProgression->GetEffectiveProgression(player) < state;
 }
 
 void IndividualProgression::UpdateProgressionState(Player* player, ProgressionState newState) const
@@ -54,6 +56,11 @@ void IndividualProgression::UpdateProgressionState(Player* player, ProgressionSt
         return;
 
     if (progressionLimit && newState > progressionLimit)
+        return;
+
+    // Paid expansion (default OFF): automatic progression may not open an era
+    // this character has not bought. The grant is refused, not partially applied.
+    if (!sIndividualProgression->IsAutomaticGrantAllowed(player, newState))
         return;
 
     uint8 currentState = GetPlayerProgressionFromQuests(player);
@@ -443,7 +450,9 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
     if (!leader || !isNormalAccount(leader))
         return;
 
-    uint8 refProgress = GetPlayerProgressionFromQuests(leader);
+    // With group enforcement ON the leader's era is the effective (paid) one;
+    // the established OFF sync keeps the raw stage.
+    uint8 refProgress = enforceGroupRules ? GetEffectiveProgression(leader) : GetPlayerProgressionFromQuests(leader);
 
     // Preserve the historical tier-0 skip with the switch OFF. When grouping
     // enforcement is ON, Vanilla bots must also sync down to a stage-0 leader.
@@ -1159,6 +1168,9 @@ private:
         sIndividualProgression->LimitedSetRepCommand = sConfigMgr->GetOption<bool>("IndividualProgression.LimitedSetRepCommand", true);
         sIndividualProgression->sharedFactionIdsRegex = sConfigMgr->GetOption<std::string>("IndividualProgression.sharedFactionIdsRegex", "59|270|349|509|510|529|576|589|609|729|730|749|889|890|909");
         sIndividualProgression->BotAccountsMaxLevel = sConfigMgr->GetOption<uint8>("IndividualProgression.BotAccountsMaxLevel", 80);
+        sIndividualProgression->paidExpansionEnabled = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.Enable", false);
+        sIndividualProgression->paidExpansionGrandfatherStage13 = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.GrandfatherStage13", false);
+        sIndividualProgression->paidExpansionVendorName = sConfigMgr->GetOption<std::string>("IndividualProgression.PaidExpansion.VendorName", "Chronomancer Vezrath");
     }
 
     static void LoadXpValues()
@@ -1185,14 +1197,56 @@ private:
 public:
     IndividualPlayerProgression_WorldScript() : WorldScript("IndividualProgression_WorldScript") { }
 
-    void OnBeforeConfigLoad(bool /*reload*/) override
+    void OnBeforeConfigLoad(bool reload) override
     {
+        // The paid expansion switch is read at startup only: online characters'
+        // purchase flags are cached at login, so toggling it by .reload could
+        // briefly treat a paid character as unpaid.
+        bool const paidExpansionAtStartup = sIndividualProgression->paidExpansionEnabled;
+        bool const grandfatherAtStartup = sIndividualProgression->paidExpansionGrandfatherStage13;
         LoadConfig();
+        if (reload)
+        {
+            sIndividualProgression->paidExpansionEnabled = paidExpansionAtStartup;
+            sIndividualProgression->paidExpansionGrandfatherStage13 = grandfatherAtStartup;
+        }
         LoadXpValues();
     }
 
-    void OnAfterConfigLoad(bool /*reload*/) override
+    void OnAfterConfigLoad(bool reload) override
     {
+        // Paid expansion flags live in the Core character settings store.
+        // Startup: without it a purchase could not be remembered, so the
+        // feature stays OFF and established progression continues.
+        // Reload: keep the startup value. Turning the gate off here would make
+        // every unpaid stage 13 Wrath-owned; purchases are refused instead.
+        bool const requested = sIndividualProgression->paidExpansionEnabled;
+        bool const storeSaving = sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);
+        sIndividualProgression->paidExpansionEnabled =
+            IndividualProgressionExpansionPolicy::FeatureEnabledAfterConfigLoad(reload, requested, storeSaving);
+        if (requested && !storeSaving)
+        {
+            if (!reload)
+                LOG_ERROR("module", "IndividualProgression.PaidExpansion.Enable requires worldserver EnablePlayerSettings = 1: paid expansion feature is NOT active; forcing OFF");
+            else
+                LOG_ERROR("module", "IndividualProgression: EnablePlayerSettings was turned off by .reload while PaidExpansion is on: the paid gate stays on, purchases are refused, and characters who log in meanwhile read as unpaid (fail closed) until it is restored and the server restarted");
+        }
+
+        // Owner-configured starts and unlocks that hand out an era without a
+        // purchase. Warn only; historical start behaviour is not changed.
+        if (!reload && sIndividualProgression->paidExpansionEnabled)
+        {
+            auto const* ip = sIndividualProgression;
+            if (ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: DeathKnightStartingProgression = {} gives new Death Knights Wrath without a purchase", ip->deathKnightStartingProgression);
+            if (ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: tbcRacesStartingProgression = {} gives new Blood Elves/Draenei TBC without a purchase", ip->tbcRacesStartingProgression);
+            if (ip->startingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: StartingProgression = {} gives every new character an expansion without a purchase", ip->startingProgression);
+            if (ip->tbcRacesProgressionLevel > 0 && ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: TbcRacesUnlockProgression = {} lets an unpaid account unlock Blood Elf/Draenei creation; set it to 8 or higher to require a TBC purchase", ip->tbcRacesProgressionLevel);
+        }
+
         if (sIndividualProgression->simpleConfigOverride)
         {
             sWorld->setIntConfig(CONFIG_WATER_BREATH_TIMER, 60000);
@@ -1214,8 +1268,11 @@ public:
     }
 };
 
+void AddSC_ip_paid_expansion();
+
 // Add all scripts in one
 void AddSC_mod_individual_progression()
 {
     new IndividualPlayerProgression_WorldScript();
+    AddSC_ip_paid_expansion();
 }
