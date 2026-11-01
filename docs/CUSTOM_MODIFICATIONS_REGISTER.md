@@ -212,3 +212,26 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Source / dependencies | Existing pinned `src/IndividualProgression.cpp` unchanged. Python source test now captures the TBC/Wrath warning label and checks it against the exact threshold in the same complete `if (...) LOG_WARN` shape. No SQL/DBC/client, Core or Playerbots changes. |
 | Verification / risks | GitHub source diff and structural sanity checks are not a complete Python suite, C++ compile or owner-host gameplay. Grok to perform independent exact-head read-only source/test/mutation check. Original startup warnings can report a risky setting but do not enforce access. |
 | Live status / rollback | DRAFT, NOT merged/installed. Revert this child test/docs-only delta if declined; original canonical #28 branch remains frozen for Claude receipt integration. No production action or approval implied. |
+
+## IP-F14-005 — F19 level floor and progression limit for the F14 saved-stage login guard (1 Nov 2026; DRAFT, F14 flag OFF, NOT MERGED)
+
+| Field | Record |
+| --- | --- |
+| Feature / intended behaviour | With the default-OFF F14 login safeguard ON, keep a verified bot's saved stage only if it is at least the original level-based login stage (≤60 → 0, 61–70 → 8, 71+ → 13) and not above a nonzero `progressionLimit`; otherwise run the original write. Turning the safeguard ON can then never leave a bot below the original behaviour. |
+| Owner / coordination | CosmicCuddle. Independent review findings F19-1/2/6 and Maintenance decision in [Coordination #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11); claim in [Coordination #13](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13). |
+| Branch / parent | `fix/ip-f19-login-preserve-level-floor-20261101`, created from [DRAFT #20](https://github.com/CosmicCuddle/mod-individual-progression/pull/20) `5fe0f9105d55d249aa55a25510d3fa23e3d84148`. #19 and #20 unchanged. |
+| Executable source | New pure `src/IndividualProgressionF14LoginPolicy.h`; `src/IndividualProgressionPlayer.cpp` gains one include, one extra guard condition and a corrected comment. Nothing else changes. |
+| Config / SQL / DBC / client | None. The existing `IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0` stays the default. |
+| Supporting files | [F19 memo](IP_F19_LOGIN_FLOOR_2026-11-01.md), `tests/f14_login_preserve_policy.cpp`, `tests/test_ip_f19_login_floor_source.py`, workflow `ip-f19-login-floor-20261101.yml`. Declared deviations: #20's frozen six-path step scoped to #20's head; #19's test reverts only the documented F19 lines before its strict comparisons. |
+| CI / runtime status | Results are recorded in the PR and Coordination #13. **No launch, no gameplay test, no owner-installed proof.** |
+| Merge / rollback | Do not merge automatically. Leave the F14 flag at 0, or revert this branch. |
+
+### IP-11 + IP-F14-005 — combined F19 login floor and paid-expansion candidate (1 Nov 2026; DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Owner/component | CS01 Maintenance integration of separately reviewed #24 F19 into existing #30 warning-label/purchase source child, **without changing either source branch**; governing owner: CosmicCuddle. |
+| Intended behaviour | With the existing default-OFF F14 RandomBot login preservation feature ON, preserve a saved stage only if it meets the historic level floor (0/8/13) and does not exceed a configured nonzero progression limit. Otherwise use the original normal-account-excluded level-stage write. All default-OFF IP, normal human paid-era effective group rules and Vezrath/GM logic remain inherited untouched. |
+| Source changes and dependencies | `IndividualProgressionPlayer.cpp` only receives the exact #24 login-region plus `IndividualProgressionF14LoginPolicy.h` include; the rest of that C++ file retains the paid-effective group/account logic at #30. New standalone F19 policy header/test, F19 source contracts and native CI workflow pinned to the integrated GM command blob; prior F19 memo retained. Inherited paid/Hunter/group regression tests are adjusted only to admit the exact F19 changes. No SQL, Playerbots fork edit, config/DBC/client patch or live process. |
+| Risks/tests | Original #24 source/policy harness is a reviewed *separate* source snapshot. This new combined HEAD needs its own Python, C++17/20 policy, full pinned Worldserver link and bot login acceptance. The historical pinned Worldserver/Playerbots source is NOT the owner-installed revision. `GrandfatherStage13`, F14 and paid mode are OFF in default configs. |
+| Release/rollback | Isolated stacked DRAFT; revert child or retain F14 OFF if F19 has not passed combined test. No migration/DB/gold, source merge or owner-host deployment; request approval before any live activation. Preserve all previously registered custom changes. |
