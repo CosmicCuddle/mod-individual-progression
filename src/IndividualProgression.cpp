@@ -1213,15 +1213,23 @@ public:
         LoadXpValues();
     }
 
-    void OnAfterConfigLoad(bool /*reload*/) override
+    void OnAfterConfigLoad(bool reload) override
     {
         // Paid expansion flags live in the Core character settings store.
-        // Without it a purchase could not be remembered: force the feature OFF
-        // so established progression continues and nobody is locked out.
-        if (sIndividualProgression->paidExpansionEnabled && !sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED))
+        // Startup: without it a purchase could not be remembered, so the
+        // feature stays OFF and established progression continues.
+        // Reload: keep the startup value. Turning the gate off here would make
+        // every unpaid stage 13 Wrath-owned; purchases are refused instead.
+        bool const requested = sIndividualProgression->paidExpansionEnabled;
+        bool const storeSaving = sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);
+        sIndividualProgression->paidExpansionEnabled =
+            IndividualProgressionExpansionPolicy::FeatureEnabledAfterConfigLoad(reload, requested, storeSaving);
+        if (requested && !storeSaving)
         {
-            LOG_ERROR("module", "IndividualProgression.PaidExpansion.Enable requires worldserver EnablePlayerSettings = 1: paid expansion feature is NOT active; forcing OFF");
-            sIndividualProgression->paidExpansionEnabled = false;
+            if (!reload)
+                LOG_ERROR("module", "IndividualProgression.PaidExpansion.Enable requires worldserver EnablePlayerSettings = 1: paid expansion feature is NOT active; forcing OFF");
+            else
+                LOG_ERROR("module", "IndividualProgression: EnablePlayerSettings was turned off by .reload while PaidExpansion is on: the paid gate stays on, purchases are refused and purchase flags are not saved until it is restored and the server restarted");
         }
 
         if (sIndividualProgression->simpleConfigOverride)

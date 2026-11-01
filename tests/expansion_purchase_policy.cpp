@@ -217,6 +217,87 @@ int main()
         Check(broken.money, static_cast<std::uint32_t>(5000), "M: missing template not charged");
     }
 
+    // ---- L. MODEL of the config / store lifecycle (labelled) ----
+    // Uses the real header rules; models Core's EnablePlayerSettings switch,
+    // .reload config and the login-time purchase cache.
+    {
+        struct Server
+        {
+            bool requestedAtBoot = false;
+            bool store = false;
+            bool active = false;
+            void Boot(bool requested, bool storeOn)
+            {
+                requestedAtBoot = requested;
+                store = storeOn;
+                active = FeatureEnabledAfterConfigLoad(false, requested, storeOn);
+            }
+            void Reload(bool storeOn, bool requestedInFile)
+            {
+                (void)requestedInFile; // Enable is startup-only: the file value is ignored on reload
+                store = storeOn;
+                active = FeatureEnabledAfterConfigLoad(true, active, storeOn);
+            }
+        };
+        struct Character
+        {
+            std::uint8_t raw = 13;
+            bool storedWrath = false; // value in character_settings
+            bool cachedWrath = false; // value loaded at login
+            void Login(Server const& srv) { cachedWrath = srv.store && storedWrath; }
+            CharacterFacts Facts(Server const& srv) const
+            {
+                CharacterFacts f = Human(raw, true, cachedWrath);
+                f.featureActive = srv.active;
+                return f;
+            }
+        };
+
+        Server srv;
+        srv.Boot(true, true);
+        Check(srv.active, true, "L: boot ON with store ON activates");
+        Character unpaid; unpaid.Login(srv);
+        Character paid; paid.storedWrath = true; paid.Login(srv);
+        Check(EffectiveStage(unpaid.Facts(srv)), UnpaidWrathAccessCap, "L: unpaid 13 -> 12");
+        Check(EffectiveStage(paid.Facts(srv)), TbcFinalStage, "L: paid 13 -> 13");
+
+        // N1: store switched OFF and .reload config.
+        srv.Reload(false, true);
+        Check(srv.active, true, "L: reload with store OFF keeps the gate ON");
+        Check(EffectiveStage(unpaid.Facts(srv)), UnpaidWrathAccessCap, "L: store OFF + reload: unpaid stays 12");
+        Check(HasPassed(unpaid.Facts(srv), WrathAccessStage), false, "L: store OFF + reload: no Northrend");
+        Check(AutomaticGrantAllowed(unpaid.Facts(srv), WrathFirstCompletionStage), false, "L: store OFF + reload: cannot earn 14");
+        Check(StoreWritesAllowed(srv.active, srv.store), false, "L: store OFF + reload: purchases refused");
+        Check(StoreWritesAllowed(srv.active, srv.store) && ShouldGrandfatherWrath(unpaid.Facts(srv), true, false), false,
+              "L: store OFF + reload: grandfather never runs on an unset-looking marker");
+        Check(EffectiveStage(paid.Facts(srv)), TbcFinalStage, "L: store OFF + reload: online paid holder keeps Wrath");
+        Character relog = paid; relog.Login(srv);
+        Check(EffectiveStage(relog.Facts(srv)), UnpaidWrathAccessCap, "L: store OFF: relogging paid holder fails closed (12)");
+        Check(AutomaticGrantAllowed(relog.Facts(srv), WrathFirstCompletionStage), false, "L: store OFF: relog cannot earn 14");
+
+        // Store restored and reloaded: purchases allowed again, paid holder restored at next login.
+        srv.Reload(true, true);
+        Check(srv.active, true, "L: store restored: gate still ON");
+        Check(StoreWritesAllowed(srv.active, srv.store), true, "L: store restored: purchases allowed");
+        relog.Login(srv);
+        Check(EffectiveStage(relog.Facts(srv)), TbcFinalStage, "L: store restored: paid holder 13 after relog");
+        Check(EffectiveStage(unpaid.Facts(srv)), UnpaidWrathAccessCap, "L: store restored: unpaid still 12");
+
+        // Boot with the store OFF declines activation (historical behaviour, nobody locked out).
+        Server off; off.Boot(true, false);
+        Check(off.active, false, "L: boot with store OFF stays inactive");
+        Check(EffectiveStage(unpaid.Facts(off)), static_cast<std::uint8_t>(13), "L: inactive = historical raw stage");
+        off.Reload(true, true);
+        Check(off.active, false, "L: reload never turns a boot-inactive feature ON");
+
+        // Feature OFF at boot: parity, and reload cannot enable it.
+        Server none; none.Boot(false, true);
+        Check(none.active, false, "L: boot OFF");
+        none.Reload(true, true);
+        Check(none.active, false, "L: reload ignores Enable = 1 written later");
+        Check(EffectiveStage(unpaid.Facts(none)), static_cast<std::uint8_t>(13), "L: OFF parity raw 13");
+    }
+
     std::cout << "Paid expansion policy: " << (checks - failures) << "/" << checks << " checks passed\n";
     return failures == 0 ? 0 : 1;
 }

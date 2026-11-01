@@ -90,15 +90,24 @@ class DefaultOff(unittest.TestCase):
         self.assertIn("return enabled && paidExpansionEnabled;", active)
         self.assertNotIn("CONFIG_PLAYER_SETTINGS_ENABLED", active)
         can = code(body(EXP, "PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)"))
-        self.assertIn("if (IsPaidExpansionActive() && !PaidExpansionStoreSaving())\n        return PurchaseResult::FeatureInactive;", can)
+        self.assertIn("if (IsPaidExpansionActive() && !StoreWritesAllowed(true, PaidExpansionStoreSaving()))\n        return PurchaseResult::FeatureInactive;", can)
         self.assertLess(can.index("PaidExpansionStoreSaving()"), can.index("return CheckPurchase("))
         self.assertIn("return sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);", body(EXP, "static bool PaidExpansionStoreSaving()"))
 
-    def test_forced_off_without_settings_store(self):
-        after = body(CORE, "void OnAfterConfigLoad(bool /*reload*/) override")
-        self.assertIn("if (sIndividualProgression->paidExpansionEnabled && !sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED))", after)
-        self.assertIn("sIndividualProgression->paidExpansionEnabled = false;", after)
-        self.assertIn("LOG_ERROR", after)
+    def test_forced_off_only_at_startup_never_on_reload(self):
+        after = body(CORE, "void OnAfterConfigLoad(bool reload) override")
+        self.assertIn("bool const requested = sIndividualProgression->paidExpansionEnabled;", after)
+        self.assertIn("IndividualProgressionExpansionPolicy::FeatureEnabledAfterConfigLoad(reload, requested, storeSaving);", after)
+        self.assertNotIn("paidExpansionEnabled = false;", after)
+        self.assertIn("if (!reload)\n                LOG_ERROR", after)
+        self.assertIn("return reload ? requested : (requested && storeSaving);", POLICY)
+
+    def test_store_writes_need_saving_store(self):
+        self.assertIn("return featureActive && storeSaving;", POLICY)
+        gf = code(body(EXP, "void IndividualProgression::EvaluatePaidExpansionGrandfather(Player* player)"))
+        self.assertIn("if (!player || !StoreWritesAllowed(IsPaidExpansionActive(), PaidExpansionStoreSaving()))\n        return;", gf)
+        can = code(body(EXP, "PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)"))
+        self.assertIn("StoreWritesAllowed(true, PaidExpansionStoreSaving())", can)
 
     def test_switch_is_startup_only(self):
         before = body(CORE, "void OnBeforeConfigLoad(bool reload) override")
@@ -232,7 +241,6 @@ class StorageAndThreads(unittest.TestCase):
 
     def test_grandfather_evaluates_every_gated_character_once(self):
         gf = code(body(EXP, "void IndividualProgression::EvaluatePaidExpansionGrandfather(Player* player)"))
-        self.assertIn("if (!player || !IsPaidExpansionActive())\n        return;", gf)
         self.assertNotIn("!paidExpansionGrandfatherStage13 ||", gf)
         self.assertIn("ShouldGrandfatherWrath(facts, paidExpansionGrandfatherStage13, evaluated)", gf)
         self.assertIn("if (!evaluated)\n        SetPaidExpansionFlag(player, SettingGrandfatherEvaluated, 1);", gf)

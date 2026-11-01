@@ -193,7 +193,7 @@ PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8
         return PurchaseResult::InvalidRequest;
 
     // Money is always saved; the purchase flag only if the store is saving.
-    if (IsPaidExpansionActive() && !PaidExpansionStoreSaving())
+    if (IsPaidExpansionActive() && !StoreWritesAllowed(true, PaidExpansionStoreSaving()))
         return PurchaseResult::FeatureInactive;
 
     CharacterFacts const facts = GetExpansionFacts(player);
@@ -249,7 +249,9 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
 // GrandfatherStage13 on later never grants Wrath retroactively.
 void IndividualProgression::EvaluatePaidExpansionGrandfather(Player* player)
 {
-    if (!player || !IsPaidExpansionActive())
+    // With the store not saving, the "evaluated" marker of an already
+    // evaluated character would read as unset and could grant Wrath.
+    if (!player || !StoreWritesAllowed(IsPaidExpansionActive(), PaidExpansionStoreSaving()))
         return;
 
     CharacterFacts const facts = GetExpansionFacts(player);

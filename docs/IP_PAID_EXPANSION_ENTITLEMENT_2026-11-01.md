@@ -57,7 +57,7 @@ Purchases use the Core character settings store (`Player::UpdatePlayerSetting`, 
 - **Saved together:** Core saves settings, quest status and money in the **same `SaveToDB` transaction**, so gold and entitlement persist or roll back together.
 - **Requires worldserver `EnablePlayerSettings = 1`, whose code default is 0.** The live value is unknown. If it is 0, the feature logs an error at startup and forces itself OFF, so nobody is locked out and no purchase is possible.
 - `Enable` and `GrandfatherStage13` are **read at server start only**. `.reload` keeps the startup values.
-- Access checks use that startup state. If `EnablePlayerSettings` is switched to 0 mid-session, access is **not** opened for free; instead purchases are refused (`FeatureInactive`), because gold would be saved but the purchase flag would not.
+- Access checks use that startup state. If `EnablePlayerSettings` is switched to 0 mid-session, **even followed by `.reload config`**, the gate stays on, so access is **not** opened for free and no unpaid stage 13 can earn stage 14. Instead purchases and grandfathering are refused (`FeatureInactive`) and an error is logged, because gold would be saved but the purchase flag would not. A paid character who relogs while the store is off reads as unpaid until it is restored.
 - Purchase record: one `LOG_INFO` line on the `module` channel (Server.log by default) per purchase or refund. `character_settings` is not part of character dumps, so a transferred character keeps TBC (stage 8 marker) but not a paid Wrath flag.
 
 **Thread safety.** Access checks run very often, including on map threads. They read only a small IP cache guarded by a shared mutex. The cache is filled on the login thread in `OnPlayerSendInitialPacketsBeforeAddToMap`, after the character's settings have loaded and before it enters a map (also on reconnect and worldport). It holds purchase bits only and is replaced on every load; it is deliberately not cleared on logout, which would briefly show a paid, still in-world character as unpaid. Core's `GetPlayerSetting` creates a missing slot as a side effect, so it is only called on the login thread or during a purchase.
@@ -106,7 +106,7 @@ That integration belongs to the Character Services fork and is not part of this 
 
 ## Tests
 
-- `tests/expansion_purchase_policy.cpp` covers the real policy header, both eras, under GCC and Clang, C++17 and C++20 (269 checks). Cases:
+- `tests/expansion_purchase_policy.cpp` covers the real policy header, both eras, under GCC and Clang, C++17 and C++20 (291 checks). Cases:
   - feature OFF identity for every stage;
   - bots and excluded accounts unchanged;
   - boss-only leaves the character unpaid;
@@ -123,7 +123,7 @@ That integration belongs to the Character Services fork and is not part of this 
   - grandfathering applies once only.
 
   The section marked **M** is a labelled model of the purchase sequence, not AzerothCore code.
-- `tests/test_ip_paid_expansion_source.py` (29 checks) covers wiring:
+- `tests/test_ip_paid_expansion_source.py` (30 checks) covers wiring:
   - default OFF;
   - forced OFF without the settings store;
   - startup-only switch;
@@ -150,7 +150,7 @@ If the owner later folds this branch into #20 or #19, their frozen assertions mu
 
 Changes requested by the reviewer and made on this branch:
 - grandfather option pinned at startup and evaluated once per character regardless of its value (no retroactive grants);
-- no fail-open if `EnablePlayerSettings` changes mid-session; purchases refuse instead of losing the flag;
+- no fail-open if `EnablePlayerSettings` changes mid-session, including after `.reload config` (second review, N1); purchases and grandfathering refuse instead;
 - cache no longer cleared on logout (removes the logout window);
 - purchase log location and character-dump limitation documented.
 

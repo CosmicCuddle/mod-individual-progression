@@ -192,6 +192,23 @@ namespace IndividualProgressionExpansionPolicy
         return LastSupportedStage;
     }
 
+    // Config lifecycle. At startup the feature stays on only when the Core
+    // settings store is saving. On .reload the startup value is kept: a store
+    // switched off later must never turn the gate off (that would treat every
+    // unpaid stage 13 as Wrath-owned and let it earn stage 14 for good).
+    constexpr bool FeatureEnabledAfterConfigLoad(bool reload, bool requested, bool storeSaving)
+    {
+        return reload ? requested : (requested && storeSaving);
+    }
+
+    // Writes to the store (purchases, grandfathering) need it to be saving;
+    // otherwise gold would be saved while the purchase flag is lost, or an
+    // "evaluated" marker would read as unset.
+    constexpr bool StoreWritesAllowed(bool featureActive, bool storeSaving)
+    {
+        return featureActive && storeSaving;
+    }
+
     // Optional owner-controlled migration: on a character's first evaluation,
     // mark an already-held stage 13 as Wrath-entitled. Never applies twice.
     constexpr bool ShouldGrandfatherWrath(CharacterFacts const& f, bool grandfatherEnabled, bool alreadyEvaluated)
