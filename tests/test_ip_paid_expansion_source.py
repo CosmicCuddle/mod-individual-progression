@@ -237,6 +237,11 @@ class PolicyHeader(unittest.TestCase):
                             ("LastSupportedStage", 18)):
             self.assertIn(f"constexpr std::uint8_t {name} = {value};", POLICY)
 
+    def test_api_version_macro_for_dependent_modules(self):
+        self.assertIn("#define COSMIC_IP_PAID_EXPANSION_API_VERSION 1\n", HEADER)
+        self.assertLess(HEADER.index('#include "IndividualProgressionExpansionPolicy.h"'),
+                        HEADER.index("#define COSMIC_IP_PAID_EXPANSION_API_VERSION"))
+
     def test_f14_header_line_untouched(self):
         self.assertIn("enforceGroupRules, f14PreserveVerifiedRandomBotStageOnLogin, EnableSetRepCommand", HEADER)
 

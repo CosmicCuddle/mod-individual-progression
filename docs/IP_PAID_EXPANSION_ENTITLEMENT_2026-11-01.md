@@ -64,6 +64,8 @@ Purchases use the Core character settings store (`Player::UpdatePlayerSetting`, 
 
 All functions live on `sIndividualProgression`. Rules are in `src/IndividualProgressionExpansionPolicy.h`.
 
+`IndividualProgression.h` defines `COSMIC_IP_PAID_EXPANSION_API_VERSION 1`, so a dependent module can use `#if defined(COSMIC_IP_PAID_EXPANSION_API_VERSION)` and still compile against an IP build without this API.
+
 | Function | Use |
 | --- | --- |
 | `IsPaidExpansionActive()` | Show the expansion offers only when this is true |
@@ -119,7 +121,7 @@ That integration belongs to the Character Services fork and is not part of this 
   - grandfathering applies once only.
 
   The section marked **M** is a labelled model of the purchase sequence, not AzerothCore code.
-- `tests/test_ip_paid_expansion_source.py` (26 checks) covers wiring:
+- `tests/test_ip_paid_expansion_source.py` (27 checks) covers wiring:
   - default OFF;
   - forced OFF without the settings store;
   - startup-only switch;

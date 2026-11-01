@@ -18,6 +18,10 @@
 #include "AreaDefines.h"
 #include "IWorld.h"
 #include "IndividualProgressionExpansionPolicy.h"
+
+// Lets dependent modules (e.g. Character Services) detect the paid expansion
+// API at compile time and keep building against an IP without it.
+#define COSMIC_IP_PAID_EXPANSION_API_VERSION 1
 #include <regex>
 #include <shared_mutex>
 #include <unordered_map>
