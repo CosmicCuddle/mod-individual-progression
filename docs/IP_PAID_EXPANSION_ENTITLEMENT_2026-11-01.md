@@ -56,9 +56,11 @@ Purchases use the Core character settings store (`Player::UpdatePlayerSetting`, 
 - **No new table and no SQL.** Core already ships `character_settings`.
 - **Saved together:** Core saves settings, quest status and money in the **same `SaveToDB` transaction**, so gold and entitlement persist or roll back together.
 - **Requires worldserver `EnablePlayerSettings = 1`, whose code default is 0.** The live value is unknown. If it is 0, the feature logs an error at startup and forces itself OFF, so nobody is locked out and no purchase is possible.
-- The switch is **read at server start only**. `.reload` keeps the startup value.
+- `Enable` and `GrandfatherStage13` are **read at server start only**. `.reload` keeps the startup values.
+- Access checks use that startup state. If `EnablePlayerSettings` is switched to 0 mid-session, access is **not** opened for free; instead purchases are refused (`FeatureInactive`), because gold would be saved but the purchase flag would not.
+- Purchase record: one `LOG_INFO` line on the `module` channel (Server.log by default) per purchase or refund. `character_settings` is not part of character dumps, so a transferred character keeps TBC (stage 8 marker) but not a paid Wrath flag.
 
-**Thread safety.** Access checks run very often, including on map threads. They read only a small IP cache guarded by a shared mutex. The cache is filled on the login thread in `OnPlayerSendInitialPacketsBeforeAddToMap`, after the character's settings have loaded and before it enters a map, and cleared on logout. Core's `GetPlayerSetting` creates a missing slot as a side effect, so it is only called on the login thread or during a purchase.
+**Thread safety.** Access checks run very often, including on map threads. They read only a small IP cache guarded by a shared mutex. The cache is filled on the login thread in `OnPlayerSendInitialPacketsBeforeAddToMap`, after the character's settings have loaded and before it enters a map (also on reconnect and worldport). It holds purchase bits only and is replaced on every load; it is deliberately not cleared on logout, which would briefly show a paid, still in-world character as unpaid. Core's `GetPlayerSetting` creates a missing slot as a side effect, so it is only called on the login thread or during a purchase.
 
 ## API for Character Services (vendor integration)
 
@@ -121,7 +123,7 @@ That integration belongs to the Character Services fork and is not part of this 
   - grandfathering applies once only.
 
   The section marked **M** is a labelled model of the purchase sequence, not AzerothCore code.
-- `tests/test_ip_paid_expansion_source.py` (27 checks) covers wiring:
+- `tests/test_ip_paid_expansion_source.py` (29 checks) covers wiring:
   - default OFF;
   - forced OFF without the settings store;
   - startup-only switch;
@@ -144,10 +146,25 @@ That integration belongs to the Character Services fork and is not part of this 
 
 If the owner later folds this branch into #20 or #19, their frozen assertions must be rebaselined under review, not bypassed.
 
+## Independent review of `62e6828` (Coordination #11) and follow-up
+
+Changes requested by the reviewer and made on this branch:
+- grandfather option pinned at startup and evaluated once per character regardless of its value (no retroactive grants);
+- no fail-open if `EnablePlayerSettings` changes mid-session; purchases refuse instead of losing the flag;
+- cache no longer cleared on logout (removes the logout window);
+- purchase log location and character-dump limitation documented.
+
+Open, needing an owner/CS01 decision before `Enable = 1` (not changed here):
+1. **Database conditions read the raw marker.** About 360 `conditions` rows of type QUESTREWARDED on quest 66013 (mostly vendor stock, some phasing gossip) are evaluated by Core directly, so an unpaid stage-13 character still passes them. Options: accept as a known limit; hold back 66013 until purchase (changes the Kil'jaeden meaning, needs a design pass); or a separate "Wrath paid" marker with retargeted conditions (an SQL migration).
+2. **Start privileges grant an era without payment.** A configured DK start of 13 (code default) or TBC-race start of 8 counts as owning that era, and DK creation is unlocked by the raw account maximum. One unpaid stage-13 character can therefore unlock a DK who owns Wrath. Intended, or should start privileges and the account-unlock check use entitlement?
+3. **GM `.ip set`** uses `ForceUpdateProgressionState`: setting 8+ or 14+ grants TBC or Wrath with no flag, and there is no GM command to show, grant or revoke a purchase. `cs_individualProgression.cpp` is a reviewed, protected file, so a GM command would be a separate draft.
+4. **`.ip tele` (GM) reads the raw stage** for its Naxx40/Onyxia check, while the instance gate uses the effective stage. Same protected-file constraint.
+5. **Rollback after refusals.** A character who completed Into the Breach while TBC was unpaid stays at stage 7 if the feature is later turned OFF; they need a GM `.ip set 8`. No automatic repair is added, because it could override a GM's deliberate setting or `DisableDefaultProgression`.
+
 ## Not decided here (feature stays OFF)
 
 - The exact final requirements for each era (Information #18). Current source uses Kel'Thuzad 40 and Kil'jaeden.
-- **Grandfathering of characters already at stage 13.** `GrandfatherStage13 = 0` by default: they must buy Wrath. When set to 1, a character already at 13 on its first login with the feature on is recorded as owning Wrath.
+- **Grandfathering of characters already at stage 13.** `GrandfatherStage13 = 0` by default: they must buy Wrath. Every gated character is evaluated once, on its first login with the feature on, **whatever the option is then**. With 1, a character already at 13 at that login is recorded as owning Wrath. Decide before first enabling the feature: turning it on later grants nothing retroactively.
 - Whether GMs, Altbots or other identities are exempt.
 - Whether within-era catch-up remains.
 - Live prices (the snapshot defaults of 1,000 / 3,000 gold are unverified).

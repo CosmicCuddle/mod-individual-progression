@@ -29,15 +29,14 @@ namespace
 
     constexpr uint8 PaidExpansionBitTbc = 0x1;
     constexpr uint8 PaidExpansionBitWrath = 0x2;
-    constexpr uint8 PaidExpansionBitEvaluated = 0x4;
 
+    // Only purchase slots are mirrored in the cache.
     uint8 BitForSetting(uint32 index)
     {
         switch (index)
         {
             case SettingTbc: return PaidExpansionBitTbc;
             case SettingWrath: return PaidExpansionBitWrath;
-            case SettingGrandfatherEvaluated: return PaidExpansionBitEvaluated;
             default: return 0;
         }
     }
@@ -60,9 +59,18 @@ namespace
     }
 }
 
+// Startup snapshot: paidExpansionEnabled is forced OFF at startup when the
+// settings store is unavailable and cannot be turned on by .reload. Reading
+// the live store setting here would hand out free Wrath if it were switched
+// off mid-session; purchases check the live setting separately instead.
 bool IndividualProgression::IsPaidExpansionActive() const
 {
-    return enabled && paidExpansionEnabled && sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);
+    return enabled && paidExpansionEnabled;
+}
+
+static bool PaidExpansionStoreSaving()
+{
+    return sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);
 }
 
 uint8 IndividualProgression::GetConfiguredStartStage(Player* player) const
@@ -137,6 +145,8 @@ void IndividualProgression::SetPaidExpansionFlag(Player* player, uint32 index, u
     player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);
 
     uint8 const bit = BitForSetting(index);
+    if (!bit)
+        return;
     std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
     uint8& bits = _paidExpansionFlags[player->GetGUID().GetCounter()];
     if (value != FlagNone)
@@ -159,7 +169,7 @@ void IndividualProgression::LoadPaidExpansionEntitlement(Player* player)
     }
 
     // Only characters at or past the final Vanilla milestone can hold a
-    // purchase; skip the others so no settings row is created for them.
+    // purchase; skip the others so no purchase slots are read for them.
     uint8 bits = 0;
     if (RawStageBeforeMap(player) >= VanillaFinalStage)
     {
@@ -176,18 +186,15 @@ void IndividualProgression::LoadPaidExpansionEntitlement(Player* player)
         _paidExpansionFlags.erase(guid);
 }
 
-void IndividualProgression::ForgetPaidExpansionEntitlement(Player* player)
-{
-    if (!player)
-        return;
-    std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
-    _paidExpansionFlags.erase(player->GetGUID().GetCounter());
-}
 
 PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)
 {
     if (!player || !player->IsInWorld() || costCopper > static_cast<uint32>(std::numeric_limits<int32>::max()))
         return PurchaseResult::InvalidRequest;
+
+    // Money is always saved; the purchase flag only if the store is saving.
+    if (IsPaidExpansionActive() && !PaidExpansionStoreSaving())
+        return PurchaseResult::FeatureInactive;
 
     CharacterFacts const facts = GetExpansionFacts(player);
     bool entryAvailable = true;
@@ -231,14 +238,18 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
 
     // 5. Money, quest markers and the flag are saved in one transaction.
     player->SaveToDB(false, false);
+    // Purchase record: the "module" log channel (Server.log by default).
     LOG_INFO("module", "IndividualProgression: character {} purchased {} for {} copper",
         player->GetGUID().GetCounter(), EraName(era), costCopper);
     return PurchaseResult::Success;
 }
 
+// "First login" means the character's first login with the feature ON. Every
+// gated character is marked evaluated then, whatever the option, so turning
+// GrandfatherStage13 on later never grants Wrath retroactively.
 void IndividualProgression::EvaluatePaidExpansionGrandfather(Player* player)
 {
-    if (!player || !paidExpansionGrandfatherStage13 || !IsPaidExpansionActive())
+    if (!player || !IsPaidExpansionActive())
         return;
 
     CharacterFacts const facts = GetExpansionFacts(player);
@@ -246,7 +257,7 @@ void IndividualProgression::EvaluatePaidExpansionGrandfather(Player* player)
         return;
 
     bool const evaluated = player->GetPlayerSetting(PaidExpansionSettingSource, SettingGrandfatherEvaluated).value != FlagNone;
-    if (ShouldGrandfatherWrath(facts, true, evaluated))
+    if (ShouldGrandfatherWrath(facts, paidExpansionGrandfatherStage13, evaluated))
     {
         SetPaidExpansionFlag(player, SettingWrath, FlagGrandfathered);
         LOG_INFO("module", "IndividualProgression: character {} grandfathered Wrath entitlement at stage {}",
@@ -276,10 +287,10 @@ class IndividualProgression_PaidExpansionPlayerScript : public PlayerScript
 {
 public:
     IndividualProgression_PaidExpansionPlayerScript() : PlayerScript("IndividualProgression_PaidExpansion",
-        { PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_LOGOUT }) { }
+        { PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN }) { }
 
     // Login thread, after the character (and its settings) loaded from the
-    // database and before it enters a map: fill the purchase cache.
+    // database and before it enters a map; also on reconnect and worldport.
     void OnPlayerSendInitialPacketsBeforeAddToMap(Player* player, WorldPacket& /*data*/) override
     {
         sIndividualProgression->LoadPaidExpansionEntitlement(player);
@@ -291,10 +302,9 @@ public:
         sIndividualProgression->SendPaidExpansionReminder(player);
     }
 
-    void OnPlayerLogout(Player* player) override
-    {
-        sIndividualProgression->ForgetPaidExpansionEntitlement(player);
-    }
+    // No logout hook: erasing on OnPlayerLogout left a window where a paid,
+    // still in-world character read as unpaid. The entry (purchase bits only)
+    // is replaced on every load, so a stale one is never used.
 };
 
 void AddSC_ip_paid_expansion()

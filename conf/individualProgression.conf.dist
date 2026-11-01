@@ -46,6 +46,8 @@ IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0
 # IndividualProgression.PaidExpansion.Enable
 #
 #        DRAFT - paid expansion entitlement. Read at server start only.
+#        Do not set worldserver EnablePlayerSettings = 0 while this is on:
+#        purchases are then refused, and stored purchases are not saved.
 #        0 = OFF (default). Established progression is unchanged.
 #        1 = Earning the final milestone of an era (Kel'Thuzad 40 = stage 7,
 #            Kil'jaeden = stage 13) only makes a character ELIGIBLE. The next
@@ -64,11 +66,13 @@ IndividualProgression.PaidExpansion.Enable = 0
 
 # IndividualProgression.PaidExpansion.GrandfatherStage13
 #
-#        Owner decision. Only used when PaidExpansion.Enable = 1.
-#        0 = OFF (default). Characters already at stage 13 must buy Wrath.
-#        1 = On each character's first login with the feature on, a character
-#            already at stage 13 is recorded as owning Wrath. Characters who
-#            reach stage 13 later still need to buy it.
+#        Owner decision, read at server start only. Decide BEFORE first
+#        enabling PaidExpansion: every character is evaluated once, on its
+#        first login with the feature on, whatever this value is then.
+#        0 = OFF (default). Characters at stage 13 must buy Wrath.
+#        1 = A character already at stage 13 at that first login is recorded
+#            as owning Wrath. Characters who reach stage 13 later, or who
+#            were evaluated while this was 0, still need to buy it.
 #
 IndividualProgression.PaidExpansion.GrandfatherStage13 = 0
 

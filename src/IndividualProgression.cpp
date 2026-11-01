@@ -1203,9 +1203,13 @@ public:
         // purchase flags are cached at login, so toggling it by .reload could
         // briefly treat a paid character as unpaid.
         bool const paidExpansionAtStartup = sIndividualProgression->paidExpansionEnabled;
+        bool const grandfatherAtStartup = sIndividualProgression->paidExpansionGrandfatherStage13;
         LoadConfig();
         if (reload)
+        {
             sIndividualProgression->paidExpansionEnabled = paidExpansionAtStartup;
+            sIndividualProgression->paidExpansionGrandfatherStage13 = grandfatherAtStartup;
+        }
         LoadXpValues();
     }
 

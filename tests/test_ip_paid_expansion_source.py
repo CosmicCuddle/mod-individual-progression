@@ -85,9 +85,14 @@ class DefaultOff(unittest.TestCase):
         self.assertIn("bool paidExpansionEnabled = false;", HEADER)
         self.assertIn("bool paidExpansionGrandfatherStage13 = false;", HEADER)
 
-    def test_active_needs_ip_flag_and_core_settings_store(self):
+    def test_active_is_startup_snapshot_and_purchase_needs_live_store(self):
         active = code(body(EXP, "bool IndividualProgression::IsPaidExpansionActive() const"))
-        self.assertIn("return enabled && paidExpansionEnabled && sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);", active)
+        self.assertIn("return enabled && paidExpansionEnabled;", active)
+        self.assertNotIn("CONFIG_PLAYER_SETTINGS_ENABLED", active)
+        can = code(body(EXP, "PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)"))
+        self.assertIn("if (IsPaidExpansionActive() && !PaidExpansionStoreSaving())\n        return PurchaseResult::FeatureInactive;", can)
+        self.assertLess(can.index("PaidExpansionStoreSaving()"), can.index("return CheckPurchase("))
+        self.assertIn("return sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);", body(EXP, "static bool PaidExpansionStoreSaving()"))
 
     def test_forced_off_without_settings_store(self):
         after = body(CORE, "void OnAfterConfigLoad(bool /*reload*/) override")
@@ -98,7 +103,9 @@ class DefaultOff(unittest.TestCase):
     def test_switch_is_startup_only(self):
         before = body(CORE, "void OnBeforeConfigLoad(bool reload) override")
         self.assertLess(before.index("bool const paidExpansionAtStartup"), before.index("LoadConfig();"))
-        self.assertIn("if (reload)\n            sIndividualProgression->paidExpansionEnabled = paidExpansionAtStartup;", before)
+        self.assertIn("sIndividualProgression->paidExpansionEnabled = paidExpansionAtStartup;", before)
+        self.assertIn("sIndividualProgression->paidExpansionGrandfatherStage13 = grandfatherAtStartup;", before)
+        self.assertLess(before.index("bool const grandfatherAtStartup"), before.index("LoadConfig();"))
 
     def test_effective_stage_is_raw_when_off(self):
         eff = code(body(EXP, "uint8 IndividualProgression::GetEffectiveProgression(Player* player)"))
@@ -209,12 +216,26 @@ class StorageAndThreads(unittest.TestCase):
                  if "GetPlayerSetting" in body(EXP, f"IndividualProgression::{name}(")}
         self.assertEqual(users, {"LoadPaidExpansionEntitlement", "EvaluatePaidExpansionGrandfather"})
 
-    def test_cache_filled_before_map_add_and_cleared_on_logout(self):
+    def test_cache_filled_before_map_add_and_kept_across_logout(self):
         script = body(EXP, "class IndividualProgression_PaidExpansionPlayerScript")
-        self.assertIn("{ PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_LOGOUT }", script)
+        self.assertIn("{ PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN }", script)
         self.assertIn("sIndividualProgression->LoadPaidExpansionEntitlement(player);",
                       body(script, "void OnPlayerSendInitialPacketsBeforeAddToMap("))
-        self.assertIn("sIndividualProgression->ForgetPaidExpansionEntitlement(player);", body(script, "void OnPlayerLogout("))
+        self.assertNotIn("OnPlayerLogout", code(script))
+        self.assertNotIn("ForgetPaidExpansionEntitlement", EXP + HEADER)
+
+    def test_cache_holds_purchase_bits_only(self):
+        bit = code(body(EXP, "uint8 BitForSetting(uint32 index)"))
+        self.assertNotIn("SettingGrandfatherEvaluated", bit)
+        setter = code(body(EXP, "void IndividualProgression::SetPaidExpansionFlag(Player* player, uint32 index, uint32 value)"))
+        self.assertLess(setter.index("if (!bit)\n        return;"), setter.index("std::unique_lock"))
+
+    def test_grandfather_evaluates_every_gated_character_once(self):
+        gf = code(body(EXP, "void IndividualProgression::EvaluatePaidExpansionGrandfather(Player* player)"))
+        self.assertIn("if (!player || !IsPaidExpansionActive())\n        return;", gf)
+        self.assertNotIn("!paidExpansionGrandfatherStage13 ||", gf)
+        self.assertIn("ShouldGrandfatherWrath(facts, paidExpansionGrandfatherStage13, evaluated)", gf)
+        self.assertIn("if (!evaluated)\n        SetPaidExpansionFlag(player, SettingGrandfatherEvaluated, 1);", gf)
 
     def test_registered_without_loader_change(self):
         add = body(CORE, "void AddSC_mod_individual_progression()")

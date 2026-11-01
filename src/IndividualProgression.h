@@ -477,7 +477,6 @@ public:
     IndividualProgressionExpansionPolicy::PurchaseResult PurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper);
     uint8 GetMaxServiceGrantableStage(Player* player);
     void LoadPaidExpansionEntitlement(Player* player);
-    void ForgetPaidExpansionEntitlement(Player* player);
     void EvaluatePaidExpansionGrandfather(Player* player);
     void SendPaidExpansionReminder(Player* player);
 
@@ -496,8 +495,8 @@ private:
     std::unordered_map<uint32, AccountMatch> _accountMatchCache;
     std::shared_mutex _accountMatchLock;
 
-    // Paid expansion flags per online character (low GUID -> PaidExpansionBit*).
-    // Filled on the login thread before the character enters a map, so the
+    // Paid expansion purchase bits per character (low GUID -> PaidExpansionBit*).
+    // Refreshed on the login thread before the character enters a map, so the
     // frequent access checks never touch the Core settings store.
     IndividualProgressionExpansionPolicy::CharacterFacts GetExpansionFacts(Player* player);
     uint8 GetConfiguredStartStage(Player* player) const;
