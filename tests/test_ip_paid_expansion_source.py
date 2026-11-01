@@ -111,6 +111,18 @@ class DefaultOff(unittest.TestCase):
             self.assertIn(name, block)
         self.assertNotRegex(code(block), r"(ip|sIndividualProgression)->\w+\s*=(?!=)", "warnings must not change any setting")
         self.assertIn("auto const* ip = sIndividualProgression;", block)
+        # A starting stage alone is not a bypass if account creation requires
+        # the matching purchased era. Preserve both conditions in the warning.
+        self.assertIn("ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage &&", block)
+        self.assertIn("ip->deathKnightProgressionLevel == 0 ||", block)
+        self.assertIn("ip->deathKnightProgressionLevel < IndividualProgressionExpansionPolicy::WrathAccessStage", block)
+        self.assertIn("ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage &&", block)
+        self.assertIn("ip->tbcRacesProgressionLevel == 0 ||", block)
+        self.assertIn("ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage", block)
+        # No warning should tell the operator that the default 13/13 DK
+        # or fully gated 8/8 race pair itself grants free access.
+        self.assertIn("with DeathKnightUnlockProgression = {}", block)
+        self.assertIn("with TbcRacesUnlockProgression = {}", block)
 
     def test_store_writes_need_saving_store(self):
         self.assertIn("return featureActive && storeSaving;", POLICY)
