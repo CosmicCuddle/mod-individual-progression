@@ -1,0 +1,63 @@
+name: IP OFF group-accept late-rejection source witness — no game or database
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ip-off-late-group-accept-order-20261101.yml
+      - tests/test_ip_off_group_late_rejection_source.py
+      - docs/IP_OFF_LATE_ACCEPT_ORDER_2026-11-01.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pinned-source-witness:
+    name: Pin original Core accept/write order and tier-zero no-loss constraints
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact invoking IP draft and ancestry
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout exact historical AzerothCore source (not installed owner source)
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          path: .pinned-core-for-off-accept-audit
+          persist-credentials: false
+      - name: Verify unchanged baseline and EXACT three audit-only paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=5fe0f9105d55d249aa55a25510d3fa23e3d84148
+          test "$(git -C .pinned-core-for-off-accept-audit rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --check "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
+          printf '%s\n' \
+            '.github/workflows/ip-off-late-group-accept-order-20261101.yml' \
+            'tests/test_ip_off_group_late_rejection_source.py' \
+            'docs/IP_OFF_LATE_ACCEPT_ORDER_2026-11-01.md' | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/actual.txt
+          for path in src/IndividualProgression.cpp src/IndividualProgressionPlayer.cpp src/cs_individualProgression.cpp src/IndividualProgressionSpells.cpp src/IndividualProgressionGroupPolicy.h conf/individualProgression.conf.dist docs/CUSTOM_MODIFICATIONS_REGISTER.md; do
+            test "$(git rev-parse "HEAD:$path")" = "$(git rev-parse "$BASE:$path")"
+          done
+          test -z "$(git diff --name-only "$BASE" HEAD -- data optional sql)"
+          echo 'PASS: exact three non-runtime audit files; all game source, config and register unchanged'
+      - name: Run source-pinned late-rejection diagnostic and witness tests
+        shell: bash
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_ip_off_group_late_rejection_source.py' -v
+      - name: Explicit evidence boundary
+        run: |
+          echo 'The test PASSES when the documented unsafe pre-accept OFF rewrite is present.'
+          echo 'This does NOT repair the risk, launch any game, perform SQL, touch characters, or certify runtime behavior.'
+          echo 'Never treat synthetic stage witness values as observations from owner game.'
