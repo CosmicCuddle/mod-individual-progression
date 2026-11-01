@@ -87,10 +87,16 @@ class PreservedParentSource(unittest.TestCase):
     """Everything outside the claimed port must be byte-identical to #16."""
 
     def test_untouched_executable_files_identical_to_16(self):
-        for path in ("src/IndividualProgressionSpells.cpp", "src/cs_individualProgression.cpp",
+        for path in ("src/IndividualProgressionSpells.cpp",
                      "src/IndividualProgressionGroupPolicy.h", "src/IndividualProgression_loader.cpp"):
             with self.subTest(path=path):
                 self.assertEqual(git("diff", "--name-only", PARENT_16, "--", path).strip(), "", path)
+
+    def test_gm_source_is_exactly_the_previously_reviewed_fix(self):
+        # This child intentionally ports #14's GM fix. All other executable
+        # protections remain identical to frozen #19.
+        self.assertEqual(git("rev-parse", "HEAD:src/cs_individualProgression.cpp").strip(),
+                         "654119d29e0519600d50b179ccd5a9c5df8695b0")
 
     def test_hunter_blob_is_the_reviewed_one(self):
         self.assertEqual(git("rev-parse", "HEAD:src/IndividualProgressionSpells.cpp").strip(),
