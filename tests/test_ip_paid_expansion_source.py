@@ -57,7 +57,10 @@ class Provenance(unittest.TestCase):
         subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", PARENT_20, "HEAD"], check=True)
 
     def test_protected_files_unchanged(self):
-        for path in ("src/IndividualProgressionSpells.cpp", "src/cs_individualProgression.cpp",
+        # CS01 command extension is an explicitly reviewed exception:
+        # it has its OWN exact Git blob assertion below and must not also be
+        # required byte-identical to the pre-extension #20 parent.
+        for path in ("src/IndividualProgressionSpells.cpp",
                      "src/IndividualProgressionGroupPolicy.h", "src/IndividualProgression_loader.cpp",
                      "src/IndividualProgressionAwareness.cpp", "src/IndividualProgressionPvP.cpp",
                      "src/IndividualProgressionBG.cpp"):
