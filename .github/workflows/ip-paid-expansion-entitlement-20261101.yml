@@ -83,9 +83,9 @@ jobs:
           git show "$BASE:docs/CUSTOM_MODIFICATIONS_REGISTER.md" > /tmp/register-parent.md
           head -c "$(wc -c < /tmp/register-parent.md)" docs/CUSTOM_MODIFICATIONS_REGISTER.md | cmp - /tmp/register-parent.md
           test "$(git rev-parse HEAD:src/IndividualProgressionSpells.cpp)" = 6ee93e1174b5aef6c5d61c9ea31526506c9d08da
-          test "$(git rev-parse HEAD:src/cs_individualProgression.cpp)" = 278aaa48dc5fb7770bd6013e659e4872752d4b03
+          test "$(git rev-parse HEAD:src/cs_individualProgression.cpp)" = 654119d29e0519600d50b179ccd5a9c5df8695b0
           test -z "$(git diff --name-only "$BASE" HEAD -- data optional sql)"
-          echo 'PASS: reviewed GM command extension; Hunter and SQL/data unchanged; register append-only'
+          echo 'PASS: frozen paid-entitlement #23 path/source guard; Hunter and SQL/data unchanged; register append-only'
       - name: "Paid expansion policy C++ tests (GCC and Clang, C++17 and C++20)"
         shell: bash
         run: |
