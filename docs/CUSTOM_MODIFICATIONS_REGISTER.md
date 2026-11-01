@@ -173,3 +173,13 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Known risk | During settings-store downtime, a character who temporarily reads unpaid may have an automatic cross-era progression grant refused; recovery of stored purchase bits does **not** replay missed grants. Source does not produce per-character refusal audit logs. Manual repairs require verified affected players, owner approval, character backups and rollback. No live situation claimed. |
 | Test / status | Source/CI checks are pending at the new draft SHA; no actual Worldserver compilation, in-game account creation, interrupted-store acceptance, GM remediation or live deployment is established by this addendum. |
 | Rollback | Revert this child branch to recover the original warnings and text; owner must separately approve any future binary change. Turning the paid switch OFF restores historical raw-stage access and must not be represented as entitlement validation. |
+
+### IP-11 PR #27 addendum — cross-era start warning coverage (1 Nov 2026; DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Source and review | [Grok review of #27 exact `cbc51cf4`](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6562168799) found two warning-only gaps; this addendum updates the same CS01-owned [draft #27](https://github.com/CosmicCuddle/mod-individual-progression/pull/27), not #23 or #25. |
+| Intended behaviour | Check both TBC and Wrath access for **each** DK and TBC-race start/unlock combination; DK 8/7 and race 13/12 must warn, while historical default DK 13/13 and gated race 8/8 remain quiet. Two logs may occur if a configuration bypasses both eras. |
+| Changed code | `src/IndividualProgression.cpp` adds two `LOG_WARN`-only guards, no stage/purchase/character/account writes; `tests/test_ip_paid_expansion_source.py` increases warning count to six, asserts both era thresholds and adds a labelled synthetic matrix; runbook updates example combinations. |
+| Dependencies and risks | Owner-specific actual config still UNKNOWN; `PaidExpansion.Enable = 0` by default. No SQL, DBC, Core/Playerbots/vendor change, account race-creation rule change or installation. Warnings are startup-only and cannot establish live bypasses. |
+| Tests, release, rollback | Source/matrix CI pending; native compile/gameplay and owner-host logging NOT verified. Revert the same child draft diff if declined; never overwrite #23, and obtain owner approval plus backup and rollback before any live deployment. |
