@@ -262,9 +262,20 @@ class AccessWiring(unittest.TestCase):
     def test_only_documented_player_cpp_changes(self):
         removed = [l[1:] for l in git("diff", "-U0", PARENT_20, "--", "src/IndividualProgressionPlayer.cpp").splitlines()
                    if l.startswith("-") and not l.startswith("---")]
-        for line in removed:
+        # F19 is a separately reviewed, deliberate login-only extension.
+        # Retain the exact four removed F14 lines as a fixed allowlist, then
+        # enforce all eight existing paid-era group/account-read changes.
+        f19_removed = {
+            "savedStage <= IndividualProgressionGroupPolicy::LastSupportedStage)",
+            "// may not yet exist during Core's PlayerScript login.",
+            "// Do not call the mutable currentBots-backed predicate",
+            "// outside the source-verified WorldScript login thread.",
+        }
+        self.assertEqual(len([l for l in removed if l.strip() in f19_removed]), 4)
+        paid_removed = [l for l in removed if l.strip() not in f19_removed]
+        for line in paid_removed:
             self.assertRegex(line, r"GetPlayerProgressionFromQuests\(|GetAccountProgression\(accountId\)|joiningState, player->getRace\(\), (leaderState|memberState)", line)
-        self.assertEqual(len(removed), 8, removed)
+        self.assertEqual(len(paid_removed), 8, paid_removed)
 
     def test_account_unlocks_use_effective_account_ceiling(self):
         self.assertEqual(PLAYER.count("sIndividualProgression->GetAccountEffectiveProgression(accountId)"), 2)

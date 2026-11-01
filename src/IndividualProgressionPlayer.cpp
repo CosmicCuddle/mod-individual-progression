@@ -1,5 +1,6 @@
 #include "IndividualProgression.h"
 #include "IndividualProgressionGroupPolicy.h"
+#include "IndividualProgressionF14LoginPolicy.h"
 // Optional Playerbots dependency: the original IP fork can build without it.
 #if __has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
 #include "../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h"
@@ -66,13 +67,18 @@ public:
                 player->GetSession() && player->GetSession()->IsHeadless())
             {
                 uint8 const savedStage = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+                // F19: never keep a stage below the original level write
+                // (<=60 -> 0, 61-70 -> 8, 71+ -> 13) or above a set limit.
                 if (savedStage >= IndividualProgressionGroupPolicy::FirstTbcStage &&
-                    savedStage <= IndividualProgressionGroupPolicy::LastSupportedStage)
+                    savedStage <= IndividualProgressionGroupPolicy::LastSupportedStage &&
+                    IndividualProgressionF14LoginPolicy::PreservesAtLeastLevelStage(
+                        savedStage, player->GetLevel(), sIndividualProgression->progressionLimit))
                 {
                     // This is deliberately the GUID overload: the PlayerbotAI
-                    // may not yet exist during Core's PlayerScript login.
-                    // Do not call the mutable currentBots-backed predicate
-                    // outside the source-verified WorldScript login thread.
+                    // may not yet exist during Core's PlayerScript login. It is
+                    // itself backed by the mutable currentBots set, which is
+                    // only safe on the source-verified WorldScript login thread;
+                    // do not call it from other hooks or threads.
                     preserveVerifiedRandomBotStage =
                         sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter());
                 }

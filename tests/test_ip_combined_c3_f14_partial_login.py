@@ -22,7 +22,34 @@ PARENT_16 = "c44c3320406670cdc8f25c963ebba13e9cf24b71"
 SOURCE_13 = "a18397bbb0c7054052030a83ac30b699ac382d38"
 F14_KEY = "IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin"
 
-PLAYER = (ROOT / "src/IndividualProgressionPlayer.cpp").read_text()
+# Child PRs may add ONLY the documented F19 login floor (one extra condition,
+# one include and a corrected comment). Revert exactly those lines so every
+# assertion below stays as strict as on #19 itself; anything else still fails.
+F19_SUBSTITUTIONS = (
+    ('#include "IndividualProgressionF14LoginPolicy.h"\n', ""),
+    ("                // F19: never keep a stage below the original level write\n"
+     "                // (<=60 -> 0, 61-70 -> 8, 71+ -> 13) or above a set limit.\n", ""),
+    ("savedStage <= IndividualProgressionGroupPolicy::LastSupportedStage &&\n"
+     "                    IndividualProgressionF14LoginPolicy::PreservesAtLeastLevelStage(\n"
+     "                        savedStage, player->GetLevel(), sIndividualProgression->progressionLimit))",
+     "savedStage <= IndividualProgressionGroupPolicy::LastSupportedStage)"),
+    ("                    // may not yet exist during Core's PlayerScript login. It is\n"
+     "                    // itself backed by the mutable currentBots set, which is\n"
+     "                    // only safe on the source-verified WorldScript login thread;\n"
+     "                    // do not call it from other hooks or threads.\n",
+     "                    // may not yet exist during Core's PlayerScript login.\n"
+     "                    // Do not call the mutable currentBots-backed predicate\n"
+     "                    // outside the source-verified WorldScript login thread.\n"),
+)
+
+
+def without_f19_login_floor(src: str) -> str:
+    for new_text, old_text in F19_SUBSTITUTIONS:
+        src = src.replace(new_text, old_text)
+    return src
+
+
+PLAYER = without_f19_login_floor((ROOT / "src/IndividualProgressionPlayer.cpp").read_text())
 CORE = (ROOT / "src/IndividualProgression.cpp").read_text()
 HEADER = (ROOT / "src/IndividualProgression.h").read_text()
 CONF = (ROOT / "conf/individualProgression.conf.dist").read_text()
