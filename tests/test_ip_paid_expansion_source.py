@@ -146,7 +146,8 @@ class DefaultOff(unittest.TestCase):
             r'\s*>=\s*IndividualProgressionExpansionPolicy::(?P<era>TbcEntryStage|WrathAccessStage)'
             r'\s*&&\s*\(\s*ip->(?P<unlock>deathKnightProgressionLevel|tbcRacesProgressionLevel)'
             r'\s*==\s*0\s*\|\|\s*ip->(?P=unlock)\s*<\s*'
-            r'IndividualProgressionExpansionPolicy::(?P=era)\s*\)\s*\)\s*LOG_WARN\("module",'
+            r'IndividualProgressionExpansionPolicy::(?P=era)\s*\)\s*\)\s*'
+            r'LOG_WARN\("module",\s*"[^"\n]*?may give (?P<message>TBC|Wrath) without a purchase",'
         )
         matched = {(m.group("start"), m.group("era"), m.group("unlock"))
                    for m in shape.finditer(block)}
@@ -159,6 +160,13 @@ class DefaultOff(unittest.TestCase):
         self.assertEqual(matched, expected)
         # Prevent duplicate matches from being hidden by the set comparison.
         self.assertEqual(len(list(shape.finditer(block))), 4)
+        # The era named in the human-readable operator warning must also
+        # match the tier threshold, not just exist somewhere in the log block.
+        # Otherwise a copy/paste swap can mislead a GM about a configuration.
+        expected_era_label = {"TbcEntryStage": "TBC", "WrathAccessStage": "Wrath"}
+        for m in shape.finditer(block):
+            with self.subTest(origin=m.group("start"), era=m.group("era")):
+                self.assertEqual(m.group("message"), expected_era_label[m.group("era")])
 
     def test_warning_cross_era_start_threshold_matrix(self):
         # Synthetic truth-table model of the four warning conditions.

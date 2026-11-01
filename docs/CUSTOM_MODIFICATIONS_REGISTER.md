@@ -201,3 +201,14 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Runtime boundaries | New GM self-only get / paid-mode set warning from #25, plus six operator-only startup log warnings from #27. No other runtime code, SQL, vendor, Core, Playerbots, paid-flag default or owner config modification. |
 | Collision resolution | Retained #25 exact `cs_individualProgression.cpp` blob pin and the repaired explicit GM-exception test, while layering #27's six-log source contract and synthetic matrix. Register retains both separate changes append-only. |
 | Evidence | Combined review/source/CI pending. No Worldserver native link, GM gameplay, vendor purchase or owner-host deployment proven. Default paid switch OFF; rollback by dropping this integration child. |
+
+### IP-11 PR warning-label source-test follow-up (1 Nov 2026; DRAFT / no runtime change)
+
+| Field | Record |
+| --- | --- |
+| Purpose / reviewer finding | [Grok #28 exact-head PASS with Low message-label gap](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6563199772): C++ paid-era warning conditions were source-checked but swapping their quoted TBC/Wrath operator labels could still pass all tests. |
+| Owning component / files | CS01 isolated child of [IP #28](https://github.com/CosmicCuddle/mod-individual-progression/pull/28) exact parent `740a792da88ba3cbf8b0d0db74ce438266247fc2`; **only** `tests/test_ip_paid_expansion_source.py` and this appended register entry. |
+| Intended behaviour | Preserve six existing warning-only logs and default-OFF paid mode; require each of four DK/TBC-race × TBC/Wrath C++ conditions to have the **same era name** in its operator warning. No character, gold, GM permission, entitlement, group, database or config behavior changed. |
+| Source / dependencies | Existing pinned `src/IndividualProgression.cpp` unchanged. Python source test now captures the TBC/Wrath warning label and checks it against the exact threshold in the same complete `if (...) LOG_WARN` shape. No SQL/DBC/client, Core or Playerbots changes. |
+| Verification / risks | GitHub source diff and structural sanity checks are not a complete Python suite, C++ compile or owner-host gameplay. Grok to perform independent exact-head read-only source/test/mutation check. Original startup warnings can report a risky setting but do not enforce access. |
+| Live status / rollback | DRAFT, NOT merged/installed. Revert this child test/docs-only delta if declined; original canonical #28 branch remains frozen for Claude receipt integration. No production action or approval implied. |
