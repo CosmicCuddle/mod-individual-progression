@@ -397,14 +397,48 @@ class SavedCompleteQuestSafety(unittest.TestCase):
         self.assertIn("if (player->GetSession())", login)
         self.assertIn("without losing objective progress", login)
         self.assertIn('LOG_INFO("module",', login)
-        for forbidden in ("RemoveQuest(", "RemoveActiveQuest(", "SetRewardedQuest(",
-                          "QUEST_STATUS_REWARDED", "ForceUpdateProgressionState(",
-                          "UpdateProgressionState(", "ModifyMoney(", "SaveToDB("):
+        for forbidden in ("RemoveQuest(", "RemoveActiveQuest(", "RemoveRewardedQuest(",
+                          "SetRewardedQuest(", "SetQuestStatus(", "SetQuestSlot(",
+                          "SetQuestSlotCounter(", "CreatureOrGOCount", "ItemCount",
+                          "AbandonQuest(", "QUEST_STATUS_REWARDED",
+                          "ForceUpdateProgressionState(", "UpdateProgressionState(",
+                          "ModifyMoney(", "SaveToDB(", "IsGameMaster()", "return;"):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, login)
 
+    def test_exact_login_body_permits_no_extra_calls_or_changed_guard_scope(self):
+        # Unlike a substring check, this pins the *whole executable login body*.
+        # It catches a deferral moved outside its if, early return, GM bypass,
+        # REWARDED reset, quest-objective wipe, or a dead-coded guard.
+        expected = """void OnPlayerLogin(Player* player) override
+    {
+        sIndividualProgression->EvaluatePaidExpansionGrandfather(player);
+
+        
+        
+        
+        
+        
+        if (player && sIndividualProgression->IsPaidExpansionActive() &&
+            sIndividualProgression->isNormalAccount(player) &&
+            !sIndividualProgression->HasExpansionEntitlement(player, Era::Tbc) &&
+            player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_COMPLETE)
+        {
+            player->IncompleteQuest(INTO_THE_BREACH);
+            if (player->GetSession())
+                ChatHandler(player->GetSession()).PSendSysMessage(
+                    "|cffffff00Into the Breach has been kept in your quest log without losing objective progress. Purchase TBC passage before claiming its reward.|r");
+            LOG_INFO("module", "IndividualProgression: deferred unpaid character {} quest 10259 completion at login",
+                player->GetGUID().GetCounter());
+        }
+
+        sIndividualProgression->SendPaidExpansionReminder(player);
+    }"""
+        actual = code(body(EXP, "void OnPlayerLogin(Player* player) override"))
+        self.assertEqual(" ".join(actual.split()), " ".join(expected.split()))
+
     def test_feature_off_bot_start_privilege_and_paid_cases_are_left_alone(self):
-        # Model of the exact four source predicates, not Core gameplay execution.
+        # Documentation-only truth table; the executable source is pinned above.
         def defer(enabled, normal, entitled, complete):
             return enabled and normal and not entitled and complete
 
