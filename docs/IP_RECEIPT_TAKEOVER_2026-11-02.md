@@ -23,3 +23,15 @@ Pinned Grimfeather Core `8daffdabe9202c228e45d833c9a1d399597a15cd` `PlayerSettin
 5. Build native joined Worldserver and run isolated staging of first paid purchase, insufficient gold, duplicate, crash/restart, malformed data, character transfer, offline GM, quest10259 and rollback before requesting installation permission.
 
 **Evidence boundary:** source helper and portable CI tests are not live account, native integration or transaction evidence. No live SQL, owner DB, host, charge, config change, merge or deployment was performed. Close/discard this child to return to IP #35 unchanged.
+
+
+## Runtime integration candidate — CS01 child, 2 November 2026
+
+The pure ledger is now used in source for raw-row validation before pre-map entitlement caching and before account-wide Wrath unlocks. **No v1 row means no entitlement or purchase**; grandfather evaluation is also refused without a validated row. `PurchaseExpansion` stages the amount/time in a validated copy BEFORE debit and writes both fields via Player in-memory `UpdatePlayerSetting` after success verification and BEFORE the existing single `SaveToDB(false,false)` transaction for gold+settings. A zero-price purchase and invalid system time fail before debit. No separate DB update and no stage8 grant on TBC purchase.
+
+**Not release ready:** No approved first-time ledger seeding exists, so real legacy/new characters without a trusted v1 row cannot purchase. This is intentional to prevent charging a transferred formerly paid character. Core may still rewrite malformed original row bytes on character save even if IP refuses it, and pdump still omits settings. These hazards require a protected Core/migration/transfer solution, native builds and staging before anyone can enable paid progression. This is an implementation candidate, not an approved feature or observed safe gold transaction.
+
+
+## Payment persistence guard — far teleport (2 November 2026)
+
+Pinned Grimfeather Core `Player::SaveToDB` at `8daffdabe...` checks `IsBeingTeleportedFar()` and schedules a **delayed save instead of immediately committing its transaction**. Even with one `SaveToDB(false,false)` call, accepting a payment during that window could acknowledge it without having persisted gold plus receipt yet. This isolated #37 follow-up therefore refuses `CanPurchaseExpansion` before debit while `player->IsBeingTeleportedFar()` is true, with a source regression assertion. The check reduces one known delayed-save risk but does not prove crash-atomicity, availability or race-freedom. No player records, money, Core or production host were changed.

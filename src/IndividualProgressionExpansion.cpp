@@ -13,6 +13,7 @@
 
 #include "IndividualProgression.h"
 #include "World.h"
+#include <ctime>
 #include "AllCreatureScript.h"
 #include "ScriptedGossip.h"
 
@@ -20,6 +21,7 @@
 #include <mutex>
 
 using namespace IndividualProgressionExpansionPolicy;
+namespace ReceiptPolicy = IndividualProgressionReceiptPolicy;
 
 namespace
 {
@@ -82,6 +84,19 @@ bool IndividualProgression::IsPaidExpansionActive() const
 static bool PaidExpansionStoreSaving()
 {
     return sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);
+}
+
+static ReceiptPolicy::Decoded ReadStrictPaidLedger(uint32 guid)
+{
+    // Read untouched RAW data: Core GetPlayerSetting may drop malformed tokens.
+    QueryResult result = CharacterDatabase.Query(
+        "SELECT data FROM character_settings WHERE guid = {} AND source = '{}' LIMIT 1",
+        guid, PaidExpansionSettingSource);
+    if (!result)
+        return ReceiptPolicy::DecodeRaw({}, false);
+    Field* fields = result->Fetch();
+    return ReceiptPolicy::DecodeRaw(fields[0].IsNull() ? std::string() :
+        fields[0].Get<std::string>(), true);
 }
 
 uint8 IndividualProgression::GetConfiguredStartStage(Player* player) const
@@ -173,7 +188,10 @@ uint8 IndividualProgression::GetAccountEffectiveProgression(uint32 accountId)
             Field* fields = result->Fetch();
             uint8 const raw = static_cast<uint8>(fields[0].Get<uint32>() - 66000);
             std::string const data = fields[1].IsNull() ? std::string() : fields[1].Get<std::string>();
-            uint8 const stage = EffectiveAccountStage(raw, SettingsSlotSet(data, SettingWrath));
+            ReceiptPolicy::Decoded const decoded = ReceiptPolicy::DecodeRaw(data, !fields[1].IsNull());
+            bool const verifiedWrath = decoded &&
+                decoded.ledger.fields[ReceiptPolicy::WrathFlag] != ReceiptPolicy::FlagNone;
+            uint8 const stage = EffectiveAccountStage(raw, verifiedWrath);
             if (stage > best)
                 best = stage;
         } while (result->NextRow());
@@ -189,7 +207,11 @@ void IndividualProgression::SetPaidExpansionFlag(Player* player, uint32 index, u
     if (!bit)
         return;
     std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
-    uint8& bits = _paidExpansionFlags[player->GetGUID().GetCounter()];
+    uint32 const guid = player->GetGUID().GetCounter();
+    auto const receipt = _paidExpansionLedgers.find(guid);
+    if (receipt != _paidExpansionLedgers.end())
+        receipt->second.fields[index] = value;
+    uint8& bits = _paidExpansionFlags[guid];
     if (value != FlagNone)
         bits |= bit;
     else
@@ -200,27 +222,32 @@ void IndividualProgression::LoadPaidExpansionEntitlement(Player* player)
 {
     if (!player)
         return;
-
     uint32 const guid = player->GetGUID().GetCounter();
     if (!IsPaidExpansionActive())
     {
         std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
         _paidExpansionFlags.erase(guid);
+        _paidExpansionLedgers.erase(guid);
         return;
     }
-
-    // Only characters at or past the final Vanilla milestone can hold a
-    // purchase; skip the others so no purchase slots are read for them.
+    ReceiptPolicy::Decoded const ledger = ReadStrictPaidLedger(guid);
     uint8 bits = 0;
-    if (RawStageBeforeMap(player) >= VanillaFinalStage)
+    if (ledger && RawStageBeforeMap(player) >= VanillaFinalStage)
     {
-        if (player->GetPlayerSetting(PaidExpansionSettingSource, SettingTbc).value != FlagNone)
+        if (ledger.ledger.fields[ReceiptPolicy::TbcFlag] != ReceiptPolicy::FlagNone)
             bits |= PaidExpansionBitTbc;
-        if (player->GetPlayerSetting(PaidExpansionSettingSource, SettingWrath).value != FlagNone)
+        if (ledger.ledger.fields[ReceiptPolicy::WrathFlag] != ReceiptPolicy::FlagNone)
             bits |= PaidExpansionBitWrath;
     }
-
     std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
+    if (ledger)
+        _paidExpansionLedgers[guid] = ledger.ledger;
+    else
+    {
+        _paidExpansionLedgers.erase(guid);
+        LOG_WARN("module", "IndividualProgression: refusing invalid/missing paid ledger for character {} (status {})",
+            guid, static_cast<uint32>(ledger.status));
+    }
     if (bits)
         _paidExpansionFlags[guid] = bits;
     else
@@ -230,7 +257,8 @@ void IndividualProgression::LoadPaidExpansionEntitlement(Player* player)
 
 PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)
 {
-    if (!player || !player->IsInWorld() || costCopper > static_cast<uint32>(std::numeric_limits<int32>::max()))
+    if (!player || !player->IsInWorld() || player->IsBeingTeleportedFar() ||
+        costCopper > static_cast<uint32>(std::numeric_limits<int32>::max()))
         return PurchaseResult::InvalidRequest;
 
     // Money is always saved; the purchase flag only if the store is saving.
@@ -238,6 +266,12 @@ PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8
         return PurchaseResult::FeatureInactive;
 
     CharacterFacts const facts = GetExpansionFacts(player);
+    if (IsPaidExpansionActive())
+    {
+        std::shared_lock<std::shared_mutex> lock(_paidExpansionLock);
+        if (_paidExpansionLedgers.find(player->GetGUID().GetCounter()) == _paidExpansionLedgers.end())
+            return PurchaseResult::EntryUnavailable;
+    }
     bool entryAvailable = true;
     if (IsKnownEra(eraValue) && static_cast<Era>(eraValue) == Era::Tbc)
     {
@@ -267,6 +301,20 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
     Era const era = static_cast<Era>(eraValue);
     uint32 const index = era == Era::Tbc ? SettingTbc : SettingWrath;
     uint8 const rawBeforePurchase = GetPlayerProgressionFromQuests(player);
+    ReceiptPolicy::Ledger stagedLedger;
+    {
+        std::shared_lock<std::shared_mutex> lock(_paidExpansionLock);
+        auto const it = _paidExpansionLedgers.find(player->GetGUID().GetCounter());
+        if (it == _paidExpansionLedgers.end())
+            return PurchaseResult::EntryUnavailable;
+        stagedLedger = it->second;
+    }
+    std::time_t const timestamp = std::time(nullptr);
+    if (timestamp <= 0 || static_cast<uint64>(timestamp) > std::numeric_limits<uint32>::max() ||
+        !ReceiptPolicy::RecordPurchase(stagedLedger,
+            era == Era::Tbc ? ReceiptPolicy::Era::Tbc : ReceiptPolicy::Era::Wrath,
+            costCopper, static_cast<uint32>(timestamp)))
+        return PurchaseResult::EntryUnavailable;
 
     // 2. Charge, then record the purchase.
     player->ModifyMoney(-static_cast<int32>(costCopper));
@@ -294,7 +342,17 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
         return PurchaseResult::EntryUnavailable;
     }
 
-    // 5. Money, quest markers and the flag are saved in one transaction.
+    // 5. Append the validated receipt to the same in-memory Player settings
+    // saved alongside gold and flags by this one SaveToDB transaction.
+    uint32 const moneySlot = era == Era::Tbc ? ReceiptPolicy::TbcCopper : ReceiptPolicy::WrathCopper;
+    uint32 const timeSlot = era == Era::Tbc ? ReceiptPolicy::TbcEpoch : ReceiptPolicy::WrathEpoch;
+    player->UpdatePlayerSetting(PaidExpansionSettingSource, ReceiptPolicy::Version, ReceiptPolicy::Version1);
+    player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot, stagedLedger.fields[moneySlot]);
+    player->UpdatePlayerSetting(PaidExpansionSettingSource, timeSlot, stagedLedger.fields[timeSlot]);
+    {
+        std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
+        _paidExpansionLedgers[player->GetGUID().GetCounter()] = stagedLedger;
+    }
     player->SaveToDB(false, false);
     // Purchase record: the "module" log channel (Server.log by default).
     LOG_INFO("module", "IndividualProgression: character {} purchased {} for {} copper",
@@ -315,6 +373,11 @@ void IndividualProgression::EvaluatePaidExpansionGrandfather(Player* player)
     CharacterFacts const facts = GetExpansionFacts(player);
     if (!facts.gated)
         return;
+    {
+        std::shared_lock<std::shared_mutex> lock(_paidExpansionLock);
+        if (_paidExpansionLedgers.find(player->GetGUID().GetCounter()) == _paidExpansionLedgers.end())
+            return;
+    }
 
     bool const evaluated = player->GetPlayerSetting(PaidExpansionSettingSource, SettingGrandfatherEvaluated).value != FlagNone;
     if (ShouldGrandfatherWrath(facts, paidExpansionGrandfatherStage13, evaluated))
