@@ -53,9 +53,12 @@ IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0
 #            Kil'jaeden = stage 13) only makes a character ELIGIBLE. The next
 #            expansion opens after buying it from the expansion vendor, which
 #            must call IndividualProgression's PurchaseExpansion API.
-#            A TBC purchase grants stage 8 (start of TBC). A Wrath purchase
-#            grants no stage; an unpaid stage 13 counts as TBC (level 70 cap,
-#            no Northrend). Applies to normal accounts only; bot and excluded
+#            A TBC purchase leaves raw stage 7 unchanged and unlocks quest
+#            10259 (Into the Breach); only its later hand-in advances to 8.
+#            A Wrath purchase grants no raw stage; earned raw stage 13 is
+#            effective stage 12 before purchase and 13 after purchase.
+#            Unpaid stage 13 has a level 70 cap and no Northrend access.
+#            Applies to normal accounts only; bot and excluded
 #            accounts, Death Knight / TBC-race / server start stages and
 #            characters already at stage 14+ keep their access.
 #        Requires worldserver EnablePlayerSettings = 1, otherwise the feature

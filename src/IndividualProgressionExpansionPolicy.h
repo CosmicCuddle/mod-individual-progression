@@ -75,6 +75,16 @@ namespace IndividualProgressionExpansionPolicy
         return f.featureActive && f.gated;
     }
 
+    // Preserve a paid character's single-use TBC entry quest when the
+    // operator disabled the default quest-driven progression writer.
+    // Existing start-stage 8+ exceptions and already-entered TBC stay
+    // unchanged. This guard refuses completion; it never grants a stage.
+    constexpr bool PaidTbcRewardWouldStrand(CharacterFacts const& f, bool disableDefaultProgression)
+    {
+        return disableDefaultProgression && Applies(f) && f.tbcPaid &&
+               f.rawStage < TbcEntryStage && f.startStage < TbcEntryStage;
+    }
+
     constexpr bool HasTbc(CharacterFacts const& f)
     {
         return !Applies(f) || f.rawStage >= TbcEntryStage || f.tbcPaid || f.startStage >= TbcEntryStage;

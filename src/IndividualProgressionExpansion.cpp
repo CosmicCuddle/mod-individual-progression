@@ -140,6 +140,16 @@ CharacterFacts IndividualProgression::GetExpansionFacts(Player* player)
     return facts;
 }
 
+
+bool IndividualProgression::MustHoldPaidTbcQuestReward(Player* player)
+{
+    // Source-only safeguard while the paid feature is OFF by default.
+    // Check the real per-character paid bit, not race alone or an inferred
+    // entitlement, so privileged TBC races/DKs remain on their old path.
+    return player && IsPaidExpansionActive() && disableDefaultProgression &&
+           PaidTbcRewardWouldStrand(GetExpansionFacts(player), disableDefaultProgression);
+}
+
 uint8 IndividualProgression::GetEffectiveProgression(Player* player)
 {
     uint8 const raw = GetPlayerProgressionFromQuests(player);
@@ -286,6 +296,14 @@ PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8
         // This is a release safeguard, not a completed migration solution.
         if (player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED)
             entryAvailable = false;
+        // Paid TBC must be advanced by the reward of quest 10259.
+        // If the operator disabled default IP progression, that reward
+        // cannot award stage 8. Do not sell a permanently stalled TBC
+        // entitlement: refuse the offer before any monetary debit.
+        // Wrath is unaffected because its purchase opens effective 13
+        // without an additional progression-quest hand-in.
+        if (disableDefaultProgression)
+            entryAvailable = false;
     }
 
     return CheckPurchase(facts, eraValue, player->HasEnoughMoney(costCopper), entryAvailable);
@@ -431,6 +449,18 @@ public:
     // via .quest complete; the audited .ip set override remains available.
     bool OnPlayerBeforeQuestComplete(Player* player, uint32 questId) override
     {
+        // A formerly paid raw-stage-7 human must not irreversibly consume
+        // nonrepeatable quest 10259 when the default stage writer is OFF.
+        // Keep the quest incomplete and the paid receipt untouched.
+        if (questId == INTO_THE_BREACH &&
+            sIndividualProgression->MustHoldPaidTbcQuestReward(player))
+        {
+            if (player->GetSession())
+                ChatHandler(player->GetSession()).PSendSysMessage(
+                    "|cffffff00Into the Breach cannot be completed while default progression is disabled. Your quest and TBC purchase are preserved.|r");
+            return false;
+        }
+
         if (questId != INTO_THE_BREACH || !player ||
             !sIndividualProgression->IsPaidExpansionActive() ||
             !sIndividualProgression->isNormalAccount(player) ||

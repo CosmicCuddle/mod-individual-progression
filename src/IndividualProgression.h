@@ -474,6 +474,8 @@ public:
     uint8 GetEffectiveProgression(Player* player);
     bool IsAutomaticGrantAllowed(Player* player, uint8 targetStage);
     bool HasExpansionEntitlement(Player* player, IndividualProgressionExpansionPolicy::Era era);
+    // Refuse to consume a previously paid 10259 when DDP prevents stage 8.
+    bool MustHoldPaidTbcQuestReward(Player* player);
     IndividualProgressionExpansionPolicy::PurchaseResult CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper);
     IndividualProgressionExpansionPolicy::PurchaseResult PurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper);
     uint8 GetMaxServiceGrantableStage(Player* player);
