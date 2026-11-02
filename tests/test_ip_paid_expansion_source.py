@@ -324,6 +324,20 @@ class PurchaseSequence(unittest.TestCase):
         self.assertIn("f.rawStage < TbcEntryStage && f.startStage < TbcEntryStage", POLICY)
         self.assertIn("VanillaFinalStage : VanillaFinalStage - 1;", POLICY)
 
+    def test_unpaid_into_the_breach_completion_veto_is_hook_registered(self):
+        script = code(EXP)
+        self.assertIn("PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE", script)
+        method = code(body(EXP, "bool OnPlayerBeforeQuestComplete(Player* player, uint32 questId) override"))
+        self.assertIn("questId != INTO_THE_BREACH", method)
+        self.assertIn("!sIndividualProgression->IsPaidExpansionActive()", method)
+        self.assertIn("!sIndividualProgression->isNormalAccount(player)", method)
+        self.assertIn("sIndividualProgression->HasExpansionEntitlement(player, Era::Tbc)", method)
+        self.assertIn("return true;", method)
+        self.assertIn("return false;", method)
+        self.assertIn("Purchase The Burning Crusade", method)
+        # Prevent accidentally accepting all quests or blocking OFF/bot/GM.
+        self.assertLess(method.index("return true;"), method.index("return false;"))
+
     def test_can_purchase_rejects_bad_input_and_checks_marker_template(self):
         can = code(body(EXP, "PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)"))
         self.assertIn("costCopper > static_cast<uint32>(std::numeric_limits<int32>::max())", can)
