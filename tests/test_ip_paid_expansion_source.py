@@ -191,6 +191,14 @@ class DefaultOff(unittest.TestCase):
             with self.subTest(case=name):
                 self.assertEqual((warns(start, unlock, 8), warns(start, unlock, 13)), (tbc, wrath))
 
+    def test_far_teleport_cannot_accept_purchase_before_delayed_save(self):
+        can = code(body(EXP, "PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)"))
+        self.assertIn("player->IsBeingTeleportedFar()", can)
+        self.assertLess(can.index("player->IsBeingTeleportedFar()"),
+                        can.index("CharacterFacts const facts = GetExpansionFacts(player);"))
+        # Pinned Core SaveToDB delays, rather than commits, if teleporting far.
+        # This pre-debit refusal is an extra safeguard, not live transaction proof.
+
     def test_store_writes_need_saving_store(self):
         self.assertIn("return featureActive && storeSaving;", POLICY)
         gf = code(body(EXP, "void IndividualProgression::EvaluatePaidExpansionGrandfather(Player* player)"))
