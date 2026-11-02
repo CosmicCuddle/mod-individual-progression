@@ -320,3 +320,6 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 
 
 **IP-RECEIPT-CORE-RAW-PRESERVE-20261102 follow-up:** Added mandatory version-zero `ValidLedger` negative coverage, replaced NDEBUG-elidable assert-only checks, and required debug/NDEBUG GCC+Clang C++17/20 CI. Same Core patch, paid source/runtime and owner host unchanged. Grok L2/L4 reviewed findings [Issue #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6575653080); result pending exact-head CI.
+
+
+**IP-RECEIPT-CORE-RAW-PRESERVE-20261102 compiled harness follow-up:** Added `tests/core_patches/stubs/` plus `tests/core_patches/core_settings_harness.cpp` and CI GCC/Clang C++17/C++20 compilation of the actual patched Core `PlayerSettings.cpp` with a disposable fake database. Tests malformed two-login/save/offline writes, valid paid/grandfather and unrelated setting source. No production file or player data touched; native full Worldserver/MySQL still separately required.

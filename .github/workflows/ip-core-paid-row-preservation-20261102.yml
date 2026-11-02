@@ -5,6 +5,8 @@ on:
     paths:
       - tests/core_patches/preserve_paid_receipt_row.patch
       - tests/test_core_paid_settings_preservation.py
+      - 'tests/core_patches/stubs/**'
+      - tests/core_patches/core_settings_harness.cpp
       - .github/workflows/ip-core-paid-row-preservation-20261102.yml
       - docs/IP_CORE_PAID_SETTINGS_PRESERVE_2026-11-02.md
   workflow_dispatch:
@@ -43,6 +45,33 @@ jobs:
           grep -Fq 'SerializeSettingsData(parsed) == data' acore/$file
           grep -Fq 'if (unsafePaidRow)' acore/$file
           grep -Fq 'if (!PlayerSettingsStore::IsCanonicalPaidReceiptRow(source, data))' acore/$file
+      - name: Compile actual patched Core PlayerSettings.cpp in isolated fake-DB harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ip-core-settings-actual
+          cp acore/src/server/game/Entities/Player/PlayerSettings.cpp /tmp/ip-core-settings-actual/PlayerSettings.cpp
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              "$compiler" -std="$standard" -O2 -Wall -Wextra -Werror -pedantic \
+                -I ip/tests/core_patches/stubs \
+                /tmp/ip-core-settings-actual/PlayerSettings.cpp \
+                ip/tests/core_patches/core_settings_harness.cpp \
+                -o /tmp/ip-actual-core-settings
+              /tmp/ip-actual-core-settings | tee /tmp/ip-actual-core-settings.log
+              grep -Eq '^ACTUAL CORE PLAYER SETTINGS HARNESS CHECKS [0-9]+ passed        shell: bash
+        run: |
+          set -euo pipefail
+          cd ip
+          python3 -B -m unittest discover -s tests -p test_core_paid_settings_preservation.py -v
+      - name: Safety boundary
+        run: |
+          echo 'Only one pinned Core source file modified in CI workspace. No fork updated.'
+          echo 'Actual patched settings unit is built against isolated fake DB. Full Worldserver/MySQL and gameplay still unproven.'
+          echo 'Paid mode must remain OFF; no owner data, SQL, payments or deployment.'
+ /tmp/ip-actual-core-settings.log
+            done
+          done
       - name: Negative laundering fixtures and source contract (model, not real Core runtime)
         shell: bash
         run: |
