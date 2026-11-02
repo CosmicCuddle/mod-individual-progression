@@ -48,3 +48,28 @@ receipt rows or the .pdump policy; those remain critical separate tasks.
 because the branch itself never changes a database. If deployed after
 approval, changing a server option does not restore any past gold or
 quest status. Verify restorable character database before live changes.
+
+
+## 2 Nov — existing-paid buyer protection (source-only follow-up)
+
+Grok identified a second stranding case: a character may buy TBC while default
+progression is enabled, then the operator may enable
+`IndividualProgression.DisableDefaultProgression=1` before that character
+rewards the nonrepeatable quest 10259. The earlier sale-refusal check cannot
+protect a purchase that already happened.
+
+A new `MustHoldPaidTbcQuestReward` predicate now checks the **actual paid
+character flag**, normal gated account, raw progression below stage 8, and
+lack of an existing stage-8 start privilege. When the paid feature is active
+and default progression is disabled, the quest-completion hook refuses the
+quest **without consuming it or modifying money/stage/receipt**. Existing
+TBC-starting races/classes, bots/excluded accounts, already stage8+, unpaid
+players and paid-feature OFF retain their previous paths.
+
+This is a draft **conservative no-data-loss safeguard**, not owner approval
+of a gameplay policy for custom progression realms. The owner may later choose
+a narrowly scoped special reward exception instead. It remains necessary to
+test startup config, real paid character settings, quest log and staged
+completion with DDP switching, as well as actual Core hook ordering; CI is
+source/policy evidence only. Undo by reverting this draft's header/policy/hook
+additions before merging. No host operation or payment has occurred.
