@@ -70,6 +70,24 @@ class Provenance(unittest.TestCase):
                              "data", "optional", "sql").strip(), "")
 
 
+    def test_f14_conf_addition_preserves_all_previous_settings(self):
+        # Grok Low-1: compare the entire distributed config against the
+        # reviewed #34 parent after removing ONLY the new default-OFF block.
+        # A flip to EnforceGroupRules or any other pre-existing default must
+        # fail this check, even though the F14 pilot itself is test-only.
+        path = "conf/individualProgression.conf.dist"
+        current = (ROOT / path).read_text()
+        begin = "\n# IndividualProgression.F14.EnforceVerifiedRandomBotTbcFloorOnLogin\n"
+        end = "IndividualProgression.F14.EnforceVerifiedRandomBotTbcFloorOnLogin = 0\n"
+        self.assertEqual(current.count(begin), 1)
+        self.assertEqual(current.count(end), 1)
+        before, remainder = current.split(begin, 1)
+        new_comments, after = remainder.split(end, 1)
+        # This new block is comment-only until its single expected OFF key.
+        self.assertNotIn("\nIndividualProgression.", new_comments)
+        self.assertEqual(before + after, git("show", FROZEN_PARENT + ":" + path))
+
+
 class Wiring(unittest.TestCase):
     def test_floor_condition_inside_existing_guard(self):
         region = flat(login_region(PLAYER))
