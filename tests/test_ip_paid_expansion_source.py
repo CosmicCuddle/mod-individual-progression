@@ -365,7 +365,7 @@ class PurchaseReminderSafety(unittest.TestCase):
             reminder.index("No purchase was processed."):
             reminder.index("Visit {} to purchase access.")
         ]
-        self.assertRegex(warning_to_invite, r"\\bcontinue\\s*;")
+        self.assertRegex(warning_to_invite, r"\bcontinue\s*;")
         # The exception applies only to TBC, not Wrath, OFF or a paid player.
         self.assertNotIn("UpdateProgressionState(", reminder)
         self.assertNotIn("ModifyMoney(", reminder)
