@@ -364,7 +364,12 @@ class StorageAndThreads(unittest.TestCase):
 
     def test_cache_filled_before_map_add_and_kept_across_logout(self):
         script = body(EXP, "class IndividualProgression_PaidExpansionPlayerScript")
-        self.assertIn("{ PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN }", script)
+        # The paid PlayerScript now also registers the pre-completion veto;
+        # check each required hook independently rather than freezing a
+        # two-entry initializer list and masking a real hook regression.
+        self.assertIn("PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP", script)
+        self.assertIn("PLAYERHOOK_ON_LOGIN", script)
+        self.assertIn("PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE", script)
         self.assertIn("sIndividualProgression->LoadPaidExpansionEntitlement(player);",
                       body(script, "void OnPlayerSendInitialPacketsBeforeAddToMap("))
         self.assertNotIn("OnPlayerLogout", code(script))
