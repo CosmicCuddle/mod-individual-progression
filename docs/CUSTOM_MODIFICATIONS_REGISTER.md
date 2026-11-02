@@ -326,3 +326,17 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 
 
 **IP-RECEIPT-CORE-RAW-PRESERVE-20261102 canonical agreement:** Tightened actual IP strict `DecodeRaw` to accept exactly the pinned Core serializer's v1 eight-slot canonical text, preserving noncanonical original rows without Core cache rewriting; added missing-trailing/leading-zero negatives. This is an explicit data-integrity restriction, not a migration. Owner-approved reconciliation needed for noncanonical original paid rows; Core patch itself unchanged.
+
+
+### CORE-PAID-ROW-READ-WRITE-BLOCK-20261102 — two-file Core no-overwrite extension (DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Owner/component | CosmicCuddle; Maintenance CS01 while Claude is away. Child of IP #38 first one-file preservation patch, based on Grok [MEDIUM-1](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6576287053). |
+| Intent | If paid RAW source was malformed on login, preserve original bytes against implicit GetPlayerSetting and explicit UpdatePlayerSetting, as well as autosave and offline UpdateSetting. Other settings sources and valid paid rows unaffected. |
+| Files/dependencies | Reviewable pinned patch for Grimfeather Core `PlayerSettings.cpp` and `Player.h` (two original SHA/blob guards); guarded Player bool, mock unit test, negative model and CI. The owner Core fork is not connected; no installed Core, SQL, client/DBC/config changes. |
+| Risks/tests | Source tests compile actual protected .cpp against mocked Player/DB with both getter/setter calls; real Player.h only compiled in future native link. Need independent Grok exact-SHA review, real MySQL gameplay/transfer/canonical commissioning tests. |
+| Live/rollback | DRAFT, default paid OFF, no owner data touched. Discard isolated child to retain first #38 patch. No production install without owner approval, backups and regression tests. |
+
+
+**CORE-PAID-ROW-READ-WRITE-BLOCK-20261102 reviewer follow-up:** fake-DB harness expanded with independent Grok L1/L2/L3 negative checks: unrelated source update while paid source is blocked, a deliberately poisoned in-memory paid cache entry unable to survive SaveToDB, and same-object reload after replacing malformed original with canonical valid data. Source patch and paid OFF defaults unchanged; requires new exact-head CI pass.

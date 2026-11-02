@@ -133,6 +133,7 @@ public:
     void _SavePlayerSettings(CharacterDatabaseTransaction);
     void UpdatePlayerSetting(std::string const&, uint32, uint32);
     PlayerSettingMap m_charSettingsMap;
+    bool m_preserveMalformedPaidSettingsRow = false;
 private:
     uint32 guid_;
 };
