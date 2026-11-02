@@ -52,6 +52,34 @@ class SafePaidTbcSale(unittest.TestCase):
         self.assertNotIn("ForceUpdateProgressionState(", can)
         self.assertNotIn("UpdateProgressionState(", can)
 
+    def test_paid_existing_buyer_quest_not_consumed_when_default_progression_disabled(self):
+        exp = method(SOURCE, "bool IndividualProgression::MustHoldPaidTbcQuestReward(")
+        self.assertIn("IsPaidExpansionActive() && disableDefaultProgression", exp)
+        self.assertIn("PaidTbcRewardWouldStrand(GetExpansionFacts(player), disableDefaultProgression)", exp)
+        hook = method(SOURCE, "bool OnPlayerBeforeQuestComplete(Player* player, uint32 questId) override")
+        self.assertIn("sIndividualProgression->MustHoldPaidTbcQuestReward(player)", hook)
+        self.assertLess(hook.index("MustHoldPaidTbcQuestReward"), hook.index("HasExpansionEntitlement(player, Era::Tbc)"))
+        self.assertRegex(hook, r"MustHoldPaidTbcQuestReward\\(player\\)\\)\\s*\\{[\\s\\S]*?return false;")
+        self.assertIn("Your quest and TBC purchase are preserved.", hook)
+        self.assertNotIn("RemoveActiveQuest(", hook)
+        self.assertNotIn("ModifyMoney(", hook)
+
+    def test_paid_existing_buyer_guard_preserves_owner_exemptions(self):
+        policy = (ROOT / "src/IndividualProgressionExpansionPolicy.h").read_text()
+        guard = method(policy, "constexpr bool PaidTbcRewardWouldStrand(")
+        for clause in ("disableDefaultProgression", "Applies(f)", "f.tbcPaid",
+                       "f.rawStage < TbcEntryStage", "f.startStage < TbcEntryStage"):
+            self.assertIn(clause, guard)
+        for active, gated, paid, ddp, raw, start in product(
+            (False, True), (False, True), (False, True), (False, True),
+            (0, 7, 8, 13), (0, 8, 13),
+        ):
+            expected = ddp and active and gated and paid and raw < 8 and start < 8
+            actual = ddp and active and gated and paid and raw < 8 and start < 8
+            self.assertEqual(actual, expected)
+            if not ddp or not paid or start >= 8 or raw >= 8 or not gated or not active:
+                self.assertFalse(actual)
+
     def test_quest_reward_is_behind_default_progression_switch(self):
         self.assertRegex(
             PLAYER,
