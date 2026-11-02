@@ -57,8 +57,8 @@ class F14TbcFloor(unittest.TestCase):
             "if (!preserveVerifiedRandomBotStage && !verifiedRandomBotTbcFloorHandled)",
             PLAYER
         )
-        self.assertEqual(snippet.count("ForceUpdateProgressionState("), 2,
-                         "one real write plus one explanatory comment? review drift")
+        self.assertEqual(snippet.count("ForceUpdateProgressionState("), 1,
+                         "only one permitted stage writer inside the verified identity gate")
         self.assertNotIn("UpdateProgressionState(", snippet)
         self.assertNotIn("SetPhaseMask(", snippet)
 
