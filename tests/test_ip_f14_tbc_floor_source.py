@@ -60,7 +60,7 @@ class F14TbcFloor(unittest.TestCase):
         )
         self.assertEqual(snippet.count("ForceUpdateProgressionState("), 1,
                          "only one permitted stage writer inside the verified identity gate")
-        self.assertIsNone(re.search(r"(?<!Force)UpdateProgressionState\\(", snippet),
+        self.assertIsNone(re.search(r"(?<!Force)UpdateProgressionState\(", snippet),
                           "must not silently add non-Force progression writes")
         self.assertNotIn("SetPhaseMask(", snippet)
 
