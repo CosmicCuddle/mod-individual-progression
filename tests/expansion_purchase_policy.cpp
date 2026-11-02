@@ -58,11 +58,7 @@ namespace
         ++c.charges;
         Era const era = static_cast<Era>(eraValue);
         if (era == Era::Tbc)
-        {
-            c.facts.tbcPaid = true;
-            if (c.facts.rawStage < PurchaseGrantStage(era))
-                c.facts.rawStage = PurchaseGrantStage(era);
-        }
+            c.facts.tbcPaid = true; // quest 10259 has NOT been rewarded yet
         else
             c.facts.wrathPaid = true;
         return r;
@@ -73,7 +69,7 @@ namespace
 static_assert(VanillaFinalStage == 7 && TbcEntryStage == 8, "Vanilla/TBC boundary");
 static_assert(TbcFinalStage == 13 && WrathFirstCompletionStage == 14, "TBC/Wrath boundary");
 static_assert(PurchaseGrantStage(Era::Wrath) == 0, "Wrath purchase must not write stage 14");
-static_assert(PurchaseGrantStage(Era::Tbc) == 8, "TBC purchase opens the start of TBC only");
+static_assert(PurchaseGrantStage(Era::Tbc) == 0, "TBC payment must NOT skip Into the Breach 10259");
 
 int main()
 {
@@ -121,7 +117,14 @@ int main()
     Check(CheckPurchase(Human(7), TBC, true, true), PurchaseResult::Success, "eligible and funded");
     Check(CheckPurchase(Human(7), TBC, true, false), PurchaseResult::EntryUnavailable, "missing marker template fails closed");
     Check(CheckPurchase(Human(7), WRATH, true, true), PurchaseResult::NotEligible, "cannot buy Wrath from Vanilla");
-    // Paid: TBC open at its start only.
+    // Paid at raw 7: entitlement unlocks 10259, not stage 8/Outland.
+    Check(HasTbc(Human(7, true)), true, "TBC purchase flag owned at stage 7");
+    Check(HasPassed(Human(7, true), TbcEntryStage), false, "paid stage 7 still awaits quest");
+    Check(AutomaticGrantAllowed(Human(7, true), TbcEntryStage), true, "paid 10259 hand-in can grant stage 8");
+    Check(ShouldRemind(Human(7, true), Era::Tbc), false, "purchase reminder ends while awaiting quest");
+    Check(CheckPurchase(Human(7, true), TBC, true, true), PurchaseResult::AlreadyOwned, "repeat click stays denied");
+    Check(MaxServiceGrantableStage(Human(7, true)), VanillaFinalStage, "paid stage7 cannot buy tier8 skip");
+    // After completing paid quest, TBC opens at stage 8.
     Check(HasTbc(Human(8, true)), true, "paid TBC owned");
     Check(HasPassed(Human(8, true), TbcEntryStage), true, "paid TBC: TBC access");
     Check(HasPassed(Human(8, true), 9), false, "paid TBC: no raid tier awarded");
@@ -165,6 +168,15 @@ int main()
 
     // ---- 6. Account alt / catch-up cannot buy eligibility ----
     Check(MaxServiceGrantableStage(Human(2)), static_cast<std::uint8_t>(6), "Vanilla catch-up stops before KT40");
+    Check(MaxServiceGrantableStage(Human(6, true)), static_cast<std::uint8_t>(6), "unexpected paid flag below KT cannot manufacture eligibility");
+    Check(MaxServiceGrantableStage(Human(7)), static_cast<std::uint8_t>(6), "unpaid stage7 cannot buy tier bypass");
+    Check(MaxServiceGrantableStage(Human(7, true)), static_cast<std::uint8_t>(7), "paid stage7 still must hand in 10259");
+    CharacterFacts privilegedRace = Human(7);
+    privilegedRace.startStage = 8;
+    Check(MaxServiceGrantableStage(privilegedRace), UnpaidWrathAccessCap, "TBC race with start stage8 retains legacy exception");
+    CharacterFacts offPaid = Human(7, true);
+    offPaid.featureActive = false;
+    Check(MaxServiceGrantableStage(offPaid), LastSupportedStage, "feature OFF preserves historical service ceiling");
     Check(MaxServiceGrantableStage(Human(9, true)), UnpaidWrathAccessCap, "TBC catch-up stops before KJ");
     Check(MaxServiceGrantableStage(Human(13, false, true)), LastSupportedStage, "Wrath-owned: no extra cap");
     Check(CheckPurchase(Human(0), TBC, true, true), PurchaseResult::NotEligible, "fresh alt of a progressed main denied");
@@ -199,7 +211,13 @@ int main()
         ModelCharacter c{Human(7), 5000, 0};
         Check(ModelPurchase(c, TBC, 1000), PurchaseResult::Success, "M: TBC bought");
         Check(c.money, static_cast<std::uint32_t>(4000), "M: charged once");
-        Check(c.facts.rawStage, TbcEntryStage, "M: stage 8 only");
+        Check(c.facts.rawStage, VanillaFinalStage, "M: TBC payment stays stage 7");
+        Check(c.facts.tbcPaid, true, "M: bought TBC sets paid flag");
+        Check(MaxServiceGrantableStage(c.facts), VanillaFinalStage, "M: vendor cannot sell stage 8 before quest");
+        Check(AutomaticGrantAllowed(c.facts, TbcEntryStage), true, "M: after purchase quest reward can grant 8");
+        // Model the later, distinct quest 10259 reward, not another purchase.
+        c.facts.rawStage = TbcEntryStage;
+        Check(c.facts.rawStage, TbcEntryStage, "M: 10259 hand-in advances to 8");
         Check(ModelPurchase(c, TBC, 1000), PurchaseResult::AlreadyOwned, "M: double click");
         Check(c.money, static_cast<std::uint32_t>(4000), "M: double click not charged");
         Check(ModelPurchase(c, WRATH, 3000), PurchaseResult::NotEligible, "M: Wrath before KJ");

@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PARENT_20 = "5fe0f9105d55d249aa55a25510d3fa23e3d84148"
 BASE_IP_30 = "817ec290b5a82306bec76cdfcf32fc86c58c5da2"  # reviewed paid + warning child, exact SHA
+REVIEWED_IP_32 = "6c180c0a78cdadcf6c79e8e627f2cc2e91e0fdae"  # frozen parent of paid-TBC #33
 PLAYER = (ROOT / "src/IndividualProgressionPlayer.cpp").read_text()
 POLICY = (ROOT / "src/IndividualProgressionF14LoginPolicy.h").read_text()
 LOGIN_ANCHOR = "            // F14 partial safeguard, OFF by default."
@@ -40,10 +41,25 @@ class Provenance(unittest.TestCase):
     def test_parent_is_pr20_head(self):
         subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", PARENT_20, "HEAD"], check=True)
 
-    def test_only_player_cpp_changes_among_existing_sources(self):
-        changed = [p for p in git("diff", "--name-only", BASE_IP_30, "--", "src").split()]
-        self.assertEqual(sorted(changed), ["src/IndividualProgressionF14LoginPolicy.h", "src/IndividualProgressionPlayer.cpp"])
-        self.assertEqual(git("diff", "--name-only", BASE_IP_30, "--", "data", "optional", "sql", "conf").strip(), "")
+    def test_f19_original_source_scope_and_reviewed_child_ownership(self):
+        # Freeze the F19 provenance check at its reviewed parent, not at
+        # moving HEAD: #33 intentionally edits the separate paid-expansion
+        # implementation. Never broaden this assertion to arbitrary sources.
+        subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", REVIEWED_IP_32, "HEAD"], check=True)
+        reviewed = sorted(git("diff", "--name-only", BASE_IP_30, REVIEWED_IP_32, "--", "src").split())
+        self.assertEqual(reviewed, ["src/IndividualProgressionF14LoginPolicy.h", "src/IndividualProgressionPlayer.cpp"])
+        changed_since_review = sorted(git("diff", "--name-only", REVIEWED_IP_32, "HEAD", "--", "src").split())
+        self.assertEqual(changed_since_review, [
+            "src/IndividualProgressionExpansion.cpp",
+            "src/IndividualProgressionExpansionPolicy.h",
+        ])
+        # The F19 login writer and pure policy must be byte-identical to the
+        # frozen reviewed #32; paid-TBC changes cannot silently alter either.
+        self.assertEqual(git("diff", "--name-only", REVIEWED_IP_32, "HEAD", "--",
+                             "src/IndividualProgressionF14LoginPolicy.h",
+                             "src/IndividualProgressionPlayer.cpp").strip(), "")
+        self.assertEqual(git("diff", "--name-only", BASE_IP_30, "HEAD", "--",
+                             "data", "optional", "sql", "conf").strip(), "")
 
 
 class Wiring(unittest.TestCase):

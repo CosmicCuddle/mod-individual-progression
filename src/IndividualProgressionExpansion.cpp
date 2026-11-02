@@ -229,7 +229,19 @@ PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8
     CharacterFacts const facts = GetExpansionFacts(player);
     bool entryAvailable = true;
     if (IsKnownEra(eraValue) && static_cast<Era>(eraValue) == Era::Tbc)
-        entryAvailable = sObjectMgr->GetQuestTemplate(66000 + TbcEntryStage) != nullptr;
+    {
+        // Never take money if either the stage-8 marker or the actual
+        // Into the Breach (10259) entry quest is missing from this world.
+        // Visibility/share/reward gating is implemented separately.
+        entryAvailable = sObjectMgr->GetQuestTemplate(66000 + TbcEntryStage) != nullptr &&
+                         sObjectMgr->GetQuestTemplate(INTO_THE_BREACH) != nullptr;
+        // A pre-rewarded, nonrepeatable 10259 at raw stage 7 would strand
+        // the buyer: it cannot be handed in again. Until an owner-reviewed
+        // recovery rule exists, refuse the SALE before any money is moved.
+        // This is a release safeguard, not a completed migration solution.
+        if (player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED)
+            entryAvailable = false;
+    }
 
     return CheckPurchase(facts, eraValue, player->HasEnoughMoney(costCopper), entryAvailable);
 }
@@ -243,19 +255,24 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
 
     Era const era = static_cast<Era>(eraValue);
     uint32 const index = era == Era::Tbc ? SettingTbc : SettingWrath;
+    uint8 const rawBeforePurchase = GetPlayerProgressionFromQuests(player);
 
     // 2. Charge, then record the purchase.
     player->ModifyMoney(-static_cast<int32>(costCopper));
     SetPaidExpansionFlag(player, index, FlagPaid);
 
-    // 3. Open the start of the era: stage 8 for TBC; nothing for Wrath
-    //    (13 is already held; 14 would skip the first Wrath raid tier).
-    if (uint8 const grant = PurchaseGrantStage(era))
-        UpdateProgressionState(player, static_cast<ProgressionState>(grant));
+    // 3. Buying TBC unlocks the Into the Breach (10259) hand-in; it does
+    //    NOT grant stage 8. Buying Wrath opens effective stage 13 by setting
+    //    its entitlement flag, without granting 14. Quest availability and
+    //    already-rewarded recovery need separate integration before release.
+    //    Never write a progression marker as a side effect of payment.
 
-    // 4. Verify. On any failure undo the flag and refund.
+    // 4. Verify payment semantics, NOT the TBC quest hand-in. A paid
+    //    stage-7 character must remain at stage 7 immediately after buying.
+    //    On any failure undo the flag and refund.
     bool const opened = era == Era::Tbc
-        ? GetPlayerProgressionFromQuests(player) >= TbcEntryStage
+        ? GetPlayerProgressionFromQuests(player) == rawBeforePurchase &&
+          GetExpansionFacts(player).tbcPaid
         : GetEffectiveProgression(player) >= WrathAccessStage;
     if (!opened)
     {
@@ -309,6 +326,16 @@ void IndividualProgression::SendPaidExpansionReminder(Player* player)
     {
         if (!ShouldRemind(facts, era))
             continue;
+        // A stage-7 character whose nonrepeatable 10259 was already
+        // rewarded cannot buy passage until the legacy quest is reconciled.
+        // Do not repeatedly direct them to a vendor that must refuse sale.
+        if (era == Era::Tbc && facts.rawStage < TbcEntryStage &&
+            player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED)
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage(
+                "|cffffff00Into the Breach is already completed, but your progression is still stage 7. Contact server staff to review TBC passage. No purchase was processed.|r");
+            continue;
+        }
         ChatHandler(player->GetSession()).PSendSysMessage(
             "|cffffff00You have completed the requirements to unlock {}! Visit {} to purchase access.|r",
             EraName(era), paidExpansionVendorName);
@@ -319,7 +346,28 @@ class IndividualProgression_PaidExpansionPlayerScript : public PlayerScript
 {
 public:
     IndividualProgression_PaidExpansionPlayerScript() : PlayerScript("IndividualProgression_PaidExpansion",
-        { PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN }) { }
+        { PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN,
+          PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE }) { }
+
+    // Defence in depth: Core's CompleteQuest invokes this veto BEFORE setting
+    // quest COMPLETE. Conditions.ScriptName is not evaluated by our pinned
+    // Core; and the reward hook fires too late to stop an unpaid quest reward.
+    // No change to OFF, bots/excluded accounts or start-stage exemptions.
+    // A GM targeting an unpaid normal character does NOT bypass this hook
+    // via .quest complete; the audited .ip set override remains available.
+    bool OnPlayerBeforeQuestComplete(Player* player, uint32 questId) override
+    {
+        if (questId != INTO_THE_BREACH || !player ||
+            !sIndividualProgression->IsPaidExpansionActive() ||
+            !sIndividualProgression->isNormalAccount(player) ||
+            sIndividualProgression->HasExpansionEntitlement(player, Era::Tbc))
+            return true;
+
+        if (player->GetSession())
+            ChatHandler(player->GetSession()).PSendSysMessage(
+                "|cffffff00Purchase The Burning Crusade from Chronomancer Vezrath before completing Into the Breach.|r");
+        return false;
+    }
 
     // Login thread, after the character (and its settings) loaded from the
     // database and before it enters a map; also on reconnect and worldport.

@@ -11,7 +11,7 @@
  *
  * Existing stage meanings are NOT renumbered:
  *   7  = Kel'Thuzad 40 (final Vanilla milestone)
- *   8  = TBC entered (previously only from the Into the Breach quest)
+ *   8  = TBC entered via Into the Breach (10259) AFTER buying TBC;
  *   13 = Kil'jaeden (final TBC milestone); legacy code also treats 13 as
  *        "Wrath open", so an UNPAID 13 is capped to 12 for access checks
  *   14 = first Wrath raid tier completed (never granted by a purchase)
@@ -132,11 +132,12 @@ namespace IndividualProgressionExpansionPolicy
         return era == Era::Tbc ? TbcEntryStage : WrathFirstCompletionStage;
     }
 
-    // Stage marker a purchase writes: TBC opens at 8; Wrath writes NO stage
-    // (13 is already held and 14 would skip the first Wrath raid tier).
-    constexpr std::uint8_t PurchaseGrantStage(Era era)
+    // Owner rule: buying TBC only unlocks Into the Breach (10259);
+    // its QUEST REWARD subsequently grants stage 8. Wrath purchase lifts
+    // the effective cap on already-earned raw 13 without granting stage 14.
+    constexpr std::uint8_t PurchaseGrantStage(Era)
     {
-        return era == Era::Tbc ? TbcEntryStage : 0;
+        return 0;
     }
 
     // Every check happens before any money is taken. Order matters:
@@ -180,13 +181,17 @@ namespace IndividualProgressionExpansionPolicy
         return true;
     }
 
-    // Highest stage a service (e.g. account catch-up) may grant. It stays
-    // below the current era's final milestone, so buying catch-up can never
-    // make a character eligible for the next expansion.
+    // A tier catch-up service must NOT sell stage 8 to a normal human
+    // who paid for TBC but has not yet rewarded Into the Breach (10259).
+    // Keep the existing 6-before-final-boss ceiling for unpaid characters.
+    // GM, bots and races starting at 8+ remain explicitly exempt.
     constexpr std::uint8_t MaxServiceGrantableStage(CharacterFacts const& f)
     {
         if (!Applies(f))
             return LastSupportedStage;
+        if (f.rawStage < TbcEntryStage && f.startStage < TbcEntryStage)
+            return HasTbc(f) && f.rawStage >= VanillaFinalStage
+                ? VanillaFinalStage : VanillaFinalStage - 1;
         if (!HasTbc(f))
             return VanillaFinalStage - 1;
         if (!HasWrath(f))

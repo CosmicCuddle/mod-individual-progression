@@ -300,29 +300,75 @@ class PurchaseSequence(unittest.TestCase):
         self.assertLess(check, bail)
         self.assertLess(bail, debit)
 
-    def test_flag_after_debit_then_grant_then_verify_refund_save(self):
+    def test_flag_after_debit_then_verify_refund_save_without_quest_grant(self):
         p = self.PURCHASE
         debit = p.index("player->ModifyMoney(-static_cast<int32>(costCopper));")
         flag = p.index("SetPaidExpansionFlag(player, index, FlagPaid);")
-        grant = p.index("UpdateProgressionState(player, static_cast<ProgressionState>(grant));")
         verify = p.index("if (!opened)")
         undo = p.index("SetPaidExpansionFlag(player, index, FlagNone);")
         refund = p.index("player->ModifyMoney(static_cast<int32>(costCopper));")
         save = p.index("player->SaveToDB(false, false);")
-        self.assertTrue(debit < flag < grant < verify < undo < refund < save)
+        self.assertTrue(debit < flag < verify < undo < refund < save)
+        # Payment records entitlement but does not itself award stage8 or 10259.
+        self.assertNotIn("UpdateProgressionState(", p)
+        self.assertIn("GetPlayerProgressionFromQuests(player) == rawBeforePurchase", p)
+        self.assertIn("GetExpansionFacts(player).tbcPaid", p)
+        self.assertIn("GetEffectiveProgression(player) >= WrathAccessStage", p)
 
     def test_no_direct_stage_writes_or_wrath_tier_skip(self):
         self.assertNotIn("ForceUpdateProgressionState", code(EXP))
         self.assertNotIn("66014", EXP)
         self.assertNotIn("PROGRESSION_WOTLK_TIER_1", code(EXP))
-        self.assertIn("return era == Era::Tbc ? TbcEntryStage : 0;", POLICY)
+        self.assertIn("constexpr std::uint8_t PurchaseGrantStage(Era)", POLICY)
+        self.assertIn("return 0;", code(body(POLICY, "constexpr std::uint8_t PurchaseGrantStage(Era)")))
+        self.assertIn("f.rawStage < TbcEntryStage && f.startStage < TbcEntryStage", POLICY)
+        self.assertIn("VanillaFinalStage : VanillaFinalStage - 1;", POLICY)
+
+    def test_unpaid_into_the_breach_completion_veto_is_hook_registered(self):
+        script = code(EXP)
+        self.assertIn("PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE", script)
+        method = code(body(EXP, "bool OnPlayerBeforeQuestComplete(Player* player, uint32 questId) override"))
+        self.assertIn("questId != INTO_THE_BREACH", method)
+        self.assertIn("!sIndividualProgression->IsPaidExpansionActive()", method)
+        self.assertIn("!sIndividualProgression->isNormalAccount(player)", method)
+        self.assertIn("sIndividualProgression->HasExpansionEntitlement(player, Era::Tbc)", method)
+        self.assertIn("return true;", method)
+        self.assertIn("return false;", method)
+        self.assertIn("Purchase The Burning Crusade", method)
+        # Prevent accidentally accepting all quests or blocking OFF/bot/GM.
+        self.assertLess(method.index("return true;"), method.index("return false;"))
 
     def test_can_purchase_rejects_bad_input_and_checks_marker_template(self):
         can = code(body(EXP, "PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)"))
         self.assertIn("costCopper > static_cast<uint32>(std::numeric_limits<int32>::max())", can)
         self.assertIn("return PurchaseResult::InvalidRequest;", can)
         self.assertIn("sObjectMgr->GetQuestTemplate(66000 + TbcEntryStage) != nullptr", can)
+        self.assertIn("sObjectMgr->GetQuestTemplate(INTO_THE_BREACH) != nullptr", can)
+        self.assertIn("player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED", can)
+        self.assertIn("entryAvailable = false;", can)
+        self.assertIn("&&", can)
+        self.assertLess(can.index("GetQuestTemplate(INTO_THE_BREACH)"), can.index("GetQuestStatus(INTO_THE_BREACH)"))
         self.assertIn("return CheckPurchase(facts, eraValue, player->HasEnoughMoney(costCopper), entryAvailable);", can)
+
+
+class PurchaseReminderSafety(unittest.TestCase):
+    def test_pre_rewarded_10259_warns_instead_of_advertising_unusable_sale(self):
+        reminder = code(body(EXP, "void IndividualProgression::SendPaidExpansionReminder(Player* player)"))
+        self.assertIn("if (!ShouldRemind(facts, era))", reminder)
+        self.assertIn("era == Era::Tbc && facts.rawStage < TbcEntryStage", reminder)
+        self.assertIn("player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED", reminder)
+        self.assertIn("Contact server staff to review TBC passage. No purchase was processed.", reminder)
+        self.assertLess(reminder.index("No purchase was processed."), reminder.index("Visit {} to purchase access."))
+        # A generic continue earlier in ShouldRemind is insufficient. The
+        # specific no-sale warning must exit BEFORE the Vezrath invitation.
+        warning_to_invite = reminder[
+            reminder.index("No purchase was processed."):
+            reminder.index("Visit {} to purchase access.")
+        ]
+        self.assertRegex(warning_to_invite, r"\bcontinue\s*;")
+        # The exception applies only to TBC, not Wrath, OFF or a paid player.
+        self.assertNotIn("UpdateProgressionState(", reminder)
+        self.assertNotIn("ModifyMoney(", reminder)
 
 
 class StorageAndThreads(unittest.TestCase):
@@ -338,7 +384,12 @@ class StorageAndThreads(unittest.TestCase):
 
     def test_cache_filled_before_map_add_and_kept_across_logout(self):
         script = body(EXP, "class IndividualProgression_PaidExpansionPlayerScript")
-        self.assertIn("{ PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN }", script)
+        # The paid PlayerScript now also registers the pre-completion veto;
+        # check each required hook independently rather than freezing a
+        # two-entry initializer list and masking a real hook regression.
+        self.assertIn("PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP", script)
+        self.assertIn("PLAYERHOOK_ON_LOGIN", script)
+        self.assertIn("PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE", script)
         self.assertIn("sIndividualProgression->LoadPaidExpansionEntitlement(player);",
                       body(script, "void OnPlayerSendInitialPacketsBeforeAddToMap("))
         self.assertNotIn("OnPlayerLogout", code(script))
