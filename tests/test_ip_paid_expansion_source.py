@@ -359,8 +359,14 @@ class PurchaseReminderSafety(unittest.TestCase):
         self.assertIn("player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED", reminder)
         self.assertIn("Contact server staff to review TBC passage. No purchase was processed.", reminder)
         self.assertLess(reminder.index("No purchase was processed."), reminder.index("Visit {} to purchase access."))
+        # A generic continue earlier in ShouldRemind is insufficient. The
+        # specific no-sale warning must exit BEFORE the Vezrath invitation.
+        warning_to_invite = reminder[
+            reminder.index("No purchase was processed."):
+            reminder.index("Visit {} to purchase access.")
+        ]
+        self.assertRegex(warning_to_invite, r"\\bcontinue\\s*;")
         # The exception applies only to TBC, not Wrath, OFF or a paid player.
-        self.assertIn("continue;", reminder)
         self.assertNotIn("UpdateProgressionState(", reminder)
         self.assertNotIn("ModifyMoney(", reminder)
 
