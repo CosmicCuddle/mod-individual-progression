@@ -300,22 +300,29 @@ class PurchaseSequence(unittest.TestCase):
         self.assertLess(check, bail)
         self.assertLess(bail, debit)
 
-    def test_flag_after_debit_then_grant_then_verify_refund_save(self):
+    def test_flag_after_debit_then_verify_refund_save_without_quest_grant(self):
         p = self.PURCHASE
         debit = p.index("player->ModifyMoney(-static_cast<int32>(costCopper));")
         flag = p.index("SetPaidExpansionFlag(player, index, FlagPaid);")
-        grant = p.index("UpdateProgressionState(player, static_cast<ProgressionState>(grant));")
         verify = p.index("if (!opened)")
         undo = p.index("SetPaidExpansionFlag(player, index, FlagNone);")
         refund = p.index("player->ModifyMoney(static_cast<int32>(costCopper));")
         save = p.index("player->SaveToDB(false, false);")
-        self.assertTrue(debit < flag < grant < verify < undo < refund < save)
+        self.assertTrue(debit < flag < verify < undo < refund < save)
+        # Payment records entitlement but does not itself award stage8 or 10259.
+        self.assertNotIn("UpdateProgressionState(", p)
+        self.assertIn("GetPlayerProgressionFromQuests(player) == rawBeforePurchase", p)
+        self.assertIn("GetExpansionFacts(player).tbcPaid", p)
+        self.assertIn("GetEffectiveProgression(player) >= WrathAccessStage", p)
 
     def test_no_direct_stage_writes_or_wrath_tier_skip(self):
         self.assertNotIn("ForceUpdateProgressionState", code(EXP))
         self.assertNotIn("66014", EXP)
         self.assertNotIn("PROGRESSION_WOTLK_TIER_1", code(EXP))
-        self.assertIn("return era == Era::Tbc ? TbcEntryStage : 0;", POLICY)
+        self.assertIn("constexpr std::uint8_t PurchaseGrantStage(Era)", POLICY)
+        self.assertIn("return 0;", code(body(POLICY, "constexpr std::uint8_t PurchaseGrantStage(Era)")))
+        self.assertIn("f.rawStage < TbcEntryStage && f.startStage < TbcEntryStage", POLICY)
+        self.assertIn("VanillaFinalStage : VanillaFinalStage - 1;", POLICY)
 
     def test_can_purchase_rejects_bad_input_and_checks_marker_template(self):
         can = code(body(EXP, "PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)"))
