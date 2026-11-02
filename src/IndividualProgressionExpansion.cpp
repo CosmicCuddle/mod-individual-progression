@@ -140,6 +140,16 @@ CharacterFacts IndividualProgression::GetExpansionFacts(Player* player)
     return facts;
 }
 
+
+bool IndividualProgression::MustHoldPaidTbcQuestReward(Player* player)
+{
+    // Source-only safeguard while the paid feature is OFF by default.
+    // Check the real per-character paid bit, not race alone or an inferred
+    // entitlement, so privileged TBC races/DKs remain on their old path.
+    return player && IsPaidExpansionActive() && disableDefaultProgression &&
+           PaidTbcRewardWouldStrand(GetExpansionFacts(player), disableDefaultProgression);
+}
+
 uint8 IndividualProgression::GetEffectiveProgression(Player* player)
 {
     uint8 const raw = GetPlayerProgressionFromQuests(player);
@@ -439,6 +449,18 @@ public:
     // via .quest complete; the audited .ip set override remains available.
     bool OnPlayerBeforeQuestComplete(Player* player, uint32 questId) override
     {
+        // A formerly paid raw-stage-7 human must not irreversibly consume
+        // nonrepeatable quest 10259 when the default stage writer is OFF.
+        // Keep the quest incomplete and the paid receipt untouched.
+        if (questId == INTO_THE_BREACH &&
+            sIndividualProgression->MustHoldPaidTbcQuestReward(player))
+        {
+            if (player->GetSession())
+                ChatHandler(player->GetSession()).PSendSysMessage(
+                    "|cffffff00Into the Breach cannot be completed while default progression is disabled. Your quest and TBC purchase are preserved.|r");
+            return false;
+        }
+
         if (questId != INTO_THE_BREACH || !player ||
             !sIndividualProgression->IsPaidExpansionActive() ||
             !sIndividualProgression->isNormalAccount(player) ||
