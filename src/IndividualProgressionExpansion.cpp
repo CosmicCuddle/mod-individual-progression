@@ -249,12 +249,11 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
     player->ModifyMoney(-static_cast<int32>(costCopper));
     SetPaidExpansionFlag(player, index, FlagPaid);
 
-    // 3. TBC payment owns access to the 10259 hand-in, NOT stage 8.
-    //    Wrath opens effective stage 13 with no additional stage/quest grant.
-    //    Quest availability and pre-rewarded recovery are separate guarded
-    //    integration tasks; do not skip or silently mark 10259 rewarded here.
-    if (uint8 const grant = PurchaseGrantStage(era))
-        UpdateProgressionState(player, static_cast<ProgressionState>(grant));
+    // 3. Buying TBC unlocks the Into the Breach (10259) hand-in; it does
+    //    NOT grant stage 8. Buying Wrath opens effective stage 13 by setting
+    //    its entitlement flag, without granting 14. Quest availability and
+    //    already-rewarded recovery need separate integration before release.
+    //    Never write a progression marker as a side effect of payment.
 
     // 4. Verify payment semantics, NOT the TBC quest hand-in. A paid
     //    stage-7 character must remain at stage 7 immediately after buying.
