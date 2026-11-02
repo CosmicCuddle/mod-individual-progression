@@ -345,8 +345,15 @@ class PurchaseSequence(unittest.TestCase):
         self.assertIn("return true;", method)
         self.assertIn("return false;", method)
         self.assertIn("Purchase The Burning Crusade", method)
-        # Prevent accidentally accepting all quests or blocking OFF/bot/GM.
-        self.assertLess(method.index("return true;"), method.index("return false;"))
+        # The new already-paid/DPP no-strand veto intentionally returns
+        # false BEFORE the historical unpaid gate. Preserve its *original*
+        # OFF/bot/GM/entitled fast-exit ordering within that gate, and require
+        # the additional veto to be limited to quest 10259.
+        self.assertIn("MustHoldPaidTbcQuestReward(player)", method)
+        self.assertLess(method.index("MustHoldPaidTbcQuestReward(player)"),
+                        method.index("if (questId != INTO_THE_BREACH || !player ||"))
+        historical = method[method.index("if (questId != INTO_THE_BREACH || !player ||"):]
+        self.assertLess(historical.index("return true;"), historical.index("return false;"))
 
     def test_can_purchase_rejects_bad_input_and_checks_marker_template(self):
         can = code(body(EXP, "PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)"))
