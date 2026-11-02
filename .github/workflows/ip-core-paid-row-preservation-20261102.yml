@@ -1,0 +1,77 @@
+name: Pinned Core malformed paid-row preservation patch (NO HOST)
+
+on:
+  pull_request:
+    paths:
+      - 'tests/core_patches/preserve_paid_receipt_row.patch'
+      - 'tests/test_core_paid_settings_preservation.py'
+      - 'tests/core_patches/stubs/**'
+      - 'tests/core_patches/core_settings_harness.cpp'
+      - '.github/workflows/ip-core-paid-row-preservation-20261102.yml'
+      - 'docs/IP_CORE_PAID_SETTINGS_PRESERVE_2026-11-02.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  protect-core-raw-paid-row:
+    name: Apply exact Core patch and compile REAL patched settings unit against fake DB
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - name: Checkout exact IP candidate
+        uses: actions/checkout@v4
+        with:
+          path: ip
+          persist-credentials: false
+      - name: Checkout pinned Grimfeather Core (disposable runner only)
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          path: acore
+          persist-credentials: false
+      - name: Apply one-file Core protection after exact source blob verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=src/server/game/Entities/Player/PlayerSettings.cpp
+          test "$(git -C acore rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
+          test "$(git -C acore rev-parse "HEAD:$file")" = f1eb86367ce69111867ef7187125f5fe456c5367
+          git -C acore apply --check ../ip/tests/core_patches/preserve_paid_receipt_row.patch
+          git -C acore apply ../ip/tests/core_patches/preserve_paid_receipt_row.patch
+          git -C acore diff --check
+          test "$(git -C acore diff --name-only)" = "$file"
+          grep -Fq 'SerializeSettingsData(parsed) == data' "acore/$file"
+          grep -Fq 'if (unsafePaidRow)' "acore/$file"
+          grep -Fq 'if (!PlayerSettingsStore::IsCanonicalPaidReceiptRow(source, data))' "acore/$file"
+      - name: Build and test ACTUAL patched Core settings implementation with disposable fake database
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ip-core-settings-actual
+          cp acore/src/server/game/Entities/Player/PlayerSettings.cpp /tmp/ip-core-settings-actual/PlayerSettings.cpp
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              "$compiler" -std="$standard" -O2 -Wall -Wextra -Werror -pedantic \
+                -I ip/tests/core_patches/stubs \
+                /tmp/ip-core-settings-actual/PlayerSettings.cpp \
+                ip/tests/core_patches/core_settings_harness.cpp \
+                -o /tmp/ip-actual-core-settings
+              /tmp/ip-actual-core-settings | tee /tmp/ip-actual-core-settings.log
+              grep -Eq '^ACTUAL CORE PLAYER SETTINGS HARNESS CHECKS [0-9]+ passed$' /tmp/ip-actual-core-settings.log
+            done
+          done
+      - name: Independent negative fixtures (model only, not game/DB proof)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ip
+          python3 -B -m unittest discover -s tests -p test_core_paid_settings_preservation.py -v
+      - name: Explicit safety boundary
+        if: always()
+        run: |
+          echo 'Only disposable CI Core source and synthetic fake-DB tests.'
+          echo 'No owner Core fork, DB, game process, character money, config or deployment changed.'
+          echo 'Native Worldserver compile and real MySQL persistence remain separate gates.'

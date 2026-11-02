@@ -86,11 +86,16 @@ namespace IndividualProgressionReceiptPolicy
             PairValid(f[WrathFlag], f[WrathCopper], f[WrathEpoch]);
     }
 
-    // Core SerializeSettingsData emits a single trailing space. Accept only
-    // that optional terminator; repeated separators, junk, sign, overflow and
-    // extra/missing slots MUST NOT shift indexes or mint entitlements.
+    // The pinned Core protection patch considers ONLY its canonical
+    // SerializeSettingsData output safe to cache. The IP decoder MUST require
+    // those same exact bytes; otherwise a supposedly valid noncanonical row
+    // could be skipped at Core load and later accidentally re-created by a
+    // GetPlayerSetting caller. This intentionally refuses no-trailing-space,
+    // leading-zero and other noncanonical legacy/manual row representations.
+    inline std::string Serialize(Ledger const& ledger);
     inline Decoded DecodeRaw(std::string_view data, bool rowPresent)
     {
+        std::string_view const originalRaw = data;
         if (!rowPresent)
             return { Status::Missing, {} };
         if (data.empty())
@@ -122,6 +127,11 @@ namespace IndividualProgressionReceiptPolicy
             return { Status::UnknownVersion, {} };
         if (!ValidLedger(ledger))
             return { Status::Inconsistent, {} };
+        // Match exactly the Core preservation guard, including one final
+        // space and canonical unsigned decimal spelling for every token.
+        std::string const canonical = Serialize(ledger);
+        if (std::string_view(canonical) != originalRaw)
+            return { Status::Malformed, {} };
         return { Status::Valid, ledger };
     }
 

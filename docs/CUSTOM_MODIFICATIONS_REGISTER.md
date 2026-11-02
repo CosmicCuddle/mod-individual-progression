@@ -305,3 +305,24 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Files | `src/IndividualProgression.h`, `src/IndividualProgressionExpansion.cpp`, source contracts, this register and receipt memo; standalone policy header remains unchanged. No SQL/config/DB/Core/Playerbots/client changes. |
 | Risks/tests | **Blocking:** no approved new/legacy ledger bootstrap, Core permissive parser may rewrite malformed bytes, pdump omits settings, real native build & gameplay pending. No production money tests. Fail-closed store means no owner character can buy without pre-provisioned valid v1 row. |
 | Live/rollback | Feature OFF, unmerged. Discard child to restore strict policy #36. Owner staging, backups and explicit approval required. |
+
+
+### IP-RECEIPT-CORE-RAW-PRESERVE-20261102 — pinned disposable Core source patch (DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Owner / source | CosmicCuddle / CS01 Maintenance; child of IP receipt #37 `6a2ee86742f0df3c37de16e093f6c14569129666`, Core pinned `8daffdabe...` source blob `f1eb863...`; Grok High-1 [Issue #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6575653080). |
+| Intended | Preserve malformed `ip_paid_expansion` original bytes across ordinary Core autosave/logout and refuse offline standalone writes to malformed source; leave all unrelated setting sources unchanged. No false entitlement mint from permissive Core token skipping. |
+| Files | `tests/core_patches/preserve_paid_receipt_row.patch` targeting Core `src/server/game/Entities/Player/PlayerSettings.cpp` in disposable runner ONLY; source and negative test, CI, memo, register. No installed Core/DB/config/SQL/DBC/client changes. |
+| Dependencies / risks | Owner Core fork unavailable; integrate only after approved source owner branch and regression tests. Explicit other module `Player::UpdatePlayerSetting` can still rewrite; true v1 bootstrap/pdump missing; Core patch currently uncompiled in native Worldserver until follow-on check. |
+| Tests | Exact file git-blob/pin patch-check source CI and counterexample model authored, results must be verified. No gameplay, gold or owner data. |
+| Live status/rollback | Unmerged DRAFT, paid OFF. Discard child to remove patch; no live rollback necessary. |
+
+
+**IP-RECEIPT-CORE-RAW-PRESERVE-20261102 follow-up:** Added mandatory version-zero `ValidLedger` negative coverage, replaced NDEBUG-elidable assert-only checks, and required debug/NDEBUG GCC+Clang C++17/20 CI. Same Core patch, paid source/runtime and owner host unchanged. Grok L2/L4 reviewed findings [Issue #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6575653080); result pending exact-head CI.
+
+
+**IP-RECEIPT-CORE-RAW-PRESERVE-20261102 compiled harness follow-up:** Added `tests/core_patches/stubs/` plus `tests/core_patches/core_settings_harness.cpp` and CI GCC/Clang C++17/C++20 compilation of the actual patched Core `PlayerSettings.cpp` with a disposable fake database. Tests malformed two-login/save/offline writes, valid paid/grandfather and unrelated setting source. No production file or player data touched; native full Worldserver/MySQL still separately required.
+
+
+**IP-RECEIPT-CORE-RAW-PRESERVE-20261102 canonical agreement:** Tightened actual IP strict `DecodeRaw` to accept exactly the pinned Core serializer's v1 eight-slot canonical text, preserving noncanonical original rows without Core cache rewriting; added missing-trailing/leading-zero negatives. This is an explicit data-integrity restriction, not a migration. Owner-approved reconciliation needed for noncanonical original paid rows; Core patch itself unchanged.
