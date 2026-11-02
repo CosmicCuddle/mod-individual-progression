@@ -28,7 +28,7 @@ int main()
     check(DecodeRaw(clean, false).status == Status::Missing);
     check(DecodeRaw("", false).status == Status::Missing);
     check(DecodeRaw("", true).status == Status::WrongSlotCount);
-    for (std::string const& raw : {
+    for (char const* raw : {
         "x 0 1", "-1 0 1", "+1 0 1", "0 x 1", "0 1a 1",
         "0 4294967296 1", "0 1 1 1 0 0 0 0 42",
         "0 0 1 1 0 0 0", "0  0 1 1 0 0 0 0",
