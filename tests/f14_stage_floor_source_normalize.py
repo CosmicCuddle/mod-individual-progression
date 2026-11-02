@@ -14,6 +14,24 @@ ORIGINAL_GATE = "if (!preserveVerifiedRandomBotStage)"
 POLICY_BEGIN = "    // F14 new-bot source candidate: a positively verified Blood Elf or\n"
 POLICY_END = "    // F19-1: never preserve a stage below the original level stage."
 
+# Frozen exact F14 policy body. Prevent normalization from hiding unrelated
+# changes between the F14 and F19 markers (Grok Low-2 / mutation M8).
+EXPECTED_POLICY_BODY = """    // Draenei RandomBot needs at least TBC stage 8, even when level <=60.
+    // At level 71+ the original bot stage floor of 13 is retained.
+    // This is a RAW awarded-marker target, not a claim the global Vanilla
+    // ProgressionLimit makes the bot eligible for TBC gameplay.
+    constexpr std::uint8_t TbcRaceFloorStage(std::uint32_t level)
+    {
+        return LevelStage(level) < 8 ? 8 : LevelStage(level);
+    }
+
+    constexpr bool NeedsTbcRaceFloor(std::uint8_t savedStage, std::uint32_t level)
+    {
+        return savedStage < TbcRaceFloorStage(level);
+    }
+
+"""
+
 HEADER_OLD = "enforceGroupRules, f14PreserveVerifiedRandomBotStageOnLogin, EnableSetRepCommand"
 HEADER_NEW = "enforceGroupRules, f14PreserveVerifiedRandomBotStageOnLogin, f14EnforceVerifiedRandomBotTbcFloorOnLogin, EnableSetRepCommand"
 
@@ -35,7 +53,8 @@ def strip_policy_pilot(source: str) -> str:
     assert source.count(POLICY_BEGIN) == 1, "F14 pilot policy start missing/duplicated"
     assert source.count(POLICY_END) == 1, "F19 policy region missing/duplicated"
     prefix, body = source.split(POLICY_BEGIN, 1)
-    _, suffix = body.split(POLICY_END, 1)
+    pilot, suffix = body.split(POLICY_END, 1)
+    assert pilot == EXPECTED_POLICY_BODY, "F14 policy body drift outside reviewed pilot"
     assert "TbcRaceFloorStage" not in prefix + suffix
     return prefix + POLICY_END + suffix
 
