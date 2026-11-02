@@ -49,9 +49,12 @@ class Provenance(unittest.TestCase):
         reviewed = sorted(git("diff", "--name-only", BASE_IP_30, REVIEWED_IP_32, "--", "src").split())
         self.assertEqual(reviewed, ["src/IndividualProgressionF14LoginPolicy.h", "src/IndividualProgressionPlayer.cpp"])
         changed_since_review = sorted(git("diff", "--name-only", REVIEWED_IP_32, "HEAD", "--", "src").split())
+        # This child adds exactly the standalone strict receipt policy header.
+        # Keep the reviewed F19 login and group policy source frozen below.
         self.assertEqual(changed_since_review, [
             "src/IndividualProgressionExpansion.cpp",
             "src/IndividualProgressionExpansionPolicy.h",
+            "src/IndividualProgressionReceiptPolicy.h",
         ])
         # The F19 login writer and pure policy must be byte-identical to the
         # frozen reviewed #32; paid-TBC changes cannot silently alter either.
