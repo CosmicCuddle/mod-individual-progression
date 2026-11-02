@@ -243,19 +243,25 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
 
     Era const era = static_cast<Era>(eraValue);
     uint32 const index = era == Era::Tbc ? SettingTbc : SettingWrath;
+    uint8 const rawBeforePurchase = GetPlayerProgressionFromQuests(player);
 
     // 2. Charge, then record the purchase.
     player->ModifyMoney(-static_cast<int32>(costCopper));
     SetPaidExpansionFlag(player, index, FlagPaid);
 
-    // 3. Open the start of the era: stage 8 for TBC; nothing for Wrath
-    //    (13 is already held; 14 would skip the first Wrath raid tier).
+    // 3. TBC payment owns access to the 10259 hand-in, NOT stage 8.
+    //    Wrath opens effective stage 13 with no additional stage/quest grant.
+    //    Quest availability and pre-rewarded recovery are separate guarded
+    //    integration tasks; do not skip or silently mark 10259 rewarded here.
     if (uint8 const grant = PurchaseGrantStage(era))
         UpdateProgressionState(player, static_cast<ProgressionState>(grant));
 
-    // 4. Verify. On any failure undo the flag and refund.
+    // 4. Verify payment semantics, NOT the TBC quest hand-in. A paid
+    //    stage-7 character must remain at stage 7 immediately after buying.
+    //    On any failure undo the flag and refund.
     bool const opened = era == Era::Tbc
-        ? GetPlayerProgressionFromQuests(player) >= TbcEntryStage
+        ? GetPlayerProgressionFromQuests(player) == rawBeforePurchase &&
+          GetExpansionFacts(player).tbcPaid
         : GetEffectiveProgression(player) >= WrathAccessStage;
     if (!opened)
     {
