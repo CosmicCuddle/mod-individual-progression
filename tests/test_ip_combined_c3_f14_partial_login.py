@@ -48,12 +48,12 @@ def without_f19_login_floor(src: str) -> str:
     # historical source test runs on a later composed IP child. This test
     # still verifies that original #13/#19 login is unchanged beneath it.
     start = "            // F14 NEW owner-priority SOURCE PILOT, default OFF."
-    end = "            // END F14 new verified RandomBot stage-floor block.\\n"
+    end = "            // END F14 new verified RandomBot stage-floor block.\n"
     if start in src:
         before, rest = src.split(start, 1)
         if end not in rest:
             raise AssertionError("F14 stage-floor cleanup marker missing")
-        src = before + rest.split(end, 1)[1]
+        src = before + rest.split(end, 1)[1].lstrip("\n")
         src = src.replace(
             "if (!preserveVerifiedRandomBotStage && !verifiedRandomBotTbcFloorHandled)",
             "if (!preserveVerifiedRandomBotStage)",
