@@ -272,3 +272,14 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Dependencies and risks | Core `Player::IncompleteQuest` at pinned 8daffdabe... changes status and log COMPLETE bit, not objective counters. Login ordering, actual quest client refresh, persisted status and re-login must be tested. Direct offline GM `.quest reward` remains unenforceable in IP and is an operator block. Offer/accept/share gating, already REWARDED recovery, receipts, DisableDefaultProgression and pdump stay release-blocking. |
 | Verification | Exact-head CI/source tests and real Worldserver/Playerbots/Character Services link **not yet verified at creation**; game/DB/host tests not performed. Source/model tests are not gameplay evidence. |
 | Live status / rollback | Development-only DRAFT, feature OFF. Drop isolated child to restore #33 unchanged. Before production require owner approval, restorable backups and staged quest/raid regression checks. |
+
+### IP-PAID-TBC-10259-A1A2-ACCESS — scoped quest-accept undo and gossip suppression (2 Nov 2026; DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Owner / parent | CosmicCuddle / CS01-IP, distinct isolated child of [IP #34](https://github.com/CosmicCuddle/mod-individual-progression/pull/34) exact `a6ac77d9fae9690be91f6ddb97422476164c0ca2`; Grok [Issue #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6573888217). |
+| Intended behaviour | Normal unpaid humans with paid mode ON cannot retain quest10259 after an online Core quest accept; the ordinary Proudwell quest menu is suppressed. Bot/excluded, paid/start privileges and mode OFF unchanged; stage8 and reward remain protected by H1/S1. |
+| Source and dependencies | `src/IndividualProgressionExpansion.cpp`: `PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT` post-add slot-clear + active-quest removal + timed-achievement cleanup; separate `AllCreatureScript::CanCreatureGossipHello` for NPC19942 with proper registration. `tests/test_ip_paid_expansion_source.py` exact-method source checks. No Core/Playerbots/Services SQL, configuration, DBC or client patch. |
+| Known exceptions | Direct quest query still displays details; ! icon persists; Playerbots-driven normal-account AI bypasses the post-add PlayerScript; offline GM commands bypass. This is an effective online human accept defence, **not** a full pre-take or all-account quest-invisibility gate. Client flicker/quest-tracker artifact and modified world quest-giver source require real-game verification. |
+| Verification | CI/native and game acceptance **NOT yet verified at creation**. Hook ordering source-checked on pinned Core `8daffdabe...`; tests are contracts, not gameplay. |
+| Live / rollback | DRAFT, unmerged, paid OFF; discard isolated child to retain #34. Owner approval, restorable backups and latest joint Worldserver/quest gameplay before enabling. |

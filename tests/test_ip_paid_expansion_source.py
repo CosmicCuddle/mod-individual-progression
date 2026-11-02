@@ -459,6 +459,77 @@ class SavedCompleteQuestSafety(unittest.TestCase):
         self.assertEqual(EXP.count("PLAYERHOOK_ON_LOGIN"), 1)
 
 
+class UnpaidTbcQuestAccessGate(unittest.TestCase):
+    """Pin IP-only acceptance undo and NPC gossip guard without changing Core."""
+
+    def test_only_unpaid_normal_accounts_are_refused(self):
+        helper = code(body(EXP, "bool MustRefuseUnpaidTbcQuest(Player* player)"))
+        self.assertEqual(" ".join(helper.split()), " ".join("""bool MustRefuseUnpaidTbcQuest(Player* player)
+        {
+            return player && sIndividualProgression->IsPaidExpansionActive() &&
+                sIndividualProgression->isNormalAccount(player) &&
+                !sIndividualProgression->HasExpansionEntitlement(player, Era::Tbc);
+        }""".split()))
+
+    def test_accept_undo_is_ordered_and_cannot_leave_ghost_slot(self):
+        method = code(body(EXP, "void OnPlayerQuestAccept(Player* player, Quest const* quest) override"))
+        expected = """void OnPlayerQuestAccept(Player* player, Quest const* quest) override
+        {
+            if (!quest || quest->GetQuestId() != INTO_THE_BREACH ||
+                !MustRefuseUnpaidTbcQuest(player))
+                return;
+            uint16 const slot = player->FindQuestSlot(INTO_THE_BREACH);
+            if (slot < MAX_QUEST_LOG_SIZE)
+                player->SetQuestSlot(slot, 0);
+            player->RemoveActiveQuest(INTO_THE_BREACH, true);
+            player->RemoveTimedAchievement(ACHIEVEMENT_TIMED_TYPE_QUEST, INTO_THE_BREACH);
+            if (player->GetSession())
+                ChatHandler(player->GetSession()).PSendSysMessage(
+                    "|cffffff00Purchase The Burning Crusade from Chronomancer Vezrath before taking Into the Breach.|r");
+            LOG_INFO("module", "IndividualProgression: refused unpaid character {} quest 10259 acceptance",
+                player->GetGUID().GetCounter());
+        }"""
+        self.assertEqual(" ".join(method.split()), " ".join(expected.split()))
+        self.assertLess(method.index("FindQuestSlot("), method.index("SetQuestSlot("))
+        self.assertLess(method.index("SetQuestSlot("), method.index("RemoveActiveQuest("))
+        self.assertLess(method.index("RemoveActiveQuest("), method.index("RemoveTimedAchievement("))
+        for forbidden in ("ModifyMoney(", "UpdateProgressionState(", "RemoveRewardedQuest(",
+                          "SetRewardedQuest(", "ForceUpdateProgressionState(", "AbandonQuest("):
+            self.assertNotIn(forbidden, method)
+
+    def test_gossip_guard_is_scoped_to_19942_none_and_unpaid(self):
+        method = code(body(EXP, "bool CanCreatureGossipHello(Player* player, Creature* creature) override"))
+        expected = """bool CanCreatureGossipHello(Player* player, Creature* creature) override
+        {
+            if (!creature || creature->GetEntry() != 19942 ||
+                !MustRefuseUnpaidTbcQuest(player) ||
+                player->GetQuestStatus(INTO_THE_BREACH) != QUEST_STATUS_NONE)
+                return false;
+            ClearGossipMenuFor(player);
+            if (player->GetSession())
+                ChatHandler(player->GetSession()).PSendSysMessage(
+                    "|cffffff00Purchase The Burning Crusade from Chronomancer Vezrath before taking Into the Breach.|r");
+            CloseGossipMenuFor(player);
+            return true;
+        }"""
+        self.assertEqual(" ".join(method.split()), " ".join(expected.split()))
+        self.assertIn('new IndividualProgression_PaidExpansionQuestGossip();',
+                      body(EXP, "void AddSC_ip_paid_expansion()"))
+        self.assertIn("PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT",
+                      body(EXP, "class IndividualProgression_PaidExpansionPlayerScript"))
+        self.assertNotIn("GetDialogStatus", EXP)
+        self.assertNotIn("creature_template", EXP)
+
+    def test_four_bit_gate_truth_table_is_documentation_only(self):
+        # Source is compared independently above. This models OFF / excluded /
+        # paid/start and the requested quest only, without game execution.
+        for enabled in (False, True):
+            for normal in (False, True):
+                for entitled in (False, True):
+                    result = enabled and normal and not entitled
+                    self.assertEqual(result, (enabled, normal, entitled) == (True, True, False))
+
+
 class StorageAndThreads(unittest.TestCase):
     def test_hot_path_reads_only_ip_cache(self):
         facts = code(body(EXP, "CharacterFacts IndividualProgression::GetExpansionFacts(Player* player)"))
