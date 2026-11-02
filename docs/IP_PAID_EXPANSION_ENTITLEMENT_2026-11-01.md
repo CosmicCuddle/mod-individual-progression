@@ -4,6 +4,10 @@
 **Created:** 1 November 2026
 **Status:** DRAFT only. Unmerged, not installed, not game-tested. **OFF by default** (`IndividualProgression.PaidExpansion.Enable = 0`).
 
+**IMPORTANT OWNER CORRECTION (2 Nov 2026):** This document began as the **superseded** design in which buying TBC instantly granted stage 8. The later owner-approved [final rule and source gap audit](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6566353358) overrides every such historical claim: **KT40 earns stage7 → buy TBC at Vezrath but stay at stage7 → paid quest 10259 Into the Breach becomes available → handing it in grants stage8.** Unpaid characters must not be able to accept/share/complete 10259. **Wrath remains buy-and-go after KJ raw13, no extra quest or stage14.** This isolated development child implements **payment stage7, verification and generic service cap** only; quest availability, already-rewarded recovery, DisableDefaultProgression interactions and durable receipts are **release blockers**. No hosted CI/gameplay/deployment PASS is implied.
+
+
+
 | Item | Value |
 | --- | --- |
 | Branch | `feature/ip-paid-expansion-entitlement-20261101` |
@@ -14,14 +18,14 @@
 
 ## Owner rule
 
-Beating the final raid of an era makes a character **eligible** to buy the next expansion from Chronomancer Vezrath. Only the purchase opens the next era. Gold alone, the boss alone, or another character's progress is never enough. A purchase opens the **start** of the next era and never marks one of its raids as completed.
+Beating the final raid of an era makes a character **eligible** to buy the next passage from Chronomancer Vezrath. Gold alone, the boss alone, or another character's progress is never enough. **TBC:** the purchase grants access to quest 10259 while keeping stage7; handing in that quest grants stage8/Outland. **Wrath:** the purchase opens Northrend immediately from earned raw13, without granting stage14. No purchase marks a raid tier completed.
 
 ## How the existing stages are used (no renumbering)
 
 | Stage | Meaning in this fork | With the feature ON |
 | --- | --- | --- |
 | 7 | Kel'Thuzad 40 (final Vanilla milestone) | Eligible to buy TBC; still Vanilla, level cap 60 |
-| 8 | TBC entered (before this change, only the Into the Breach quest granted it) | Granted by the TBC purchase. Characters already at 8+ keep TBC |
+| 8 | TBC entered via Into the Breach (10259) | Buying TBC keeps stage7 and unlocks the quest; its **reward** grants stage8. Characters already at 8+ keep existing access |
 | 13 | Kil'jaeden (final TBC milestone). Legacy code also uses 13 as "Wrath open" in about 40 checks | **Unpaid:** treated as 12 for every access check (XP cap 70, no Northrend, TBC phasing, TBC arena season, TBC group band). **Paid:** unchanged 13 |
 | 14 | First Wrath raid tier completed | Never granted by a purchase. Characters already at 14+ keep Wrath |
 
@@ -58,7 +62,7 @@ Purchases use the Core character settings store (`Player::UpdatePlayerSetting`, 
 - **Requires worldserver `EnablePlayerSettings = 1`, whose code default is 0.** The live value is unknown. If it is 0, the feature logs an error at startup and forces itself OFF, so nobody is locked out and no purchase is possible.
 - `Enable` and `GrandfatherStage13` are **read at server start only**. `.reload` keeps the startup values.
 - Access checks use that startup state. If `EnablePlayerSettings` is switched to 0 mid-session, **even followed by `.reload config`**, the gate stays on, so access is **not** opened for free and no unpaid stage 13 can earn stage 14. Instead purchases and grandfathering are refused (`FeatureInactive`) and an error is logged, because gold would be saved but the purchase flag would not. A paid character who relogs while the store is off reads as unpaid until it is restored.
-- Purchase record: one `LOG_INFO` line on the `module` channel (Server.log by default) per purchase or refund. `character_settings` is not part of character dumps, so a transferred character keeps TBC (stage 8 marker) but not a paid Wrath flag.
+- Purchase record: one `LOG_INFO` line on the `module` channel (Server.log by default) per purchase or refund. `character_settings` is not part of character dumps: a **paid stage7 TBC character loses access to quest10259** after a dump/load if entitlement is missing; a paid Wrath character at raw13 may lose access too. **Block transfers** until an owner-approved tested procedure exists.
 
 **Thread safety.** Access checks run very often, including on map threads. They read only a small IP cache guarded by a shared mutex. The cache is filled on the login thread in `OnPlayerSendInitialPacketsBeforeAddToMap`, after the character's settings have loaded and before it enters a map (also on reconnect and worldport). It holds purchase bits only and is replaced on every load; it is deliberately not cleared on logout, which would briefly show a paid, still in-world character as unpaid. Core's `GetPlayerSetting` creates a missing slot as a side effect, so it is only called on the login thread or during a purchase.
 
@@ -74,7 +78,7 @@ All functions live on `sIndividualProgression`. Rules are in `src/IndividualProg
 | `HasExpansionEntitlement(player, Era::Tbc / Era::Wrath)` | Already owned? |
 | `CanPurchaseExpansion(player, era, costCopper)` | Pre-check for the gossip menu. It never charges |
 | `PurchaseExpansion(player, era, costCopper)` | The only purchase path |
-| `GetMaxServiceGrantableStage(player)` | Cap for any catch-up/tier service: 6 before TBC is owned, 12 before Wrath is owned |
+| `GetMaxServiceGrantableStage(player)` | Cap for catch-up/tier services: 6 without TBC, **7 for TBC-paid/raw7 awaiting 10259**, 12 after TBC entry but before Wrath |
 | `GetAccountEffectiveProgression(accountId)` | Account maximum for unlock checks (e.g. a vendor's account-unlock ceiling): equal to `GetAccountProgression` when OFF; an unpaid stage 13 counts as 12 when ON |
 
 **`PurchaseExpansion` steps:**
@@ -82,7 +86,7 @@ All functions live on `sIndividualProgression`. Rules are in `src/IndividualProg
 2. Check `HasEnoughMoney`.
 3. Charge.
 4. Store the flag.
-5. For TBC, grant stage 8.
+5. For TBC, **grant no stage**: payment writes only the paid entitlement, and the paid quest10259 reward later grants stage8. Wrath likewise never grants stage14.
 6. Verify. On failure, clear the flag **and refund**.
 7. `SaveToDB`.
 
@@ -112,7 +116,7 @@ That integration belongs to the Character Services fork and is not part of this 
   - bots and excluded accounts unchanged;
   - boss-only leaves the character unpaid;
   - wealthy without the boss is denied;
-  - paid TBC means stage 8 and no raid tier;
+  - paid TBC while at raw7 means **stage7 pending Into the Breach**; only handing in 10259 grants stage8; no raid tier is skipped;
   - paid Wrath means no stage write and no stage 14;
   - repeat purchase is never charged;
   - unpaid 13 means effective 12, so no Northrend or 70+ XP;
