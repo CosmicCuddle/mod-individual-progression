@@ -45,7 +45,9 @@ int main()
         "1 0 1 1 5000 1700000000 0 0  ",
         "1  0 1 1 5000 1700000000 0 0",
         "1 0 1 1 5000 1700000000 0 0",
-        "1 0 1 1 5000 1700000000 0 0 extra"
+        "1 0 1 1 5000 1700000000 0 0 extra",
+        "01 0 1 1 5000 1700000000 0 0 ",
+        "", " "
     };
     for (auto const& raw : malformed)
     {
@@ -53,12 +55,19 @@ int main()
         Player login1(guid);
         login1._LoadCharacterSettings(RawRows(guid));
         Check(login1.m_charSettingsMap.count(source) == 0, "invalid original must not enter cache");
+        // Previously a getter would implicitly create a zero settings vector.
+        Check(login1.GetPlayerSetting(source, 3).value == 0, "blocked read returns safe zero");
+        Check(login1.m_charSettingsMap.count(source) == 0, "blocked read cannot create paid cache");
+        login1.UpdatePlayerSetting(source, 2, 1);
+        Check(login1.m_charSettingsMap.count(source) == 0, "blocked direct write cannot create paid cache");
         Save(login1);
         Check(CharacterDatabase.rows[{guid, source}] == raw, "autosave must preserve original raw bytes");
 
         Player login2(guid);
         login2._LoadCharacterSettings(RawRows(guid));
         Check(login2.m_charSettingsMap.count(source) == 0, "second login still refuses malformed row");
+        Check(login2.GetPlayerSetting(source, 3).value == 0, "second-login blocked read");
+        login2.UpdatePlayerSetting(source, 0, 1);
         Save(login2);
         Check(CharacterDatabase.rows[{guid, source}] == raw, "second autosave still preserves original");
 
