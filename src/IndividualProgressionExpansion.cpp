@@ -342,7 +342,9 @@ public:
     // Defence in depth: Core's CompleteQuest invokes this veto BEFORE setting
     // quest COMPLETE. Conditions.ScriptName is not evaluated by our pinned
     // Core; and the reward hook fires too late to stop an unpaid quest reward.
-    // Does not touch other quests, OFF mode, GM/start-stage exemptions or bots.
+    // No change to OFF, bots/excluded accounts or start-stage exemptions.
+    // A GM targeting an unpaid normal character does NOT bypass this hook
+    // via .quest complete; the audited .ip set override remains available.
     bool OnPlayerBeforeQuestComplete(Player* player, uint32 questId) override
     {
         if (questId != INTO_THE_BREACH || !player ||
