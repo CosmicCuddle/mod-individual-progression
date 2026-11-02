@@ -3,6 +3,7 @@
 This tests SOURCE ONLY. Passing tests cannot establish new-bot startup/rehydration
 coverage, correct live identities, global cap behaviour or gameplay.
 """
+import re
 import unittest
 from itertools import product
 from pathlib import Path
@@ -59,7 +60,8 @@ class F14TbcFloor(unittest.TestCase):
         )
         self.assertEqual(snippet.count("ForceUpdateProgressionState("), 1,
                          "only one permitted stage writer inside the verified identity gate")
-        self.assertNotIn("UpdateProgressionState(", snippet)
+        self.assertIsNone(re.search(r"(?<!Force)UpdateProgressionState\\(", snippet),
+                          "must not silently add non-Force progression writes")
         self.assertNotIn("SetPhaseMask(", snippet)
 
     def test_pure_stage_policy_and_no_other_class_eras(self):
