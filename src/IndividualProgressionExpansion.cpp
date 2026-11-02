@@ -235,6 +235,12 @@ PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8
         // Visibility/share/reward gating is implemented separately.
         entryAvailable = sObjectMgr->GetQuestTemplate(66000 + TbcEntryStage) != nullptr &&
                          sObjectMgr->GetQuestTemplate(INTO_THE_BREACH) != nullptr;
+        // A pre-rewarded, nonrepeatable 10259 at raw stage 7 would strand
+        // the buyer: it cannot be handed in again. Until an owner-reviewed
+        // recovery rule exists, refuse the SALE before any money is moved.
+        // This is a release safeguard, not a completed migration solution.
+        if (player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED)
+            entryAvailable = false;
     }
 
     return CheckPurchase(facts, eraValue, player->HasEnoughMoney(costCopper), entryAvailable);
