@@ -340,3 +340,15 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 
 
 **CORE-PAID-ROW-READ-WRITE-BLOCK-20261102 reviewer follow-up:** fake-DB harness expanded with independent Grok L1/L2/L3 negative checks: unrelated source update while paid source is blocked, a deliberately poisoned in-memory paid cache entry unable to survive SaveToDB, and same-object reload after replacing malformed original with canonical valid data. Source patch and paid OFF defaults unchanged; requires new exact-head CI pass.
+
+### IP-PAID-TBC-DISABLED-DEFAULT-PREFLIGHT — no-stranding sale refusal (2 Nov 2026, DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Owner, context | CosmicCuddle, paid-era IP fork owner. Owner-final KT40 stage7 -> pay TBC still stage7 -> quest10259 rewards stage8; distinct Wrath direct effective13 purchase unchanged. Grok identified a confirmed source-level stranding when DisableDefaultProgression=1 in [coordination #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6588597481). |
+| Intended behaviour | Fail closed and refuse only TBC sale **before money moves** if IP default quest-based progression is disabled; result EntryUnavailable, no stage/gold mutation. No behaviour change for Wrath, paid flag OFF, or DisableDefaultProgression=0. This is a conservative source candidate, not owner final policy. |
+| Ownership/version | `CosmicCuddle/mod-individual-progression` isolated child of strict paid receipt [PR #39](https://github.com/CosmicCuddle/mod-individual-progression/pull/39) at exact 8c7d0532082e92f862a3bd715c7f08ad1289a0f0. Existing receipt and Core patch files untouched. |
+| Affected paths | `src/IndividualProgressionExpansion.cpp` narrow existing CanPurchaseExpansion TBC branch; `tests/test_ip_paid_tbc_disabled_progression_sale.py`; `docs/IP_PAID_TBC_DISABLED_DEFAULT_PROGRESSION_2026-11-02.md`; this append-only register. No SQL, DBC, Character Services, Playerbots, Core or conf changes. |
+| Dependencies/risks | Feature OFF means unchanged production behaviour. Conservative rejection prevents a permanently stranded TBC buyer but may make TBC purchases unavailable on specially configured disabled-progression realms; owner must approve alternative reward exception or refusal. Receipt commissioning and transfer issues still unresolved. |
+| Tests / release state | Source/policy negative tests drafted and will require exact-head CI, native Core/IP/Services link, disposable paid/unpaid 10259 reward and quest state, default progression toggles, gold and row persistence. No live build/game/DB change or merge, no production approval. |
+| Rollback | Discard source draft or leave paid feature OFF; if ever deployed, revert approved branch/binary with backup and verify ongoing purchased character records separately. |
