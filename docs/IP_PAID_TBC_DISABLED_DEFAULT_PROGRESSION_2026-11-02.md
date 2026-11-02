@@ -73,3 +73,27 @@ test startup config, real paid character settings, quest log and staged
 completion with DDP switching, as well as actual Core hook ordering; CI is
 source/policy evidence only. Undo by reverting this draft's header/policy/hook
 additions before merging. No host operation or payment has occurred.
+
+## 2 Nov — separate packet-level defence-in-depth, not full reward protection
+
+The pinned Core `QuestHandler.cpp::HandleQuestgiverChooseRewardOpcode` calls
+`CanRewardQuest` followed by `RewardQuest` for an already-COMPLETE quest;
+it does not call `CompleteQuest` (the PlayerScript veto) again. That is a
+**separate, real remaining route** past the original paid DDP guard.
+
+On an **isolated child of PR #41**, the new
+`IndividualProgression_PaidTbcQuestRewardPacketGuard` checks the normal
+`CMSG_QUESTGIVER_CHOOSE_REWARD` packet before Core processes it. It returns
+false only for a verified *already-paid, stage<8, gated normal human lacking
+stage8 start privilege*, when default progression is disabled, and only for
+quest 10259. It leaves all other packets to Core, does not alter the received
+packet, charge/refund money or mutate character/quest data. This is an
+extra safeguard for **the normal client reward hand-in**, not an assertion
+that command/script/server-internal `RewardQuest` calls are covered.
+
+**Release blocker stays active:** the pinned Core supplies no general
+pre-`RewardQuest` veto in its PlayerScript interface; all nonpacket paths,
+thread/context safety and complete quest hand-ins need independent Core
+review and compatible native build + disposable gameplay. No owner runtime,
+config, SQL or production changes authorised. Parent #41 remains frozen
+while its own native CI finishes. Rollback is discarding this unmerged child.
