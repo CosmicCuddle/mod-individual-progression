@@ -336,7 +336,26 @@ class IndividualProgression_PaidExpansionPlayerScript : public PlayerScript
 {
 public:
     IndividualProgression_PaidExpansionPlayerScript() : PlayerScript("IndividualProgression_PaidExpansion",
-        { PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN }) { }
+        { PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN,
+          PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE }) { }
+
+    // Defence in depth: Core's CompleteQuest invokes this veto BEFORE setting
+    // quest COMPLETE. Conditions.ScriptName is not evaluated by our pinned
+    // Core; and the reward hook fires too late to stop an unpaid quest reward.
+    // Does not touch other quests, OFF mode, GM/start-stage exemptions or bots.
+    bool OnPlayerBeforeQuestComplete(Player* player, uint32 questId) override
+    {
+        if (questId != INTO_THE_BREACH || !player ||
+            !sIndividualProgression->IsPaidExpansionActive() ||
+            !sIndividualProgression->isNormalAccount(player) ||
+            sIndividualProgression->HasExpansionEntitlement(player, Era::Tbc))
+            return true;
+
+        if (player->GetSession())
+            ChatHandler(player->GetSession()).PSendSysMessage(
+                "|cffffff00Purchase The Burning Crusade from Chronomancer Vezrath before completing Into the Breach.|r");
+        return false;
+    }
 
     // Login thread, after the character (and its settings) loaded from the
     // database and before it enters a map; also on reconnect and worldport.
