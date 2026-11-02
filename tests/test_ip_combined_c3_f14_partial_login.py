@@ -66,6 +66,19 @@ def without_f19_login_floor(src: str) -> str:
 
 PLAYER = without_f19_login_floor((ROOT / "src/IndividualProgressionPlayer.cpp").read_text())
 CORE = (ROOT / "src/IndividualProgression.cpp").read_text()
+# The legacy #13 port test compares the historical configuration block,
+# so remove only the new F14 pilot read/absent-PB-handler from that comparison.
+# All new F14 source guards are verified in test_ip_f14_tbc_floor_source.py.
+CORE_F14_HISTORICAL = CORE.replace(
+    '        sIndividualProgression->f14EnforceVerifiedRandomBotTbcFloorOnLogin = sConfigMgr->GetOption<bool>(\n'
+    '            "IndividualProgression.F14.EnforceVerifiedRandomBotTbcFloorOnLogin", false);\n', ""
+).replace(
+    '        if (sIndividualProgression->f14EnforceVerifiedRandomBotTbcFloorOnLogin)\n'
+    '        {\n'
+    '            LOG_ERROR("module", "Individual Progression F14 TBC RandomBot floor requested without Playerbots header: forcing this incomplete feature OFF");\n'
+    '            sIndividualProgression->f14EnforceVerifiedRandomBotTbcFloorOnLogin = false;\n'
+    '        }\n', ""
+)
 HEADER = (ROOT / "src/IndividualProgression.h").read_text()
 CONF = (ROOT / "conf/individualProgression.conf.dist").read_text()
 
@@ -200,8 +213,8 @@ class PortedFromSource13(unittest.TestCase):
     def test_config_read_and_header_member_from_13(self):
         src13 = git_show(SOURCE_13, "src/IndividualProgression.cpp")
         block = re.search(r'        sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = .*?#endif\n', src13, re.S).group(0)
-        self.assertEqual(CORE.count(block), 1)
-        self.assertIn("enforceGroupRules, f14PreserveVerifiedRandomBotStageOnLogin, EnableSetRepCommand", HEADER)
+        self.assertEqual(CORE_F14_HISTORICAL.count(block), 1)
+        self.assertIn("enforceGroupRules, f14PreserveVerifiedRandomBotStageOnLogin, f14EnforceVerifiedRandomBotTbcFloorOnLogin, EnableSetRepCommand", HEADER)
 
     def test_conf_block_from_13(self):
         conf13 = git_show(SOURCE_13, "conf/individualProgression.conf.dist")
