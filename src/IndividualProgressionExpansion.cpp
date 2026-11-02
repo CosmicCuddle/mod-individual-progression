@@ -326,6 +326,16 @@ void IndividualProgression::SendPaidExpansionReminder(Player* player)
     {
         if (!ShouldRemind(facts, era))
             continue;
+        // A stage-7 character whose nonrepeatable 10259 was already
+        // rewarded cannot buy passage until the legacy quest is reconciled.
+        // Do not repeatedly direct them to a vendor that must refuse sale.
+        if (era == Era::Tbc && facts.rawStage < TbcEntryStage &&
+            player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED)
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage(
+                "|cffffff00Into the Breach is already completed, but your progression is still stage 7. Contact server staff to review TBC passage. No purchase was processed.|r");
+            continue;
+        }
         ChatHandler(player->GetSession()).PSendSysMessage(
             "|cffffff00You have completed the requirements to unlock {}! Visit {} to purchase access.|r",
             EraName(era), paidExpansionVendorName);
