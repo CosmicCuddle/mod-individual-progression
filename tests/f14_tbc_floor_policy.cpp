@@ -1,6 +1,7 @@
 #include "../src/IndividualProgressionF14LoginPolicy.h"
 #include <cassert>
 #include <cstdint>
+#include <initializer_list>
 
 namespace P = IndividualProgressionF14LoginPolicy;
 
