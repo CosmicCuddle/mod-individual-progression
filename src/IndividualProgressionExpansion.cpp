@@ -15,6 +15,10 @@
 #include "World.h"
 #include <ctime>
 #include "AllCreatureScript.h"
+#include "ScriptDefines/ServerScript.h"
+#include "Opcodes.h"
+#include "WorldPacket.h"
+#include "WorldSession.h"
 #include "ScriptedGossip.h"
 
 #include <limits>
@@ -559,8 +563,50 @@ public:
     }
 };
 
+// Defence-in-depth for a quest already COMPLETE before default progression
+// was disabled. Pinned Core's choose-reward handler calls RewardQuest directly;
+// it does NOT invoke OnPlayerBeforeQuestComplete again. Only block the normal
+// client packet when the same narrowly verified paid human would be stranded.
+// Other direct Core reward call sites still need an authoritative pre-reward
+// veto before the paid feature can be enabled on a real realm.
+class IndividualProgression_PaidTbcQuestRewardPacketGuard final : public ServerScript
+{
+public:
+    IndividualProgression_PaidTbcQuestRewardPacketGuard()
+        : ServerScript("IndividualProgression_PaidTbcQuestRewardPacketGuard",
+            {SERVERHOOK_CAN_PACKET_RECEIVE}) { }
+
+    bool CanPacketReceive(WorldSession* session, WorldPacket const& packet) override
+    {
+        if (packet.GetOpcode() != CMSG_QUESTGIVER_CHOOSE_REWARD || !session ||
+            !session->GetPlayer() || packet.size() < 16)
+            return true;
+
+        Player* player = session->GetPlayer();
+        if (!sIndividualProgression->MustHoldPaidTbcQuestReward(player))
+            return true;
+
+        // Core QuestHandler.cpp consumes guid (8 bytes), quest id and reward
+        // index in precisely this order. Never mutate the caller's read cursor.
+        WorldPacket copy(packet);
+        copy.rpos(0);
+        ObjectGuid questGiver;
+        uint32 questId = 0;
+        uint32 reward = 0;
+        copy >> questGiver >> questId >> reward;
+        if (questId != INTO_THE_BREACH)
+            return true;
+
+        // The quest must remain COMPLETE/unrewarded; do not alter its
+        // objectives, bought entitlement, money or progression markers.
+        // Core must never run RewardQuest for this client packet.
+        return false;
+    }
+};
+
 void AddSC_ip_paid_expansion()
 {
     new IndividualProgression_PaidExpansionPlayerScript();
     new IndividualProgression_PaidExpansionQuestGossip();
+    new IndividualProgression_PaidTbcQuestRewardPacketGuard();
 }
