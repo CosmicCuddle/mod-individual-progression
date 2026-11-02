@@ -513,10 +513,27 @@ class UnpaidTbcQuestAccessGate(unittest.TestCase):
             return true;
         }"""
         self.assertEqual(" ".join(method.split()), " ".join(expected.split()))
-        self.assertIn('new IndividualProgression_PaidExpansionQuestGossip();',
-                      body(EXP, "void AddSC_ip_paid_expansion()"))
-        self.assertIn("PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT",
-                      body(EXP, "class IndividualProgression_PaidExpansionPlayerScript"))
+        # Do not count commented-out hook registration as working code.
+        # Pin the whole registration body and reject preprocessor disabled code
+        # (#if 0 evades ordinary comment stripping).
+        registered = body(EXP, "void AddSC_ip_paid_expansion()")
+        self.assertNotRegex(registered, r"(?m)^\s*#\s*if(?:def|ndef)?\b")
+        active = code(re.sub(r"/\*.*?\*/", "", registered, flags=re.S))
+        expected_add_sc = """void AddSC_ip_paid_expansion()
+        {
+            new IndividualProgression_PaidExpansionPlayerScript();
+            new IndividualProgression_PaidExpansionQuestGossip();
+        }"""
+        self.assertEqual(" ".join(active.split()), " ".join(expected_add_sc.split()))
+        self.assertEqual(active.count("new IndividualProgression_PaidExpansionQuestGossip();"), 1)
+        self.assertEqual(EXP.count("new IndividualProgression_PaidExpansionQuestGossip();"), 1)
+
+        script = body(EXP, "class IndividualProgression_PaidExpansionPlayerScript")
+        self.assertNotRegex(script, r"(?m)^\s*#\s*if(?:def|ndef)?\b")
+        script = code(re.sub(r"/\*.*?\*/", "", script, flags=re.S))
+        self.assertIn("PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE, PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT })",
+                      " ".join(script.split()))
+        self.assertEqual(script.count("PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT"), 1)
         self.assertNotIn("GetDialogStatus", EXP)
         self.assertNotIn("creature_template", EXP)
 
