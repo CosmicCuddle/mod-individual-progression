@@ -337,3 +337,6 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Files/dependencies | Reviewable pinned patch for Grimfeather Core `PlayerSettings.cpp` and `Player.h` (two original SHA/blob guards); guarded Player bool, mock unit test, negative model and CI. The owner Core fork is not connected; no installed Core, SQL, client/DBC/config changes. |
 | Risks/tests | Source tests compile actual protected .cpp against mocked Player/DB with both getter/setter calls; real Player.h only compiled in future native link. Need independent Grok exact-SHA review, real MySQL gameplay/transfer/canonical commissioning tests. |
 | Live/rollback | DRAFT, default paid OFF, no owner data touched. Discard isolated child to retain first #38 patch. No production install without owner approval, backups and regression tests. |
+
+
+**CORE-PAID-ROW-READ-WRITE-BLOCK-20261102 reviewer follow-up:** fake-DB harness expanded with independent Grok L1/L2/L3 negative checks: unrelated source update while paid source is blocked, a deliberately poisoned in-memory paid cache entry unable to survive SaveToDB, and same-object reload after replacing malformed original with canonical valid data. Source patch and paid OFF defaults unchanged; requires new exact-head CI pass.

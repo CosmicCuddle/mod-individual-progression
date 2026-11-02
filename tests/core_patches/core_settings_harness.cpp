@@ -60,7 +60,15 @@ int main()
         Check(login1.m_charSettingsMap.count(source) == 0, "blocked read cannot create paid cache");
         login1.UpdatePlayerSetting(source, 2, 1);
         Check(login1.m_charSettingsMap.count(source) == 0, "blocked direct write cannot create paid cache");
+        // Grok L1: blocking a malformed paid source must not disable all
+        // unrelated settings updates on the SAME flagged player.
+        login1.UpdatePlayerSetting("ac_default", 0, 77);
+        Check(login1.GetPlayerSetting("ac_default", 0).value == 77, "unrelated source can be updated");
+        // Grok L2: even if an unrelated future caller inserts a paid vector
+        // directly into the public cache, the save guard must preserve RAW.
+        login1.m_charSettingsMap[source] = PlayerSettingVector{PlayerSetting(99)};
         Save(login1);
+        Check(CharacterDatabase.rows[{guid, "ac_default"}] == "77 ", "unrelated source saved on flagged player");
         Check(CharacterDatabase.rows[{guid, source}] == raw, "autosave must preserve original raw bytes");
 
         Player login2(guid);
@@ -76,7 +84,18 @@ int main()
     }
 
     auto const valid = std::string("1 0 1 1 5000 1700000000 0 0 ");
+    // Grok L3: same object can be re-loaded after operator repair. Its
+    // blocked-source flag must reset BEFORE the new valid row is read.
+    CharacterDatabase.rows[{guid, source}] = "x 1 0 1 1 5000 1700000000 0 0";
+    Player reloaded(guid);
+    reloaded._LoadCharacterSettings(RawRows(guid));
+    Check(reloaded.GetPlayerSetting(source, 0).value == 0, "malformed first load denied");
     CharacterDatabase.rows[{guid, source}] = valid;
+    reloaded._LoadCharacterSettings(RawRows(guid));
+    Check(reloaded.GetPlayerSetting(source, 0).value == 1, "same-object reload reads repaired paid data");
+    reloaded.UpdatePlayerSetting(source, 0, 1);
+    Save(reloaded);
+    Check(CharacterDatabase.rows[{guid, source}] == valid, "repaired same-object data persists safely");
     Player validLogin(guid);
     validLogin._LoadCharacterSettings(RawRows(guid));
     Check(validLogin.m_charSettingsMap.count(source) == 1, "valid paid row must load");
