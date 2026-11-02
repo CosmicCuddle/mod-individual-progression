@@ -38,6 +38,7 @@ struct FakeField
     template <typename T> T Get() const;
 };
 template <> inline std::string FakeField::Get<std::string>() const { return data; }
+using Field = FakeField; // Core's public DB field alias expected by PlayerSettings.cpp
 
 struct FakeRows
 {
