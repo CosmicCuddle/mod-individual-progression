@@ -294,3 +294,14 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Dependencies/risks | Pinned Core `PlayerSettings.cpp` malformed-token dropping and `SaveToDB` malformed-row overwrite, missing/pdump source rows, owner-approved bootstrap, actual transaction wiring and costs are **not solved**. No SQL, Core, Playerbots, client, DBC or config change. |
 | Tests / live | Disposable C++17/20 policy CI and negative raw-token cases authored, job results must be checked; no native Worldserver, DB, money or gameplay claim. Default feature OFF. |
 | Rollback | Discard isolated child to restore #35 unchanged; no production rollback or DB migration. Require owner approval before any live activation. |
+
+
+### IP-RECEIPT-STRICT-RUNTIME-20261102 — guarded payment source candidate (DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Owner/component | CosmicCuddle; CS01 interim Claude receipt takeover, isolated child of policy #36 exact `73ce3be8df5fc2fadf2af3e5a52d9e2e82077c1c`. |
+| Desired behaviour | Raw v1 validated on login/account; no missing/invalid entitlement; no debit without valid ledger; amount/time prepared before charge and saved through Player in-memory settings in same SaveToDB transaction. TBC raw7 and Wrath effective13 unchanged. |
+| Files | `src/IndividualProgression.h`, `src/IndividualProgressionExpansion.cpp`, source contracts, this register and receipt memo; standalone policy header remains unchanged. No SQL/config/DB/Core/Playerbots/client changes. |
+| Risks/tests | **Blocking:** no approved new/legacy ledger bootstrap, Core permissive parser may rewrite malformed bytes, pdump omits settings, real native build & gameplay pending. No production money tests. Fail-closed store means no owner character can buy without pre-provisioned valid v1 row. |
+| Live/rollback | Feature OFF, unmerged. Discard child to restore strict policy #36. Owner staging, backups and explicit approval required. |

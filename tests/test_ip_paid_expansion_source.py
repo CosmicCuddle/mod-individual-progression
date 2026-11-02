@@ -282,7 +282,9 @@ class AccessWiring(unittest.TestCase):
         self.assertNotIn("sIndividualProgression->GetAccountProgression(", PLAYER)
         acct = code(body(EXP, "uint8 IndividualProgression::GetAccountEffectiveProgression(uint32 accountId)"))
         self.assertIn("if (!sIndividualProgression->IsPaidExpansionActive())\n        return GetAccountProgression(accountId);", acct)
-        self.assertIn("EffectiveAccountStage(raw, SettingsSlotSet(data, SettingWrath))", acct)
+        self.assertIn("ReceiptPolicy::DecodeRaw(data, !fields[1].IsNull())", acct)
+        self.assertIn("EffectiveAccountStage(raw, verifiedWrath)", acct)
+        self.assertNotIn("SettingsSlotSet(data, SettingWrath)", acct)
         self.assertIn("LEFT JOIN character_settings s ON s.guid = c.guid AND s.source = '{}'", acct)
         # The raw account reader stays unchanged for every other caller.
         sig = "uint8 IndividualProgression::GetAccountProgression(uint32 accountId)"
@@ -530,6 +532,33 @@ class UnpaidTbcQuestAccessGate(unittest.TestCase):
                     self.assertEqual(result, (enabled, normal, entitled) == (True, True, False))
 
 
+class StrictReceiptRuntime(unittest.TestCase):
+    def test_raw_settings_are_decoded_before_ledger_or_account_entitlement(self):
+        loader = code(body(EXP, "void IndividualProgression::LoadPaidExpansionEntitlement(Player* player)"))
+        reader = code(body(EXP, "static ReceiptPolicy::Decoded ReadStrictPaidLedger(uint32 guid)"))
+        self.assertIn("SELECT data FROM character_settings", reader)
+        self.assertIn("ReceiptPolicy::DecodeRaw(", reader)
+        self.assertIn("ReceiptPolicy::Decoded const ledger = ReadStrictPaidLedger(guid);", loader)
+        self.assertNotIn("GetPlayerSetting(", loader)
+        self.assertIn("_paidExpansionLedgers.erase(guid);", loader)
+        acct = code(body(EXP, "uint8 IndividualProgression::GetAccountEffectiveProgression(uint32 accountId)"))
+        self.assertIn("ReceiptPolicy::DecodeRaw(data, !fields[1].IsNull())", acct)
+
+    def test_denied_unknown_row_and_receipt_built_before_money(self):
+        can = code(body(EXP, "PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)"))
+        purchase = code(body(EXP, "PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)"))
+        self.assertIn("_paidExpansionLedgers.find(", can)
+        self.assertLess(can.index("_paidExpansionLedgers.find("), can.index("return CheckPurchase("))
+        self.assertLess(purchase.index("ReceiptPolicy::RecordPurchase("),
+                        purchase.index("player->ModifyMoney(-static_cast<int32>(costCopper));"))
+        self.assertLess(purchase.index("if (!opened)"), purchase.index("uint32 const moneySlot"))
+        self.assertLess(purchase.index("uint32 const moneySlot"), purchase.index("player->SaveToDB(false, false);"))
+        self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot", purchase)
+        self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, timeSlot", purchase)
+        self.assertEqual(purchase.count("player->SaveToDB(false, false);"), 1)
+        self.assertNotIn("PlayerSettingsStore::UpdateSetting(", purchase)
+        self.assertNotIn("CharacterDatabase.Execute(", purchase)
+
 class StorageAndThreads(unittest.TestCase):
     def test_hot_path_reads_only_ip_cache(self):
         facts = code(body(EXP, "CharacterFacts IndividualProgression::GetExpansionFacts(Player* player)"))
@@ -539,7 +568,7 @@ class StorageAndThreads(unittest.TestCase):
     def test_settings_store_used_only_on_login_thread_or_purchase(self):
         users = {name for name in re.findall(r"\n(?:void|bool|uint8|PurchaseResult|CharacterFacts) IndividualProgression::(\w+)\(", EXP)
                  if "GetPlayerSetting" in body(EXP, f"IndividualProgression::{name}(")}
-        self.assertEqual(users, {"LoadPaidExpansionEntitlement", "EvaluatePaidExpansionGrandfather"})
+        self.assertEqual(users, {"EvaluatePaidExpansionGrandfather"})
 
     def test_cache_filled_before_map_add_and_kept_across_logout(self):
         script = body(EXP, "class IndividualProgression_PaidExpansionPlayerScript")

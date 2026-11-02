@@ -18,6 +18,7 @@
 #include "AreaDefines.h"
 #include "IWorld.h"
 #include "IndividualProgressionExpansionPolicy.h"
+#include "IndividualProgressionReceiptPolicy.h"
 
 // Lets dependent modules (e.g. Character Services) detect the paid expansion
 // API at compile time and keep building against an IP without it.
@@ -505,6 +506,8 @@ private:
     uint8 GetConfiguredStartStage(Player* player) const;
     void SetPaidExpansionFlag(Player* player, uint32 index, uint32 value);
     std::unordered_map<uint32, uint8> _paidExpansionFlags;
+    // Missing or invalid RAW settings are unknown, never free purchases.
+    std::unordered_map<uint32, IndividualProgressionReceiptPolicy::Ledger> _paidExpansionLedgers;
     std::shared_mutex _paidExpansionLock;
 };
 
