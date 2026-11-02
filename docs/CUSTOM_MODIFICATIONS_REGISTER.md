@@ -283,3 +283,14 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Known exceptions | Direct quest query still displays details; ! icon persists; Playerbots-driven normal-account AI bypasses the post-add PlayerScript; offline GM commands bypass. This is an effective online human accept defence, **not** a full pre-take or all-account quest-invisibility gate. Client flicker/quest-tracker artifact and modified world quest-giver source require real-game verification. |
 | Verification | CI/native and game acceptance **NOT yet verified at creation**. Hook ordering source-checked on pinned Core `8daffdabe...`; tests are contracts, not gameplay. |
 | Live / rollback | DRAFT, unmerged, paid OFF; discard isolated child to retain #34. Owner approval, restorable backups and latest joint Worldserver/quest gameplay before enabling. |
+
+### IP-PAID-RECEIPT-STRICT-LEDGER-20261102 — CS01 interim receipt coding (DRAFT, source/model only)
+
+| Field | Record |
+| --- | --- |
+| Owner / developer | CosmicCuddle; CS01 Maintenance temporary takeover from Claude/CS03-IP by explicit owner request. Child of IP #35 source `3a9997984ea827223e3cb31022b1cfe8cdf7c75c`; Claude's unreported work remains untouched. |
+| Intended behaviour | Validate raw `ip_paid_expansion` character settings with version/presence sentinel and per-era money/timestamp pairs. Refuse legacy/missing/malformed/shifting/unsupported rows rather than inferring zero, gift entitlement or recharging; TBC purchase still must remain raw stage7, Wrath effective13. |
+| Affected files | New `src/IndividualProgressionReceiptPolicy.h`, `tests/receipt_ledger_policy.cpp`, `.github/workflows/ip-receipt-ledger-policy-20261102.yml`, `docs/IP_RECEIPT_TAKEOVER_2026-11-02.md`, this append. No existing runtime C++ modified by this first slice. |
+| Dependencies/risks | Pinned Core `PlayerSettings.cpp` malformed-token dropping and `SaveToDB` malformed-row overwrite, missing/pdump source rows, owner-approved bootstrap, actual transaction wiring and costs are **not solved**. No SQL, Core, Playerbots, client, DBC or config change. |
+| Tests / live | Disposable C++17/20 policy CI and negative raw-token cases authored, job results must be checked; no native Worldserver, DB, money or gameplay claim. Default feature OFF. |
+| Rollback | Discard isolated child to restore #35 unchanged; no production rollback or DB migration. Require owner approval before any live activation. |
