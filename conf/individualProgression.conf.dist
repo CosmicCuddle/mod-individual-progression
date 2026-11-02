@@ -43,6 +43,22 @@ IndividualProgression.EnforceGroupRules = 0
 #
 IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0
 
+# IndividualProgression.F14.EnforceVerifiedRandomBotTbcFloorOnLogin
+#
+#        DRAFT — OFF by default. Positive RandomBot-only login stage-floor
+#        experiment for Blood Elf/Draenei race10/11. Only on a HEADLESS
+#        session, positive Playerbots RandomBot GUID and IP bot-account match:
+#        preserve existing raw stage >=max(8,level band), otherwise set RAW
+#        rewarded stage to 8 for lvl<=70 or 13 for lvl>=71.
+#        May grant stage8 even when the global Vanilla ProgressionLimit <8;
+#        this does NOT raise human limits or allow cross-era grouping.
+#        Separate non-login Bot creation/rehydration/reset protections,
+#        observer-specific invisibility, and template/DB/stage history
+#        checks are STILL required. No automatic migration or production
+#        enablement without owner approval and restorable character DB.
+#
+IndividualProgression.F14.EnforceVerifiedRandomBotTbcFloorOnLogin = 0
+
 # IndividualProgression.PaidExpansion.Enable
 #
 #        DRAFT - paid expansion entitlement. Read at server start only.
