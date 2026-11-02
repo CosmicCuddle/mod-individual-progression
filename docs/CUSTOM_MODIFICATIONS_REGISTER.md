@@ -352,3 +352,20 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Dependencies/risks | Feature OFF means unchanged production behaviour. Conservative rejection prevents a permanently stranded TBC buyer but may make TBC purchases unavailable on specially configured disabled-progression realms; owner must approve alternative reward exception or refusal. Receipt commissioning and transfer issues still unresolved. |
 | Tests / release state | Source/policy negative tests drafted and will require exact-head CI, native Core/IP/Services link, disposable paid/unpaid 10259 reward and quest state, default progression toggles, gold and row persistence. No live build/game/DB change or merge, no production approval. |
 | Rollback | Discard source draft or leave paid feature OFF; if ever deployed, revert approved branch/binary with backup and verify ongoing purchased character records separately. |
+
+
+**IP-PAID-TBC-DISABLED-DEFAULT-PREFLIGHT addendum (Part 18, 2 Nov 2026):**
+Additional no-stranding safeguard protects a character who already purchased
+TBC but has not yet completed 10259 when default quest progression later
+becomes disabled. `IndividualProgression::MustHoldPaidTbcQuestReward` uses
+the real per-character paid bit, raw stage, account eligibility, and start
+privilege; the before-complete hook refuses consuming the quest without
+making a stage, gold, character setting or quest-state write. Added pure
+C++ source-policy acceptance checks and Python source wiring checks.
+Affects `IndividualProgression.h`,
+`IndividualProgressionExpansion.cpp`,
+`IndividualProgressionExpansionPolicy.h`, and corresponding tests.
+Depends on Core before-complete hook and strict ledger reads; native link
+and actual staged gameplay remain unproven. Paid feature default OFF.
+Rollback: revert reviewed draft changes; never delete paid ledger data.
+Owner still decides refusal vs narrow paid quest grant under DDP.
