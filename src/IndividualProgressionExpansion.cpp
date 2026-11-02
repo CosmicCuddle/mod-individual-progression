@@ -229,7 +229,13 @@ PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8
     CharacterFacts const facts = GetExpansionFacts(player);
     bool entryAvailable = true;
     if (IsKnownEra(eraValue) && static_cast<Era>(eraValue) == Era::Tbc)
-        entryAvailable = sObjectMgr->GetQuestTemplate(66000 + TbcEntryStage) != nullptr;
+    {
+        // Never take money if either the stage-8 marker or the actual
+        // Into the Breach (10259) entry quest is missing from this world.
+        // Visibility/share/reward gating is implemented separately.
+        entryAvailable = sObjectMgr->GetQuestTemplate(66000 + TbcEntryStage) != nullptr &&
+                         sObjectMgr->GetQuestTemplate(INTO_THE_BREACH) != nullptr;
+    }
 
     return CheckPurchase(facts, eraValue, player->HasEnoughMoney(costCopper), entryAvailable);
 }
