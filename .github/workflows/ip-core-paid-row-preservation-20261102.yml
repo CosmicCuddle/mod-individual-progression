@@ -1,0 +1,56 @@
+name: Pinned Core malformed paid-row preservation patch (NO HOST)
+
+on:
+  pull_request:
+    paths:
+      - tests/core_patches/preserve_paid_receipt_row.patch
+      - tests/test_core_paid_settings_preservation.py
+      - .github/workflows/ip-core-paid-row-preservation-20261102.yml
+      - docs/IP_CORE_PAID_SETTINGS_PRESERVE_2026-11-02.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  protect-core-raw-paid-row:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - name: Checkout IP patch and test at exact PR head
+        uses: actions/checkout@v4
+        with:
+          path: ip
+          persist-credentials: false
+      - name: Checkout immutable Grimfeather Core — no upstream writes
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          path: acore
+          persist-credentials: false
+      - name: Require exact Core source blob, apply patch on disposable runner only
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=src/server/game/Entities/Player/PlayerSettings.cpp
+          test "$(git -C acore rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
+          test "$(git -C acore rev-parse HEAD:$file)" = f1eb86367ce69111867ef7187125f5fe456c5367
+          git -C acore apply --check ../ip/tests/core_patches/preserve_paid_receipt_row.patch
+          git -C acore apply ../ip/tests/core_patches/preserve_paid_receipt_row.patch
+          git -C acore diff --check
+          test "$(git -C acore diff --name-only)" = "$file"
+          grep -Fq 'SerializeSettingsData(parsed) == data' acore/$file
+          grep -Fq 'if (unsafePaidRow)' acore/$file
+          grep -Fq 'if (!PlayerSettingsStore::IsCanonicalPaidReceiptRow(source, data))' acore/$file
+      - name: Negative laundering fixtures and source contract (model, not real Core runtime)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ip
+          python3 -B -m unittest discover -s tests -p test_core_paid_settings_preservation.py -v
+      - name: Safety boundary
+        run: |
+          echo 'Only one pinned Core source file modified in CI workspace. No fork updated.'
+          echo 'Model does not prove native Worldserver compile, login/gameplay or real DB persistence.'
+          echo 'Paid mode must remain OFF; no owner data, SQL, payments or deployment.'
