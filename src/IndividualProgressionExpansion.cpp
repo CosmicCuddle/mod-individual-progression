@@ -379,6 +379,25 @@ public:
     void OnPlayerLogin(Player* player) override
     {
         sIndividualProgression->EvaluatePaidExpansionGrandfather(player);
+
+        // Core has no pre-RewardQuest veto: a saved COMPLETE from an offline GM
+        // command or before this feature was enabled could otherwise be rewarded
+        // while the unpaid stage-8 grant is denied, permanently stranding 10259.
+        // Defer ONLY that saved status; IncompleteQuest preserves kill progress,
+        // quest ownership, stage markers, and already-REWARDED quest history.
+        if (player && sIndividualProgression->IsPaidExpansionActive() &&
+            sIndividualProgression->isNormalAccount(player) &&
+            !sIndividualProgression->HasExpansionEntitlement(player, Era::Tbc) &&
+            player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_COMPLETE)
+        {
+            player->IncompleteQuest(INTO_THE_BREACH);
+            if (player->GetSession())
+                ChatHandler(player->GetSession()).PSendSysMessage(
+                    "|cffffff00Into the Breach has been kept in your quest log without losing objective progress. Purchase TBC passage before claiming its reward.|r");
+            LOG_INFO("module", "IndividualProgression: deferred unpaid character {} quest 10259 completion at login",
+                player->GetGUID().GetCounter());
+        }
+
         sIndividualProgression->SendPaidExpansionReminder(player);
     }
 

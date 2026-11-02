@@ -371,6 +371,60 @@ class PurchaseReminderSafety(unittest.TestCase):
         self.assertNotIn("ModifyMoney(", reminder)
 
 
+class SavedCompleteQuestSafety(unittest.TestCase):
+    """Source contract for login-only fail-closed deferral, NOT a gameplay test."""
+
+    def test_only_unpaid_normal_complete_10259_is_deferred_on_login(self):
+        login = code(body(EXP, "void OnPlayerLogin(Player* player) override"))
+        # Pin the *whole* guard; losing just one restriction must fail this test.
+        guard = " ".join(login.split())
+        required = (
+            "if (player && sIndividualProgression->IsPaidExpansionActive() && "
+            "sIndividualProgression->isNormalAccount(player) && "
+            "!sIndividualProgression->HasExpansionEntitlement(player, Era::Tbc) && "
+            "player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_COMPLETE)"
+        )
+        self.assertIn(required, guard)
+        self.assertEqual(login.count("player->IncompleteQuest(INTO_THE_BREACH);"), 1)
+        self.assertLess(login.index("EvaluatePaidExpansionGrandfather(player);"),
+                        login.index("player->IncompleteQuest(INTO_THE_BREACH);"))
+        self.assertLess(login.index("player->IncompleteQuest(INTO_THE_BREACH);"),
+                        login.index("SendPaidExpansionReminder(player);"))
+
+    def test_only_restores_status_and_keeps_items_gold_quest_objectives(self):
+        login = code(body(EXP, "void OnPlayerLogin(Player* player) override"))
+        self.assertIn("player->IncompleteQuest(INTO_THE_BREACH);", login)
+        self.assertIn("if (player->GetSession())", login)
+        self.assertIn("without losing objective progress", login)
+        self.assertIn('LOG_INFO("module",', login)
+        for forbidden in ("RemoveQuest(", "RemoveActiveQuest(", "SetRewardedQuest(",
+                          "QUEST_STATUS_REWARDED", "ForceUpdateProgressionState(",
+                          "UpdateProgressionState(", "ModifyMoney(", "SaveToDB("):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, login)
+
+    def test_feature_off_bot_start_privilege_and_paid_cases_are_left_alone(self):
+        # Model of the exact four source predicates, not Core gameplay execution.
+        def defer(enabled, normal, entitled, complete):
+            return enabled and normal and not entitled and complete
+
+        for enabled in (False, True):
+            for normal in (False, True):
+                for entitled in (False, True):
+                    for complete in (False, True):
+                        with self.subTest(enabled=enabled, normal=normal,
+                                          entitled=entitled, complete=complete):
+                            self.assertEqual(defer(enabled, normal, entitled, complete),
+                                             (enabled, normal, entitled, complete) ==
+                                             (True, True, False, True))
+
+    def test_pre_map_refresh_remains_read_only_and_no_new_hooks(self):
+        refresh = code(body(EXP, "void OnPlayerSendInitialPacketsBeforeAddToMap("))
+        self.assertIn("LoadPaidExpansionEntitlement(player);", refresh)
+        self.assertNotIn("IncompleteQuest(", refresh)
+        self.assertEqual(EXP.count("PLAYERHOOK_ON_LOGIN"), 1)
+
+
 class StorageAndThreads(unittest.TestCase):
     def test_hot_path_reads_only_ip_cache(self):
         facts = code(body(EXP, "CharacterFacts IndividualProgression::GetExpansionFacts(Player* player)"))
