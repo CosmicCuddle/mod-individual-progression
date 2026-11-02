@@ -34,7 +34,9 @@ int main()
     check(!HasPaidReceipt(value.ledger, Era::Tbc));
     check(!HasPaidReceipt(value.ledger, Era::Wrath));
     check(Serialize(value.ledger) == clean);
-    check(DecodeRaw("0 0 1 1 0 0 0 0", true).status == Status::Valid);
+    check(DecodeRaw("0 0 1 1 0 0 0 0", true).status == Status::Malformed);
+    check(DecodeRaw("00 0 1 1 0 0 0 0 ", true).status == Status::Malformed);
+    check(DecodeRaw("1 0 1 1 5000 1700000000 0 0", true).status == Status::Malformed);
 
     check(DecodeRaw(clean, false).status == Status::Missing);
     check(DecodeRaw("", false).status == Status::Missing);

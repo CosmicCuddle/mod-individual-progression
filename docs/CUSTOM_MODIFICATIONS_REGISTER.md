@@ -323,3 +323,6 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 
 
 **IP-RECEIPT-CORE-RAW-PRESERVE-20261102 compiled harness follow-up:** Added `tests/core_patches/stubs/` plus `tests/core_patches/core_settings_harness.cpp` and CI GCC/Clang C++17/C++20 compilation of the actual patched Core `PlayerSettings.cpp` with a disposable fake database. Tests malformed two-login/save/offline writes, valid paid/grandfather and unrelated setting source. No production file or player data touched; native full Worldserver/MySQL still separately required.
+
+
+**IP-RECEIPT-CORE-RAW-PRESERVE-20261102 canonical agreement:** Tightened actual IP strict `DecodeRaw` to accept exactly the pinned Core serializer's v1 eight-slot canonical text, preserving noncanonical original rows without Core cache rewriting; added missing-trailing/leading-zero negatives. This is an explicit data-integrity restriction, not a migration. Owner-approved reconciliation needed for noncanonical original paid rows; Core patch itself unchanged.
