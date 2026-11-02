@@ -329,6 +329,8 @@ class PurchaseSequence(unittest.TestCase):
         self.assertIn("costCopper > static_cast<uint32>(std::numeric_limits<int32>::max())", can)
         self.assertIn("return PurchaseResult::InvalidRequest;", can)
         self.assertIn("sObjectMgr->GetQuestTemplate(66000 + TbcEntryStage) != nullptr", can)
+        self.assertIn("sObjectMgr->GetQuestTemplate(INTO_THE_BREACH) != nullptr", can)
+        self.assertIn("&&", can)
         self.assertIn("return CheckPurchase(facts, eraValue, player->HasEnoughMoney(costCopper), entryAvailable);", can)
 
 
