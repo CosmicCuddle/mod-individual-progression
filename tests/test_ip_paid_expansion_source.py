@@ -330,7 +330,10 @@ class PurchaseSequence(unittest.TestCase):
         self.assertIn("return PurchaseResult::InvalidRequest;", can)
         self.assertIn("sObjectMgr->GetQuestTemplate(66000 + TbcEntryStage) != nullptr", can)
         self.assertIn("sObjectMgr->GetQuestTemplate(INTO_THE_BREACH) != nullptr", can)
+        self.assertIn("player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED", can)
+        self.assertIn("entryAvailable = false;", can)
         self.assertIn("&&", can)
+        self.assertLess(can.index("GetQuestTemplate(INTO_THE_BREACH)"), can.index("GetQuestStatus(INTO_THE_BREACH)"))
         self.assertIn("return CheckPurchase(facts, eraValue, player->HasEnoughMoney(costCopper), entryAvailable);", can)
 
 
