@@ -64,7 +64,23 @@ class Provenance(unittest.TestCase):
                              "src/IndividualProgressionF14LoginPolicy.h",
                              "src/IndividualProgressionPlayer.cpp").strip(), "")
         self.assertEqual(git("diff", "--name-only", BASE_IP_30, "HEAD", "--",
-                             "data", "optional", "sql", "conf").strip(), "")
+                             "data", "optional", "sql").strip(), "")
+        # Only the owner-final paid TBC *commentary* was corrected on this
+        # independent paid branch. Every config assignment, other comment and
+        # protected F19/GM setting must remain byte-identical to BASE_IP_30.
+        original = git("show", BASE_IP_30 + ":conf/individualProgression.conf.dist")
+        current = (ROOT / "conf/individualProgression.conf.dist").read_text()
+        old = ("#            A TBC purchase grants stage 8 (start of TBC). A Wrath purchase\n"
+               "#            grants no stage; an unpaid stage 13 counts as TBC (level 70 cap,\n"
+               "#            no Northrend). Applies to normal accounts only; bot and excluded")
+        revised = ("#            A TBC purchase leaves raw stage 7 unchanged and unlocks quest\n"
+                   "#            10259 (Into the Breach); only its later hand-in advances to 8.\n"
+                   "#            A Wrath purchase grants no raw stage; earned raw stage 13 is\n"
+                   "#            effective stage 12 before purchase and 13 after purchase.\n"
+                   "#            Unpaid stage 13 has a level 70 cap and no Northrend access.\n"
+                   "#            Applies to normal accounts only; bot and excluded")
+        self.assertEqual(current.count(revised), 1)
+        self.assertEqual(current.replace(revised, old), original)
 
 
 class Wiring(unittest.TestCase):
