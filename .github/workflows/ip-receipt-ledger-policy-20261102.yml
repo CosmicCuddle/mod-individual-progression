@@ -1,0 +1,34 @@
+name: IP strict paid receipt ledger model (OFF, NO HOST)
+
+on:
+  pull_request:
+    paths:
+      - 'src/IndividualProgressionReceiptPolicy.h'
+      - 'tests/receipt_ledger_policy.cpp'
+      - '.github/workflows/ip-receipt-ledger-policy-20261102.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  strict-receipt-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and execute strict pure model with gcc/clang C++17/20
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              "$compiler" -std="$standard" -O2 -Wall -Wextra -Werror -pedantic \
+                tests/receipt_ledger_policy.cpp -o /tmp/ip-receipt-model
+              /tmp/ip-receipt-model | tee /tmp/ip-receipt-model.log
+              grep -Eq '^RECEIPT POLICY CHECKS [0-9]+ passed$' /tmp/ip-receipt-model.log
+            done
+          done
+      - name: Safety and non-deployment boundary
+        run: |
+          echo 'Pure policy tests only. No production receipt writers, migrations, owner DB, Worldserver, gold or character account data.'
