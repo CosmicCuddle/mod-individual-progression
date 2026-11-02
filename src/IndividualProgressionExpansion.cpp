@@ -286,6 +286,14 @@ PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8
         // This is a release safeguard, not a completed migration solution.
         if (player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED)
             entryAvailable = false;
+        // Paid TBC must be advanced by the reward of quest 10259.
+        // If the operator disabled default IP progression, that reward
+        // cannot award stage 8. Do not sell a permanently stalled TBC
+        // entitlement: refuse the offer before any monetary debit.
+        // Wrath is unaffected because its purchase opens effective 13
+        // without an additional progression-quest hand-in.
+        if (disableDefaultProgression)
+            entryAvailable = false;
     }
 
     return CheckPurchase(facts, eraValue, player->HasEnoughMoney(costCopper), entryAvailable);
