@@ -73,6 +73,28 @@ static_assert(PurchaseGrantStage(Era::Tbc) == 0, "TBC payment must NOT skip Into
 
 int main()
 {
+    // S: Real, compiled pure-policy test for protecting previously paid
+    // characters from consuming quest 10259 with disabled progression.
+    {
+        CharacterFacts paid = Human(7, true);
+        Check(PaidTbcRewardWouldStrand(paid, true), true, "S: raw7 paid + DDP holds quest");
+        Check(PaidTbcRewardWouldStrand(paid, false), false, "S: enabled progression permits quest");
+        CharacterFacts unpaid = Human(7);
+        Check(PaidTbcRewardWouldStrand(unpaid, true), false, "S: unpaid follows existing veto");
+        CharacterFacts alreadyTbc = Human(8, true);
+        Check(PaidTbcRewardWouldStrand(alreadyTbc, true), false, "S: stage8 not stranded");
+        CharacterFacts exempt = paid;
+        exempt.startStage = 8;
+        Check(PaidTbcRewardWouldStrand(exempt, true), false, "S: TBC start privilege unchanged");
+        CharacterFacts bot = paid;
+        bot.gated = false;
+        Check(PaidTbcRewardWouldStrand(bot, true), false, "S: bot/excluded unaffected");
+        CharacterFacts off = paid;
+        off.featureActive = false;
+        Check(PaidTbcRewardWouldStrand(off, true), false, "S: paid feature OFF unchanged");
+        CharacterFacts stillVanilla = Human(6, true);
+        Check(PaidTbcRewardWouldStrand(stillVanilla, true), true, "S: paid below8 cannot consume 10259");
+    }
     // ---- 1. Feature OFF: exact established behaviour for every stage ----
     for (int s = 0; s <= LastSupportedStage; ++s)
     {
