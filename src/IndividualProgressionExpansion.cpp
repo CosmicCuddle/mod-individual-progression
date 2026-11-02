@@ -13,6 +13,8 @@
 
 #include "IndividualProgression.h"
 #include "World.h"
+#include "AllCreatureScript.h"
+#include "ScriptedGossip.h"
 
 #include <limits>
 #include <mutex>
@@ -56,6 +58,15 @@ namespace
     char const* EraName(Era era)
     {
         return era == Era::Tbc ? "The Burning Crusade" : "Wrath of the Lich King";
+    }
+
+    // Owner-final rule: OFF, bots/excluded accounts and historic TBC starting
+    // privileges are unchanged; only unpaid normal humans are refused.
+    bool MustRefuseUnpaidTbcQuest(Player* player)
+    {
+        return player && sIndividualProgression->IsPaidExpansionActive() &&
+            sIndividualProgression->isNormalAccount(player) &&
+            !sIndividualProgression->HasExpansionEntitlement(player, Era::Tbc);
     }
 }
 
@@ -347,7 +358,7 @@ class IndividualProgression_PaidExpansionPlayerScript : public PlayerScript
 public:
     IndividualProgression_PaidExpansionPlayerScript() : PlayerScript("IndividualProgression_PaidExpansion",
         { PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN,
-          PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE }) { }
+          PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE, PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT }) { }
 
     // Defence in depth: Core's CompleteQuest invokes this veto BEFORE setting
     // quest COMPLETE. Conditions.ScriptName is not evaluated by our pinned
@@ -367,6 +378,29 @@ public:
             ChatHandler(player->GetSession()).PSendSysMessage(
                 "|cffffff00Purchase The Burning Crusade from Chronomancer Vezrath before completing Into the Breach.|r");
         return false;
+    }
+
+    // Core 8daffdabe has no pre-take quest veto. Undo only the attempted
+    // 10259 accept on unpaid normal accounts immediately after Core AddQuest.
+    // Clearing the log slot is mandatory: RemoveActiveQuest alone leaves a
+    // dangling slot, and the later completion check must see no active quest.
+    void OnPlayerQuestAccept(Player* player, Quest const* quest) override
+    {
+        if (!quest || quest->GetQuestId() != INTO_THE_BREACH ||
+            !MustRefuseUnpaidTbcQuest(player))
+            return;
+
+        uint16 const slot = player->FindQuestSlot(INTO_THE_BREACH);
+        if (slot < MAX_QUEST_LOG_SIZE)
+            player->SetQuestSlot(slot, 0);
+
+        player->RemoveActiveQuest(INTO_THE_BREACH, true);
+        player->RemoveTimedAchievement(ACHIEVEMENT_TIMED_TYPE_QUEST, INTO_THE_BREACH);
+        if (player->GetSession())
+            ChatHandler(player->GetSession()).PSendSysMessage(
+                "|cffffff00Purchase The Burning Crusade from Chronomancer Vezrath before taking Into the Breach.|r");
+        LOG_INFO("module", "IndividualProgression: refused unpaid character {} quest 10259 acceptance",
+            player->GetGUID().GetCounter());
     }
 
     // Login thread, after the character (and its settings) loaded from the
@@ -406,7 +440,34 @@ public:
     // is replaced on every load, so a stale one is never used.
 };
 
+// Hide the ordinary quest-giver menu for a normal unpaid human without
+// changing the NPC's ScriptName or any world SQL. Core's direct query packet
+// still exposes details; the acceptance undo above is the authoritative gate.
+// The '!' icon is NOT hidden by this AllCreatureScript hook.
+class IndividualProgression_PaidExpansionQuestGossip : public AllCreatureScript
+{
+public:
+    IndividualProgression_PaidExpansionQuestGossip() :
+        AllCreatureScript("IndividualProgression_PaidExpansionQuestGossip") { }
+
+    bool CanCreatureGossipHello(Player* player, Creature* creature) override
+    {
+        if (!creature || creature->GetEntry() != 19942 ||
+            !MustRefuseUnpaidTbcQuest(player) ||
+            player->GetQuestStatus(INTO_THE_BREACH) != QUEST_STATUS_NONE)
+            return false;
+
+        ClearGossipMenuFor(player);
+        if (player->GetSession())
+            ChatHandler(player->GetSession()).PSendSysMessage(
+                "|cffffff00Purchase The Burning Crusade from Chronomancer Vezrath before taking Into the Breach.|r");
+        CloseGossipMenuFor(player);
+        return true;
+    }
+};
+
 void AddSC_ip_paid_expansion()
 {
     new IndividualProgression_PaidExpansionPlayerScript();
+    new IndividualProgression_PaidExpansionQuestGossip();
 }
