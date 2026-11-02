@@ -257,7 +257,8 @@ void IndividualProgression::LoadPaidExpansionEntitlement(Player* player)
 
 PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)
 {
-    if (!player || !player->IsInWorld() || costCopper > static_cast<uint32>(std::numeric_limits<int32>::max()))
+    if (!player || !player->IsInWorld() || player->IsBeingTeleportedFar() ||
+        costCopper > static_cast<uint32>(std::numeric_limits<int32>::max()))
         return PurchaseResult::InvalidRequest;
 
     // Money is always saved; the purchase flag only if the store is saving.
