@@ -59,7 +59,7 @@ class SafePaidTbcSale(unittest.TestCase):
         hook = method(SOURCE, "bool OnPlayerBeforeQuestComplete(Player* player, uint32 questId) override")
         self.assertIn("sIndividualProgression->MustHoldPaidTbcQuestReward(player)", hook)
         self.assertLess(hook.index("MustHoldPaidTbcQuestReward"), hook.index("HasExpansionEntitlement(player, Era::Tbc)"))
-        self.assertRegex(hook, r"MustHoldPaidTbcQuestReward\\(player\\)\\)\\s*\\{[\\s\\S]*?return false;")
+        self.assertRegex(hook, r"MustHoldPaidTbcQuestReward\(player\)\)\s*\{[\s\S]*?return false;")
         self.assertIn("Your quest and TBC purchase are preserved.", hook)
         self.assertNotIn("RemoveActiveQuest(", hook)
         self.assertNotIn("ModifyMoney(", hook)
@@ -70,15 +70,11 @@ class SafePaidTbcSale(unittest.TestCase):
         for clause in ("disableDefaultProgression", "Applies(f)", "f.tbcPaid",
                        "f.rawStage < TbcEntryStage", "f.startStage < TbcEntryStage"):
             self.assertIn(clause, guard)
-        for active, gated, paid, ddp, raw, start in product(
-            (False, True), (False, True), (False, True), (False, True),
-            (0, 7, 8, 13), (0, 8, 13),
-        ):
-            expected = ddp and active and gated and paid and raw < 8 and start < 8
-            actual = ddp and active and gated and paid and raw < 8 and start < 8
-            self.assertEqual(actual, expected)
-            if not ddp or not paid or start >= 8 or raw >= 8 or not gated or not active:
-                self.assertFalse(actual)
+        # The exact C++ policy, not a Python reimplementation, is exercised
+        # in expansion_purchase_policy.cpp (human, OFF, bot, start-stage and
+        # paid/unpaid cases). Here we only pin the production source wiring.
+        self.assertIn("PaidTbcRewardWouldStrand(GetExpansionFacts(player), disableDefaultProgression)", SOURCE)
+
 
     def test_quest_reward_is_behind_default_progression_switch(self):
         self.assertRegex(
