@@ -351,6 +351,20 @@ class PurchaseSequence(unittest.TestCase):
         self.assertIn("return CheckPurchase(facts, eraValue, player->HasEnoughMoney(costCopper), entryAvailable);", can)
 
 
+class PurchaseReminderSafety(unittest.TestCase):
+    def test_pre_rewarded_10259_warns_instead_of_advertising_unusable_sale(self):
+        reminder = code(body(EXP, "void IndividualProgression::SendPaidExpansionReminder(Player* player)"))
+        self.assertIn("if (!ShouldRemind(facts, era))", reminder)
+        self.assertIn("era == Era::Tbc && facts.rawStage < TbcEntryStage", reminder)
+        self.assertIn("player->GetQuestStatus(INTO_THE_BREACH) == QUEST_STATUS_REWARDED", reminder)
+        self.assertIn("Contact server staff to review TBC passage. No purchase was processed.", reminder)
+        self.assertLess(reminder.index("No purchase was processed."), reminder.index("Visit {} to purchase access."))
+        # The exception applies only to TBC, not Wrath, OFF or a paid player.
+        self.assertIn("continue;", reminder)
+        self.assertNotIn("UpdateProgressionState(", reminder)
+        self.assertNotIn("ModifyMoney(", reminder)
+
+
 class StorageAndThreads(unittest.TestCase):
     def test_hot_path_reads_only_ip_cache(self):
         facts = code(body(EXP, "CharacterFacts IndividualProgression::GetExpansionFacts(Player* player)"))
