@@ -26,6 +26,21 @@ namespace IndividualProgressionF14LoginPolicy
         return 13;
     }
 
+    // F14 new-bot source candidate: a positively verified Blood Elf or
+    // Draenei RandomBot needs at least TBC stage 8, even when level <=60.
+    // At level 71+ the original bot stage floor of 13 is retained.
+    // This is a RAW awarded-marker target, not a claim the global Vanilla
+    // ProgressionLimit makes the bot eligible for TBC gameplay.
+    constexpr std::uint8_t TbcRaceFloorStage(std::uint32_t level)
+    {
+        return LevelStage(level) < 8 ? 8 : LevelStage(level);
+    }
+
+    constexpr bool NeedsTbcRaceFloor(std::uint8_t savedStage, std::uint32_t level)
+    {
+        return savedStage < TbcRaceFloorStage(level);
+    }
+
     // F19-1: never preserve a stage below the original level stage.
     // F19-2: never preserve a stage above a nonzero progression limit.
     constexpr bool PreservesAtLeastLevelStage(std::uint8_t savedStage, std::uint32_t level, std::int32_t progressionLimit)
