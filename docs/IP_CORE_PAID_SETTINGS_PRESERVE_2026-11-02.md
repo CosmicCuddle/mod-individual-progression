@@ -23,3 +23,8 @@ The connected GitHub repositories do **not** include an owner-controlled Azeroth
 - Must preserve Feature OFF, unrelated settings sources, custom player settings and existing realm data. Do not merge this Core patch into an arbitrary Core branch or apply to owner host without explicit CosmicCuddle approval and restorable backups.
 
 **Rollback:** discard isolated PR; for a future staged Core application reverse only this pinned patch, restore snapshots/backups as approved. No change to live Core/SQL/host has occurred.
+
+
+## Grok test-strength follow-up (2 Nov 2026)
+
+Grok's [#37 L2/L4 findings](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6575653080) identified a version-mutant that bypassed the original helper tests and a C++ test driver that treated every check as a no-op under `-DNDEBUG`. The isolated #38 child now adds **direct** `ValidLedger` version-zero refusal and denies `RecordPurchase` on that invalid copy, replaces `assert()`-only test calls with an always-executing exit-on-failure helper, and extends the portable C++ CI matrix to g++/clang++ C++17/C++20 with and without `-DNDEBUG`. These are **test-only** changes, no production receipt arithmetic or Core patch change. Exact-head CI must be checked; no native/DB/gameplay approval is implied.

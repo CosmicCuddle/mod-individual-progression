@@ -4,7 +4,8 @@
  */
 #include "../src/IndividualProgressionReceiptPolicy.h"
 
-#include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -14,7 +15,17 @@ using namespace IndividualProgressionReceiptPolicy;
 int main()
 {
     unsigned checks = 0;
-    auto check = [&](bool value) { assert(value); ++checks; };
+    // Never use assert(): NDEBUG would silently skip every check expression,
+    // falsely printing PASS while making no policy calls at all.
+    auto check = [&](bool value)
+    {
+        if (!value)
+        {
+            std::fputs("FAIL: strict receipt policy check\n", stderr);
+            std::exit(EXIT_FAILURE);
+        }
+        ++checks;
+    };
 
     std::string const clean = "0 0 1 1 0 0 0 0 ";
     Decoded value = DecodeRaw(clean, true);
@@ -68,6 +79,13 @@ int main()
     check(!ValidLedger(copy));
     check(!HasPaidReceipt(copy, Era::Tbc));
     check(!RecordPurchase(copy, Era::Wrath, 70000, 1793620010));
+
+    // Grok L2: ValidLedger is also called directly on cached/staged ledgers,
+    // so it must independently reject invalid v1 versions (not just DecodeRaw).
+    Ledger invalidVersion = value.ledger;
+    invalidVersion.fields[Version] = 0;
+    check(!ValidLedger(invalidVersion));
+    check(!RecordPurchase(invalidVersion, Era::Tbc, 50000, 1793620010));
 
     Ledger inherited = value.ledger;
     inherited.fields[WrathFlag] = FlagGrandfathered;

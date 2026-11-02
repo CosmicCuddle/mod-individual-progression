@@ -317,3 +317,6 @@ Before every proposed Grimfeather update: identify actual installed commits and 
 | Dependencies / risks | Owner Core fork unavailable; integrate only after approved source owner branch and regression tests. Explicit other module `Player::UpdatePlayerSetting` can still rewrite; true v1 bootstrap/pdump missing; Core patch currently uncompiled in native Worldserver until follow-on check. |
 | Tests | Exact file git-blob/pin patch-check source CI and counterexample model authored, results must be verified. No gameplay, gold or owner data. |
 | Live status/rollback | Unmerged DRAFT, paid OFF. Discard child to remove patch; no live rollback necessary. |
+
+
+**IP-RECEIPT-CORE-RAW-PRESERVE-20261102 follow-up:** Added mandatory version-zero `ValidLedger` negative coverage, replaced NDEBUG-elidable assert-only checks, and required debug/NDEBUG GCC+Clang C++17/20 CI. Same Core patch, paid source/runtime and owner host unchanged. Grok L2/L4 reviewed findings [Issue #11](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6575653080); result pending exact-head CI.
