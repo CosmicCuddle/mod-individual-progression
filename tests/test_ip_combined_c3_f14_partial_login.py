@@ -75,6 +75,14 @@ def without_f14_group_floor_player(src: str) -> str:
                     "#endif\n")
     assert src.count(registration) == 1
     src = src.replace(registration, "")
+    # Restore C3's historic AddSC registration exactly: the separate
+    # optional F14 attack/stop/corpse pilot is covered by its own new test,
+    # and must not alter the original C3/F19 group/login baseline.
+    new_registration = ("#if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION)\n"
+                        "    new IndividualProgressionF14AttackEventScript();\n"
+                        "#endif\n")
+    assert src.count(new_registration) == 1
+    src = src.replace(new_registration, "")
     return src
 
 
