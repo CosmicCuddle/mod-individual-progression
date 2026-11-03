@@ -607,6 +607,18 @@ class StrictReceiptRuntime(unittest.TestCase):
         self.assertLess(purchase.index(all_slots), purchase.index(write_slot))
         self.assertLess(purchase.index(write_slot), purchase.index(cache_store))
         self.assertLess(purchase.index(cache_store), purchase.index("player->SaveToDB(false, false);"))
+        # No post-RecordPurchase direct assignment may zero any staged receipt
+        # slot before debit. M7 used: stagedLedger.fields[2] = 0;.
+        validated_to_write = purchase[purchase.index("ReceiptPolicy::RecordPurchase("):
+                                      purchase.index(all_slots)]
+        self.assertNotRegex(validated_to_write, r"stagedLedger\s*\.\s*fields\s*\[[^\]]+\]\s*=(?!=)")
+        # M7 family: no staged-ledger mutation is allowed after validation
+        # and before the canonical full-vector write (alias/.at()/reset).
+        recorded = purchase.index("ReceiptPolicy::RecordPurchase(")
+        valid_return = purchase.index("return PurchaseResult::EntryUnavailable;", recorded)
+        valid_return += len("return PurchaseResult::EntryUnavailable;")
+        self.assertNotIn("stagedLedger", purchase[valid_return:purchase.index(all_slots)])
+
         self.assertNotIn("uint32 const moneySlot", purchase)
         self.assertNotIn("uint32 const timeSlot", purchase)
         self.assertNotIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot", purchase)
@@ -650,7 +662,13 @@ class StorageAndThreads(unittest.TestCase):
         nonpurchase_return = setter.index("if (!bit)\n        return;")
         bits = setter.index("uint8& bits = _paidExpansionFlags[guid];")
         self.assertTrue(lock < mirror < nonpurchase_return < bits)
-        self.assertIn("index < ReceiptPolicy::Slots", setter)
+        # The mirror must not contain an extra condition excluding slot 2.
+        # Grok's M5 mutation (&& index != SettingGrandfatherEvaluated) must die.
+        self.assertIn("if (receipt != _paidExpansionLedgers.end() && index < ReceiptPolicy::Slots)\n        receipt->second.fields[index] = value;", setter)
+        # M5 family: disallow a second receipt-slot write or early exit.
+        self.assertEqual(setter.count("receipt->second.fields["), 1)
+        self.assertNotIn("SettingGrandfatherEvaluated", setter)
+        self.assertNotIn("return", setter[:mirror])
         self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);", setter)
         self.assertNotIn("_paidExpansionFlags[guid]", setter[:nonpurchase_return])
 
