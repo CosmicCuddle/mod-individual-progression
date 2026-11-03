@@ -1,0 +1,79 @@
+# F14 Core hook proof only. No gameplay hide, no Core repo write or host.
+name: F14 Core observer visibility hook prototype — exact-source safety
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-core-observer-hook-prototype-20261103
+    paths:
+      - "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch"
+      - "tests/test_ip_f14_core_observer_seam_prototype.py"
+      - ".github/workflows/ip-f14-core-observer-seam-source-prototype-20261103.yml"
+  pull_request:
+    paths:
+      - "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch"
+      - "tests/test_ip_f14_core_observer_seam_prototype.py"
+      - ".github/workflows/ip-f14-core-observer-seam-source-prototype-20261103.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-core-default-allow-hook:
+    name: F14 default-allow Core seam — disposable exact source
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated IP observer hook prototype
+        uses: actions/checkout@v4
+        with:
+          path: ip
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout exact historic Grimfeather Core
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          path: core
+          persist-credentials: false
+      - name: Verify exact Core pin and no IP executable edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C core rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
+          git -C ip merge-base --is-ancestor ce69a6891470693a471896b999c4fc97424f8676 HEAD
+          test -z "$(git -C ip diff --name-only ce69a6891470693a471896b999c4fc97424f8676 HEAD -- src conf sql data optional)"
+          test "$(git -C core rev-parse HEAD:src/server/game/Scripting/ScriptMgr.h)" = 7f0f30d3ca46cb290636c33ca8e1b2b9c0ffa1f8
+          test "$(git -C core rev-parse HEAD:src/server/game/Scripting/ScriptDefines/WorldObjectScript.h)" = 30c497114d0f4058f9866d4c6e53ac03f715a269
+          test "$(git -C core rev-parse HEAD:src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp)" = a3ec17f35bf44f0068162251c96d4cbdc439e700
+          test "$(git -C core rev-parse HEAD:src/server/game/Entities/Object/Object.cpp)" = 39a24ef072321c567892d4257bfc7a9ba9f30791
+          test "$(git -C core rev-parse HEAD:src/server/game/Entities/Player/Player.cpp)" = 138e7eab4905ec366338a54cc18e6cfe749a3670
+      - name: Apply five-file Core hook proposal only on disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="${{ github.workspace }}/ip/tests/core_patches/f14_observer_visibility_default_allow_prototype.patch"
+          git -C core apply --check "$patch"
+          git -C core apply "$patch"
+          git -C core diff --check
+          git -C core diff --name-only | sort >/tmp/core-actual.txt
+          printf '%s\n' \
+            src/server/game/Scripting/ScriptMgr.h \
+            src/server/game/Scripting/ScriptDefines/WorldObjectScript.h \
+            src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp \
+            src/server/game/Entities/Object/Object.cpp \
+            src/server/game/Entities/Player/Player.cpp | sort >/tmp/core-expected.txt
+          diff -u /tmp/core-expected.txt /tmp/core-actual.txt
+          echo "PASS: exact five Core files only, no installed Core source changed"
+      - name: Verify default-allow/no gameplay source safety guards
+        shell: bash
+        env:
+          COSMIC_F14_PATCHED_CORE: ${{ github.workspace }}/core
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s ip/tests -p 'test_ip_f14_core_observer_seam_prototype.py' -v
+      - name: Status and limits
+        run: |
+          echo "SOURCE-ONLY PASS is NOT a Worldserver compile, game visibility, corpse refresh, or PB integration test."
+          echo "The default hook returns allow; no IP module registers a veto. Nothing is hidden."
+          echo "No Core fork, merge, config, character DB, or owner host modification."
