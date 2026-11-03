@@ -1076,6 +1076,59 @@ public:
 };
 #endif
 
+#if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION)
+class IndividualProgressionF14AttackEventScript : public UnitScript
+{
+public:
+    IndividualProgressionF14AttackEventScript()
+        : UnitScript("IndividualProgression_F14AttackEvents", true,
+                     {UNITHOOK_ON_F14_ATTACK_TARGET_TRANSITION,
+                      UNITHOOK_ON_F14_CREATURE_CORPSE_READY}) { }
+
+    void OnF14AttackTargetTransition(Unit* attacker, Unit* oldVictim, Unit* newVictim) override
+    {
+        // An unverified or human actor must never trigger the F14 refresh.
+        // This optional hook is synchronous and must not retain Unit pointers.
+        if (!sIndividualProgression->enabled ||
+            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+            !attacker || !attacker->IsPlayer())
+            return;
+
+        Player* candidate = attacker->ToPlayer();
+        if (!candidate || !candidate->IsInWorld() ||
+            !candidate->GetSession() || !candidate->GetSession()->IsHeadless() ||
+            (candidate->getRace() != RACE_DRAENEI &&
+             candidate->getRace() != RACE_BLOODELF) ||
+            !sIndividualProgression->HasF14VerifiedRandomBotIdentity(candidate))
+            return;
+
+        // The true (forced) path invokes the synchronous nearby-player notifier,
+        // NOT Unit::UpdateObjectVisibility(false)'s delayed notification.
+        // This is only a narrow ATTACK transition refresh; it does not supply
+        // all threat, rights, spell-in-flight or observer-stage requirements.
+        if (oldVictim && oldVictim != newVictim &&
+            oldVictim->IsCreature() && oldVictim->IsInWorld())
+            oldVictim->UpdateObjectVisibility(true);
+
+        if (newVictim && newVictim->IsCreature() && newVictim->IsInWorld())
+            newVictim->UpdateObjectVisibility(true);
+    }
+
+    void OnF14CreatureCorpseReady(Creature* creature) override
+    {
+        // The Core event is emitted AFTER corpse-state promotion. Never hide
+        // a corpse; this forced refresh allows the normal visibility policy to
+        // restore the dead creature for Vanilla observers if it was hidden.
+        if (!sIndividualProgression->enabled ||
+            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+            !creature || !creature->IsInWorld())
+            return;
+
+        creature->UpdateObjectVisibility(true);
+    }
+};
+#endif
+
 void AddSC_mod_individual_progression_player()
 {
     new IndividualPlayerProgression();
@@ -1083,5 +1136,8 @@ void AddSC_mod_individual_progression_player()
     new IndividualPlayerProgression_AccountScript();
 #if defined(COSMIC_F14_OBSERVER_HOOK_VERSION)
     new IndividualProgressionF14ObserverScript();
+#endif
+#if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION)
+    new IndividualProgressionF14AttackEventScript();
 #endif
 }

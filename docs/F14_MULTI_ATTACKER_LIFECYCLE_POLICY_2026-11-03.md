@@ -1,0 +1,31 @@
+# F14 multi-RandomBot active-attacker lifecycle safety model
+
+**Date:** 3 November 2026. **Owner:** CosmicCuddle. **Status:** UNWIRED/DEFAULT OFF pure C++ model, proposed integration to [IP F14 DRAFT #54](https://github.com/CosmicCuddle/mod-individual-progression/pull/54). This document does not approve deployment, feature activation, Core merges or bot changes.
+
+## Why the model is needed
+
+The owner's approved policy is to hide an otherwise eligible, plain living hostile creature **only while it is being actively attacked by one or more positively verified Blood Elf/Draenei RandomBots** in an observer-specific, proven-safe context. Human Blood Elves and Draenei and Altbots **must never be hidden** under this policy. When a hidden eligible bot stops attacking, switches target or the creature dies, the creature must immediately revert to normal visibility; normal quest loot, corpse rights, kill credit, threat, real humans and GM visibility must remain intact.
+
+A single `bool eligibleHiddenAttackerActive` does not accurately represent two verified RandomBots attacking one target. If bot A stops but bot B remains in combat and actively attacks the same creature, there is still an eligible attacker. Conversely, if the last verified bot stops, the target is no longer eligible for F14 concealment. A stale attack identity, newly involved human or uncertain creature instance must **fail visible**.
+
+## Source delivered
+
+- `src/IndividualProgressionF14MultiAttackerPolicy.h` — portable `constexpr` **data-only** tracker for up to 16 independent actor incarnation tokens. Identical start events do not double count. Each event advances the creature revision and revokes the earlier positive complete snapshot. A known bot leaving leaves all OTHER known bots active, but requires another complete proof before a hide candidate could be reaccepted.
+- An unknown actor stop, missing actor token, unverified/human participant, threat/loot/rights/identity change, overflow at 17th attacker, revision wrap and stale roster rebuild **fail visible**. No event silently ignores an unknown attacker.
+- Death/despawn clears all attackers and marks the creature dead. Respawn requires a **different nonzero creature-instance identity** and starts with an empty roster, no copied proof. Never reuse the creature DB template or a recycled in-game GUID as that identity.
+- `ReplaceWithFullyVerifiedRoster` permits recovery from temporary uncertainty only with a **complete fresh roster and rights proof at the exact CURRENT creature incarnation + generation**. It rejects duplicate actor tokens, stale generations, zero actors inside a claimed roster, unverified facts and an over-capacity roster. The recovered data still lacks observer/rights/refresh proof until separately reverified; none of this sends client packets.
+- `tests/f14_multi_attacker_policy.cpp` tests multi-bot join/leave, single last attacker stop, stale/unknown events, human interference and recovery, death/respawn, target switch between two independent creatures, revision wrap and 17th attacker. The dedicated fast source CI now compiles and executes this model on **GCC and Clang × C++17 and C++20** without linking or launching a server. **Do not claim those CI checks passed until the exact run finishes.**
+- The previously introduced [`IndividualProgressionF14RefreshPolicy.h`](https://github.com/CosmicCuddle/mod-individual-progression/blob/research/cs01-f14-visibility-refresh-epoch-model-20261103/src/IndividualProgressionF14RefreshPolicy.h) already has 56 isolated checks (four older GitHub compiler jobs passed). That separate `State` still uses a simple active-attacker flag. **No runtime composer exists:** a future safe integration must derive that flag from a complete current multi-bot + rights snapshot and invalidate per-viewer observations on every changed generation. Neither standalone policy authorises concealment by itself.
+
+## Hard boundaries
+
+- This model is **NOT INCLUDED from any compiled IP .cpp**, does not track live Core pointers, does not inspect actual Playerbots, threat, gold, quests, stages, spell missiles, loot or GM observers and cannot determine full per-viewer safety. Its positive actor-candidate result is **not** a creature-visibility permission.
+- `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION` is intentionally NOT DEFINED by the pinned Core observer/WHO/attack/corpse patches. F14 is **FORCED OFF**; the new actor model does not enable a switch. Normal human race 10/11 visibility remains unchanged by all unmerged drafts.
+- Real integration requires owning map-thread event ordering, positively verified RandomBot incarnation identities, complete live participant+threat+tap+group rights proof, direct negative handling of human/GM/Altbot/pet/DoT/ranged actions, exact epoch checks per observer, immediate client create/destroy/respawn notification and WHOs/social surfaces. Cap overflow is a clear fail-visible condition, **not** permission to conceal with a truncated roster.
+- Pinned historical source evidence is not owner installed version. Before owner gameplay: verify actual installed Core/Playerbots/IP/Naxx/Services, custom modifications and restorable backups; build exact tested code, then explicit CosmicCuddle approval. First limited game test continues to exclude F14.
+
+## Test and rollback
+
+- Source risk: model-only; no config/SQL/client/DBC or host changes. Rollback is discarding the isolated unmerged PR #54 commits. No player data touched.
+- Dedicated fast exact-head workflow: [F14 attack/corpse Core bridge exact source](https://github.com/CosmicCuddle/mod-individual-progression/actions/workflows/ip-f14-attack-corpse-bridge-source-20261103.yml). Also review companion [Core+Naxx+PB+Services native workflow](https://github.com/CosmicCuddle/mod-individual-progression/actions/workflows/ip-f14-attack-corpse-bridge-joint-native-20261103.yml); pending success is **not** failure or compile proof.
+- Coordination and decisions remain in [Issue #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9).
