@@ -113,7 +113,7 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 -    return true;
 -}
 -
--void Unit::CombatStop(
+-void Unit::CombatStop(bool includingCast, bool mutualPvP)
 +    SendMeleeAttackStop(victim);
 +
 +    // Synchronous event after unlink; consumers must not retain Unit pointers.
@@ -121,7 +121,7 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 +    return true;
 +}
 +
-+void Unit::CombatStop(
++void Unit::CombatStop(bool includingCast, bool mutualPvP)
  {
      if (includingCast && IsNonMeleeSpellCast(false))
 diff --git a/src/server/game/Entities/Creature/Creature.cpp b/src/server/game/Entities/Creature/Creature.cpp
