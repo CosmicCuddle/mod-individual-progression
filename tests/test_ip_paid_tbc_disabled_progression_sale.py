@@ -76,6 +76,10 @@ class SafePaidTbcSale(unittest.TestCase):
         self.assertIn("WorldPacket copy(packet);", guard)
         self.assertIn("copy.rpos(0);", guard)
         self.assertIn("copy >> questGiver >> questId >> reward;", guard)
+        self.assertIn('ChatHandler(session).PSendSysMessage(', guard)
+        self.assertIn("Your quest and TBC purchase are preserved.", guard)
+        self.assertLess(guard.index("if (questId != INTO_THE_BREACH)"), guard.index("ChatHandler(session)"))
+        self.assertLess(guard.index("ChatHandler(session)"), guard.index("return false;"))
         self.assertLess(guard.index("if (questId != INTO_THE_BREACH)"), guard.rindex("return false;"))
         self.assertEqual(guard.count("return false;"), 1)
         for forbidden in ("RewardQuest(", "ModifyMoney(", "SetQuestStatus(", "IncompleteQuest(", "ForceUpdateProgressionState(", "AddQuest("):
