@@ -1,0 +1,29 @@
+# F14 attack/corpse event bridge — optional runtime code, F14 forced OFF
+
+**Owner:** CosmicCuddle. **Date:** 3 November 2026. **Status:** unmerged draft, source-only and test-only Core patch, no host change or real gameplay. Parent [F14 refresh model draft #53](https://github.com/CosmicCuddle/mod-individual-progression/pull/53), exact `9962ab8cb009c23d99b457d8ded618828be12a78`. The required Core fork/host baseline is **not** verified to match our pinned historical Core `Grimfeather/azerothcore-wotlk@8daffdabe9202c228e45d833c9a1d399597a15cd`.
+
+## Actual implemented paths
+
+- `tests/core_patches/f14_attack_corpse_event_bridge_prototype.patch`: **third disposable Core patch** applied after optional world-observer #50 and WHO #52 patches; modifies *only* historical Core `UnitScript.h/.cpp`, `ScriptMgr.h`, `Unit.cpp` and `Creature.cpp`.
+- New `UnitScript::OnF14AttackTargetTransition(Unit* attacker, Unit* previousVictim, Unit* newVictim)` fires **after** a successful `Unit::Attack` target assignment and after `Unit::AttackStop` has unlinked the attack. It receives both old and new targets. This is necessary because `OnUnitEnterCombat` alone does not fire for a target switch during continuing combat.
+- New `UnitScript::OnF14CreatureCorpseReady(Creature*)` fires after `Creature::setDeathState(JustDied)` has promoted the creature to **Corpse**, not before. No global phase change or actual corpse/loot data mutation.
+- `src/IndividualProgressionPlayer.cpp` optionally creates `IndividualProgressionF14AttackEventScript` only when the versioned Core event interface is compiled. Its fast default returns without doing work for disabled F14, human attackers, unverified RandomBots, Altbots, missing/headless-invalid sessions and non-Blood Elf/Draenei races. A positively verified qualifying **headless BE/Draenei RandomBot** may trigger `UpdateObjectVisibility(true)` on the old and new living in-world creature targets; a death/corpse-ready event may trigger the same **forced synchronous** visibility notification for a creature. It never scans threat/attackers in this callback, reads DB, changes loot rights, writes IP progression, adjusts player money, or mutates phase masks.
+- `Unit::UpdateObjectVisibility(false)` on pinned Core is **delayed** via `NOTIFY_VISIBILITY_CHANGED`, whereas `true` directly traverses nearby visibility by `Acore::VisibleChangesNotifier` (via `WorldObject::UpdateObjectVisibility(true)`). This is why the proposed immediate transition path uses `true`. **This is a source-level event notification, not verified in-client timing or correctness.**
+- Added `tests/test_ip_f14_attack_corpse_bridge.py` and an independent pinned full-core/native CI workflow to apply all three Core patches and compile IP + historical Playerbots + Naxx #292 + Character Services #16. Test-only Core/Playerbots patches never enter the owner's installations.
+
+## Critical intentionally incomplete features
+
+- The new Core macro is **`COSMIC_F14_ATTACK_EVENT_HOOK_VERSION`**, NOT `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION`. The latter remains **undefined** in all three patches. The feature option `IndividualProgression.F14.ExperimentalRndbotPlayerVisibility` is **forced OFF**, even if a configuration attempted to switch it on.
+- The callback only offers attack-target and post-corpse notification; it **does not** implement full threat/tap/DoT/assist/AI/pet/quest/loot rights snapshots, observer-viewer transition refresh on stage changes, Playerbot pet/minion attack capture, logout/identity cache invalidation or all other player-discovery surfaces. In particular, the pure F14 creature concealment model remains **unwired**, so this patch cannot actually hide a creature.
+- Threat/combat arrival in one worker and target attack transitions may be reordered; map-thread ownership, target pointer lifetime during synchronous callback, combat exit events and mixed-viewer visibility need independent review and real gameplay testing.
+- Although the callback returns immediately while disabled, Core event notification calls would be compiled in hot attack paths. Benchmark and compatibility/regression checks are mandatory before any Core fork incorporation.
+- Public WHO handling is a separate optional, still incomplete path. No claim that counts/party/friends/guild/target references are all concealed or that all previously hidden creatures are immediately rendered to a client has been proved.
+- **FIRST TEST CUT:** continue to prefer the already successful historical Naxx #292, IP #46, Services #16 tuple with **F14 OFF** and installed-source/backups verified. Do not include this prototype in a rushed owner-host build.
+
+## Evidence and rollback
+
+- Source patch has been inspected against the **exact historical Core** with 8 unified hunks, matching original line contents/counts and non-overlapping locations after all earlier patches.
+- New source tests and new full Worldserver CI are authored; their exact-head results remain **unverified** until Actions finishes. Previously successful #50 builds do not prove this new third patch.
+- Rollback today: discard this unmerged draft branch and the disposable Core patch, no server/character data to restore. A future approved release requires owner Core fork identification, module ABI/version match, restorable backups, independent review, full Worldserver link, and multi-client positive/negative gameplay with corpse and 2-human loot rights.
+
+**Owner policy:** conceal **only positively verified Blood Elf/Draenei RandomBots** from Vanilla observers, **not human BE/Draenei or Altbots**, and only conceal their creature targets **while actively attacked** by eligible hidden bots; dead creatures must return to normal view. [Coordination Issue #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9).
