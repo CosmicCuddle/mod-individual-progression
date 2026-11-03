@@ -73,11 +73,20 @@ class PrototypeBoundary(unittest.TestCase):
             dispatcher_section,
         )
         self.assertNotIn("+    return false;", dispatcher_section)
-        # Both newly added denial returns are protected by the hook result;
-        # they must never be converted into a blanket visibility denial.
-        self.assertEqual(
-            PATCH.count("+        return false;"), 2,
-            "expected one guarded veto in Object.cpp and one in Player.cpp",
+        # Re-emitting existing CanNeverSee's denial is legitimate.
+        # The NEW Object.cpp and Player.cpp veto returns must each be gated
+        # by a distinct observer hook call in the same local source section.
+        object_section = PATCH.split(
+            "diff --git a/src/server/game/Entities/Object/Object.cpp", 1
+        )[1].split("diff --git a/", 1)[0]
+        player_section = PATCH.split(
+            "diff --git a/src/server/game/Entities/Player/Player.cpp", 1
+        )[1]
+        self.assertEqual(object_section.count("+            return false;"), 1)
+        self.assertEqual(player_section.count("+        return false;"), 1)
+        self.assertIn(
+            "if (CanNeverSee(obj))", object_section,
+            "preserve stock no-map/no-phase check",
         )
         self.assertIn(
             "!sScriptMgr->OnWorldObjectCanBeSeenByPlayer(observer, obj)",
