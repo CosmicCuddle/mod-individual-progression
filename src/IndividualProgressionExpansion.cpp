@@ -600,6 +600,10 @@ public:
         // The quest must remain COMPLETE/unrewarded; do not alter its
         // objectives, bought entitlement, money or progression markers.
         // Core must never run RewardQuest for this client packet.
+        // A packet veto is otherwise silent; explain why the hand-in was
+        // refused so the player doesn't mistake it for a lost purchase.
+        ChatHandler(session).PSendSysMessage(
+            "|cffffff00Into the Breach cannot be rewarded while default progression is disabled. Your quest and TBC purchase are preserved.|r");
         return false;
     }
 };
