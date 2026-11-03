@@ -364,13 +364,15 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
         return PurchaseResult::EntryUnavailable;
     }
 
-    // 5. Append the validated receipt to the same in-memory Player settings
-    // saved alongside gold and flags by this one SaveToDB transaction.
-    uint32 const moneySlot = era == Era::Tbc ? ReceiptPolicy::TbcCopper : ReceiptPolicy::WrathCopper;
-    uint32 const timeSlot = era == Era::Tbc ? ReceiptPolicy::TbcEpoch : ReceiptPolicy::WrathEpoch;
-    player->UpdatePlayerSetting(PaidExpansionSettingSource, ReceiptPolicy::Version, ReceiptPolicy::Version1);
-    player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot, stagedLedger.fields[moneySlot]);
-    player->UpdatePlayerSetting(PaidExpansionSettingSource, timeSlot, stagedLedger.fields[timeSlot]);
+    // 5. Store ALL eight validated v1 slots in the same Player settings map
+    // before the single character+gold SaveToDB transaction. Core's
+    // UpdatePlayerSetting creates a missing vector with index+1 elements.
+    // A first TBC write ending at slot 5 would otherwise save only six
+    // tokens, and the strict decoder would reject the paid entitlement at
+    // next login. Never infer that a missing/legacy row can be purchased:
+    // those still fail closed in CanPurchaseExpansion before any debit.
+    for (uint32 slot = 0; slot < ReceiptPolicy::Slots; ++slot)
+        player->UpdatePlayerSetting(PaidExpansionSettingSource, slot, stagedLedger.fields[slot]);
     {
         std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
         _paidExpansionLedgers[player->GetGUID().GetCounter()] = stagedLedger;
