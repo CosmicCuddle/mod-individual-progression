@@ -611,7 +611,7 @@ class StrictReceiptRuntime(unittest.TestCase):
         # slot before debit. M7 used: stagedLedger.fields[2] = 0;.
         validated_to_write = purchase[purchase.index("ReceiptPolicy::RecordPurchase("):
                                       purchase.index(all_slots)]
-        self.assertNotRegex(validated_to_write, r"stagedLedger\\s*\\.\\s*fields\\s*\\[[^\\]]+\\]\\s*=(?!=)")
+        self.assertNotRegex(validated_to_write, r"stagedLedger\s*\.\s*fields\s*\[[^\]]+\]\s*=(?!=)")
 
         self.assertNotIn("uint32 const moneySlot", purchase)
         self.assertNotIn("uint32 const timeSlot", purchase)
@@ -658,7 +658,7 @@ class StorageAndThreads(unittest.TestCase):
         self.assertTrue(lock < mirror < nonpurchase_return < bits)
         # The mirror must not contain an extra condition excluding slot 2.
         # Grok's M5 mutation (&& index != SettingGrandfatherEvaluated) must die.
-        self.assertIn("if (receipt != _paidExpansionLedgers.end() && index < ReceiptPolicy::Slots)\\n        receipt->second.fields[index] = value;".replace("\\n", "\n"), setter)
+        self.assertIn("if (receipt != _paidExpansionLedgers.end() && index < ReceiptPolicy::Slots)\n        receipt->second.fields[index] = value;", setter)
         self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);", setter)
         self.assertNotIn("_paidExpansionFlags[guid]", setter[:nonpurchase_return])
 
