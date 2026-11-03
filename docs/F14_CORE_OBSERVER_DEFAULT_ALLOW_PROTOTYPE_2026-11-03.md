@@ -12,12 +12,12 @@ Core [`Player::IsVisibleGloballyFor`](https://github.com/Grimfeather/azerothcore
 
 ## Minimal five-file candidate patch — not installed
 
-**Source artifact:** `tests/core_patches/f14_observer_visibility_default_allow_prototype.patch` applies only to the *disposable test runner's* exact historical Core (five files, six hunks).
+**Source artifact:** `tests/core_patches/f14_observer_visibility_default_allow_prototype.patch` applies only to the *disposable test runner's* exact historical Core (five files, eight hunks).
 
 1. `src/server/game/Scripting/ScriptDefines/WorldObjectScript.h`: add `WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER` *after* all existing numeric hooks and before `END`, and default method `virtual bool OnWorldObjectCanBeSeenByPlayer(Player const*,WorldObject const*) { return true; }`.
 2. `src/server/game/Scripting/ScriptMgr.h` and `.../WorldObjectScript.cpp`: dispatch via existing `CALL_ENABLED_BOOLEAN_HOOKS` and deny only on explicit future module veto. **With no vetoing hook, return TRUE.** Existing hook ordinals remain unchanged.
-3. `src/server/game/Entities/Object/Object.cpp`: call the observer hook **only for Player observers** and only Player/Creature targets, after `CanNeverSee` but BEFORE the early always-visible fast path. This is only an observation gate, not a threat, attack, damage, loot or phase modification.
-4. `src/server/game/Entities/Player/Player.cpp`: apply the same hook to normal-account observer in `IsVisibleGloballyFor` **after self exemption but BEFORE `IsVisible()`**; keep GM observer bypass and existing GM visibility behavior. Neither code path identifies any bot/race on its own.
+3. `src/server/game/Entities/Object/Object.cpp`: call the observer hook only when a Player observer has a **non-null, ordinary-player WorldSession**, and only for Player/Creature targets, after `CanNeverSee` but BEFORE the early always-visible fast path. Headless bots and GM observers bypass this new hook. The patch explicitly includes `AccountMgr.h` and `WorldSession.h`. This is only an observation gate, not a threat, attack, damage, loot or phase modification.
+4. `src/server/game/Entities/Player/Player.cpp`: apply the same hook only when the observer has a **non-null ordinary-player WorldSession** in `IsVisibleGloballyFor`, **after self exemption but BEFORE `IsVisible()`**. Preserve the original fast true path for headless bots (whose session may be absent), GM observer bypass and existing GM visibility behavior. Neither path identifies a RandomBot/race on its own.
 
 **Crucial limitation:** there is NO override in the IP module for this new hook; no creature/player is concealed. This patch does not create any F14 configuration key, perform WorldObject visibility refresh or alter saved stages. Therefore compiling it is a **Core seam compatibility proof**, NOT a playable F14 visibility system. F14 remains **BLOCKED_CORE_PB_HOOK**.
 
