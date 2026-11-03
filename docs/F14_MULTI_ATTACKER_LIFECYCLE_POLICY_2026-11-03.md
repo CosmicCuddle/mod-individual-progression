@@ -23,7 +23,10 @@ Core already dispatches `AllCreatureScript::OnCreatureAddWorld` only after the c
 
 ## Additional logout/identity-expiry requirement
 
-Core `Unit::AttackStop` notification currently ignores an actor if the old RandomBot session has already vanished (or if its positive GUID cache has been evicted). `OnPlayerLogout` evicts the identity but has no audited map-thread targeted visibility refresh. The multi-attacker policy can deny stale proofs on a changed identity only when the **real runtime** sends the corresponding actor-expiry event. This is **not yet wired**. Never call forced per-creature visibility updates directly from an unverified logout/session worker; provide a map-thread event path first, and ensure the creature becomes visible even if an old actor remains in a stale roster.
+Pinned Core logs players out by evicting the F14 verified actor cache in `OnPlayerLogout` **before** `Unit::CleanupBeforeRemoveFromMap` may invoke `CombatStop` / `AttackStop`. The F14 event-script **stop-only** callback now requests a conservative old-creature visibility refresh for *any Player AttackStop*, even if headless session or verified bot identity has already been removed. This does **not** permit a human or Altbot to qualify for hiding: starts/switches still require positive RandomBot identity, and the multi-attacker candidate model remains UNWIRED.
+
+However, `CombatStop` may occur **after** `RemoveFromWorld`, and a real client/map-thread refresh on an old victim may be unsafe from this teardown context. All paths must be audited for map-thread ownership and for those that never emit attack-stop. The model can deny stale proofs only when the real runtime delivers an actor-expiry or reverify event. Since that actor cache and map-thread collector do not exist yet, **F14 remains FORCED OFF**. Do not issue direct logout-thread packets. The stop fallback is a defensive source prototype, not a gameplay guarantee.
+
 
 ## Hard boundaries
 
