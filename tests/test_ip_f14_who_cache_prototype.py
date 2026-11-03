@@ -27,7 +27,7 @@ def method(src, signature):
 
 
 class WHOPrototypeBoundary(unittest.TestCase):
-    def test_pinned_core_only_four_paths_seven_hunks(self):
+    def test_pinned_core_only_four_paths_six_nonoverlapping_hunks(self):
         paths = re.findall(r"^diff --git a/(\S+) b/\1$", PATCH, re.M)
         self.assertEqual(set(paths), {
             "src/server/game/Scripting/ScriptMgr.h",
@@ -36,7 +36,7 @@ class WHOPrototypeBoundary(unittest.TestCase):
             "src/server/game/Handlers/MiscHandler.cpp",
         })
         self.assertEqual(len(paths), 4)
-        self.assertEqual(PATCH.count("@@ -"), 7)
+        self.assertEqual(PATCH.count("@@ -"), 6)
 
     def test_positive_cache_only_no_unsafe_target_lookup(self):
         guid = method(CORE, "bool IndividualProgression::HasF14VerifiedRandomBotGuid(")
@@ -76,7 +76,6 @@ class WHOPrototypeBoundary(unittest.TestCase):
         self.assertIn("CALL_ENABLED_BOOLEAN_HOOKS(WorldObjectScript,", PATCH)
         self.assertIn("!script->OnWhoListEntryCanBeSeenByPlayer(observer, targetGuid, targetRace)", PATCH)
         self.assertIn("target.GetGuid(), target.GetRace()", PATCH)
-        self.assertIn("sWhoListCacheMgr->GetWhoList()", PATCH) if "sWhoListCacheMgr->GetWhoList()" in PATCH else None
         who_section = PATCH.split("diff --git a/src/server/game/Handlers/MiscHandler.cpp", 1)[1]
         self.assertIn("AccountMgr::IsPlayerAccount(GetSecurity())", who_section)
         self.assertNotIn("ObjectAccessor::FindPlayer(", who_section)
