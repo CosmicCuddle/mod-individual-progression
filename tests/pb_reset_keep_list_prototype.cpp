@@ -95,8 +95,15 @@ int main()
     Check("reload to configured list preserves earned stage8",
           PreserveExistingRewardedMarker(66008, QuestState::Rewarded,
                                          currentMask.load(std::memory_order_acquire)), true);
+    // A single reset captures the mask once before iterating all quests.
+    // Later reloads affect the NEXT reset, not half of the ongoing one.
+    std::uint32_t const inFlightResetMask = currentMask.load(std::memory_order_acquire);
     currentMask.store(emptyMask, std::memory_order_release);
-    Check("reload to empty list immediately restores stock reset",
+    Check("in-flight reset retains previous snapshot despite config reload",
+          PreserveExistingRewardedMarker(66008, QuestState::Rewarded, inFlightResetMask), true);
+    Check("in-flight reset treats later marker consistently",
+          PreserveExistingRewardedMarker(66018, QuestState::Rewarded, inFlightResetMask), true);
+    Check("new reset immediately sees empty reload",
           PreserveExistingRewardedMarker(66008, QuestState::Rewarded,
                                          currentMask.load(std::memory_order_acquire)), false);
 
