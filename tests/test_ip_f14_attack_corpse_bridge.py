@@ -33,6 +33,38 @@ class F14TransitionBridge(unittest.TestCase):
         self.assertEqual(len(paths), 5)
         self.assertEqual(PATCH.count("@@ -"), 7)
 
+    def test_runner_allowlists_match_the_actual_patch_sets(self):
+        # Source-only CI applies exactly three F14 patches. It must NOT
+        # pretend it also modified the two paid-row Core files. The native
+        # joint job *does* apply the separate paid-row patch first.
+        patches = (
+            PATCH,
+            (ROOT / "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch").read_text(),
+            (ROOT / "tests/core_patches/f14_who_cached_entry_prototype.patch").read_text(),
+        )
+        exact = set()
+        for content in patches:
+            exact.update(re.findall(r"^diff --git a/(\\S+) b/\\1$", content, re.M))
+        self.assertEqual(len(exact), 10, "three F14 patches should touch 10 distinct Core files")
+
+        source = (ROOT / ".github/workflows/ip-f14-attack-corpse-bridge-source-20261103.yml").read_text()
+        # Match only the expected-path declaration, never tool/log prose.
+        start = source.index("printf '%s\\n' \\\n")
+        end = source.index("| sort >/tmp/f14-core-expected.txt", start)
+        source_allow = set(re.findall(r"src/server/game/[A-Za-z0-9_./]+\\.(?:cpp|h)",
+                                          source[start:end]))
+        self.assertEqual(source_allow, exact)
+
+        native = (ROOT / ".github/workflows/ip-f14-attack-corpse-bridge-joint-native-20261103.yml").read_text()
+        start = native.index("printf '%s\\n' \\\n", native.index("Apply F14 attack-target + corpse-ready event bridge"))
+        end = native.index("| sort > /tmp/f14-three-patches-expected.txt", start)
+        native_allow = set(re.findall(r"src/server/game/[A-Za-z0-9_./]+\\.(?:cpp|h)",
+                                          native[start:end]))
+        self.assertEqual(native_allow, exact | {
+            "src/server/game/Entities/Player/PlayerSettings.cpp",
+            "src/server/game/Entities/Player/Player.h",
+        })
+
     def test_distinct_partial_contract(self):
         self.assertIn("#define COSMIC_F14_ATTACK_EVENT_HOOK_VERSION 1", PATCH)
         self.assertNotIn("#define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION", PATCH)
