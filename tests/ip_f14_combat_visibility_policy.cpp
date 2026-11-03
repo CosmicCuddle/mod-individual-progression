@@ -12,6 +12,7 @@ constexpr F14::CreatureSnapshot Creature()
     F14::CreatureSnapshot c{};
     c.complete = true;
     c.current = true;
+    c.generation = 1; // Present, current creature state.
     c.plainUnscriptedNonEliteHostileNpc = true;
     c.alive = true;
     c.inCombat = true;
@@ -26,6 +27,7 @@ constexpr F14::ObserverSnapshot Observer()
 {
     F14::ObserverSnapshot o{};
     o.explicitlyEnabled = true;
+    o.checkedAgainstCreatureGeneration = 1;
     o.positivelyVerifiedNormalPlayer = true;
     o.hasVanillaEffectiveProgression = true;
     o.allParticipantsAlreadyHiddenFromThisObserver = true;
@@ -87,8 +89,21 @@ int main()
     c = c0; c.plainUnscriptedNonEliteHostileNpc = false; visible("rare/boss/escort/pet/script/charm", c, o0);
     c = c0; c.alive = false; visible("corpse or dead creature", c, o0);
     c = c0; c.inCombat = false; visible("combat ended", c, o0);
+    c = c0; c.eligibleHiddenRandomBotCurrentlyAttackingThisCreature = false;
+    visible("bot stops attacking even though creature remains in combat", c, o0);
+    c = c0; c.alive = false;
+    visible("death overrides a stale active-attacker flag", c, o0);
+    c = c0; c.generation = 2;
+    visible("stale viewer-target pair after combatant joins", c, o0);
+    o = o0; o.checkedAgainstCreatureGeneration = 2;
+    visible("stale viewer-target pair against original creature generation", c0, o);
+    c = c0; c.generation = 0;
+    o = o0; o.checkedAgainstCreatureGeneration = 0;
+    visible("zero generation never authorizes concealment", c, o);
+    c = c0; c.generation = 2;
+    o = o0; o.checkedAgainstCreatureGeneration = 2;
+    hide("fresh viewer-target pair matches new creature generation", c, o);
     c = c0; c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion = false; visible("human BE, Altbot or unknown attacker", c, o0);
-    c = c0; c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion = false; visible("mixed hidden bot and unrelated GM-hidden participant", c, o0);
     c = c0; c.noRealPlayerCombatThreatTapOrRights = false; visible("other real player has threat/tap rights", c, o0);
     c = c0; c.noPendingThreatOrCombatantChanges = false; visible("new victim or threat-add pending", c, o0);
 
