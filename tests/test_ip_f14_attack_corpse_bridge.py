@@ -165,6 +165,26 @@ class F14TransitionBridge(unittest.TestCase):
             self.assertNotIn(code, corpse)
             self.assertNotIn(code, respawn)
 
+    def test_existing_world_add_hook_recovers_pre_world_respawn(self):
+        # The post-Alive Core respawn event can fire before AddToWorld, when
+        # IsInWorld() correctly makes its refresh a no-op. Use existing
+        # AllCreatureScript AddWorld callback, not a fourth Core patch seam.
+        self.assertIn('#include "AllCreatureScript.h"', P)
+        self.assertIn("class IndividualProgressionF14WorldAddScript final : public AllCreatureScript", P)
+        self.assertIn("new IndividualProgressionF14WorldAddScript();", P)
+        self.assertIn("new IndividualProgressionF14AttackEventScript();", P)
+        added = method(P, "void OnCreatureAddWorld(Creature* creature) override")
+        for condition in ("!sIndividualProgression->enabled",
+                          "!sIndividualProgression->f14ExperimentalRndbotPlayerVisibility",
+                          "!creature || !creature->IsInWorld()"):
+            self.assertIn(condition, added)
+        self.assertIn("creature->UpdateObjectVisibility(true);", added)
+        for forbidden in ("SetPhaseMask(", "GetLootRecipient", "GetLoot", "sRandomPlayerbotMgr",
+                          "DestroyForVisiblePlayers(", "SaveToDB("):
+            self.assertNotIn(forbidden, added)
+        self.assertNotIn("void OnCreatureRemoveWorld(", P,
+                         "Removal must not send packets while Core tears down the creature")
+
     def test_logout_avoids_unreviewed_cross_thread_visibility_work(self):
         # Core/Playerbots session teardown can invalidate a verified actor
         # without an AttackStop callback carrying an eligible headless
