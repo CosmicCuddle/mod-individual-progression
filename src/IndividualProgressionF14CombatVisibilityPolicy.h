@@ -27,6 +27,8 @@ namespace IndividualProgressionF14CombatVisibilityPolicy
         bool plainUnscriptedNonEliteHostileNpc = false;
         bool alive = false;
         bool inCombat = false;
+        // Current active attack against THIS creature; old combat/threat is insufficient.
+        bool eligibleHiddenRandomBotCurrentlyAttackingThisCreature = false;
 
         // ALL participants, not merely one positive attacker, must be
         // positively identified BE/Draenei rndbots or positively owned
@@ -84,6 +86,7 @@ namespace IndividualProgressionF14CombatVisibilityPolicy
                c.complete && c.current &&
                c.plainUnscriptedNonEliteHostileNpc &&
                c.alive && c.inCombat &&
+               c.eligibleHiddenRandomBotCurrentlyAttackingThisCreature &&
                c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion &&
                c.noRealPlayerCombatThreatTapOrRights &&
                c.noPendingThreatOrCombatantChanges;
