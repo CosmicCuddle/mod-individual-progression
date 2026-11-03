@@ -428,6 +428,9 @@ public:
     bool paidExpansionGrandfatherStage13 = false;
     // Independent F14 group-time pilot; leave OFF until owner approval.
     bool f14ProtectVerifiedRandomBotGroupFloor = false;
+    // Experimental F14 world-observer player visibility pilot; OFF by default.
+    // Requires the separate Core observer hook; /who and refresh are not ready.
+    bool f14ExperimentalRndbotPlayerVisibility = false;
     std::string paidExpansionVendorName;
 
     // progression is derived from rewarded hidden quests (IDs 66000 + progression)
@@ -450,6 +453,7 @@ public:
     // F14: verified GUID is recorded only on the login thread; group workers never call Playerbots.
     void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
     void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
+    bool HasF14VerifiedRandomBotIdentity(Player const* player);
     bool ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage);
     void checkHunterPetSpells(Player* player);
     void checkWarlockPetSpells(Player* player);
