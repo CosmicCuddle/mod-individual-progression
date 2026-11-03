@@ -79,15 +79,11 @@ def without_f14_group_floor_player(src: str) -> str:
     # optional F14 attack/stop/corpse pilot is covered by its own new test,
     # and must not alter the original C3/F19 group/login baseline.
     new_registration = ("#if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION)\n"
+                        "    new IndividualProgressionF14WorldAddScript();\n"
                         "    new IndividualProgressionF14AttackEventScript();\n"
                         "#endif\n")
     assert src.count(new_registration) == 1
     src = src.replace(new_registration, "")
-    # The optional AllCreatureScript AddWorld watcher is a separate F14-only
-    # script; it is never part of the frozen C3 player/login implementation.
-    new_addworld_registration = "    new IndividualProgressionF14WorldAddScript();\n"
-    assert src.count(new_addworld_registration) == 1
-    src = src.replace(new_addworld_registration, "")
     return src
 
 
