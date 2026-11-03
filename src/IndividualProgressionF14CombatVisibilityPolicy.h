@@ -40,6 +40,13 @@ namespace IndividualProgressionF14CombatVisibilityPolicy
         bool noRealPlayerCombatThreatTapOrRights = false;
         bool noPendingThreatOrCombatantChanges = false;
 
+        // Stable nonzero identity for THIS living creature instance, not
+        // merely its template or spawn ID. Regeneration/respawn must issue a
+        // fresh identity so stale observer facts cannot match a new entity.
+        // A creature revision alone is unsafe: different creatures may both
+        // start at generation 1.
+        std::uint64_t creatureIdentityToken = 0;
+
         // Nonzero revision of this target's combat/attack/rights facts.
         // A participant, threat, active-attack or ownership change must
         // invalidate all previously checked viewer-target pairs.
@@ -77,7 +84,10 @@ namespace IndividualProgressionF14CombatVisibilityPolicy
         bool coreVisibilityAndThreatRefreshVerified = false;
 
         // This is a viewer/creature PAIR fact set, not just a viewer cache.
-        // All observer checks must be made against this exact creature state.
+        // Both the target's unique instance identity and current revision
+        // must match. A cached result for creature A must never apply to B
+        // even if A and B have the same revision value.
+        std::uint64_t checkedAgainstCreatureIdentityToken = 0;
         std::uint32_t checkedAgainstCreatureGeneration = 0;
 
         // These two proofs must be evaluated from live Unit/attacker state
@@ -93,7 +103,9 @@ namespace IndividualProgressionF14CombatVisibilityPolicy
     constexpr bool ShouldConcealCreatureFromObserver(CreatureSnapshot const& c,
                                                      ObserverSnapshot const& o)
     {
-        return c.generation != 0 &&
+        return c.creatureIdentityToken != 0 &&
+               c.creatureIdentityToken == o.checkedAgainstCreatureIdentityToken &&
+               c.generation != 0 &&
                c.generation == o.checkedAgainstCreatureGeneration &&
                o.explicitlyEnabled &&
                o.positivelyVerifiedNormalPlayer &&
