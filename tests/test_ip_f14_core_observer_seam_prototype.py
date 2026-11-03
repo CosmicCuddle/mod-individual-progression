@@ -46,7 +46,7 @@ class PrototypeBoundary(unittest.TestCase):
         self.assertEqual(len(paths), 5)
         self.assertEqual(set(paths), PINNED_PATHS)
         self.assertEqual(PATCH.count("diff --git "), 5)
-        self.assertEqual(PATCH.count("@@ -"), 6)
+        self.assertEqual(PATCH.count("@@ -"), 8)
         for path in paths:
             self.assertIn(f"--- a/{path}\n+++ b/{path}", PATCH)
 
@@ -82,8 +82,8 @@ class PrototypeBoundary(unittest.TestCase):
         player_section = PATCH.split(
             "diff --git a/src/server/game/Entities/Player/Player.cpp", 1
         )[1]
-        self.assertEqual(object_section.count("+            return false;"), 1)
-        self.assertEqual(player_section.count("+        return false;"), 1)
+        self.assertEqual(object_section.count("+                return false;"), 1)
+        self.assertEqual(player_section.count("+            return false;"), 1)
         self.assertIn(
             "if (CanNeverSee(obj))", object_section,
             "preserve stock no-map/no-phase check",
@@ -103,10 +103,35 @@ class PrototypeBoundary(unittest.TestCase):
         self.assertIn("(obj->IsPlayer() || obj->IsCreature())", PATCH)
         self.assertIn("!sScriptMgr->OnWorldObjectCanBeSeenByPlayer(observer, obj)", PATCH)
         self.assertIn("!sScriptMgr->OnWorldObjectCanBeSeenByPlayer(u, this)", PATCH)
-        self.assertIn("AccountMgr::IsPlayerAccount(u->GetSession()->GetSecurity())", PATCH)
+        self.assertIn("AccountMgr::IsPlayerAccount(observerSession->GetSecurity())", PATCH)
         # Stock order of self, detection and GM rights still protects self.
         self.assertIn("    if (u == this)", PATCH)
         self.assertIn("    if (IsVisible())", PATCH)
+
+    def test_headless_bot_and_gm_session_visibility_fail_open(self):
+        # A headless player has no WorldSession. It must bypass the new
+        # observer callback without dereferencing GetSession()->GetSecurity().
+        object_section = PATCH.split(
+            "diff --git a/src/server/game/Entities/Object/Object.cpp", 1
+        )[1].split("diff --git a/", 1)[0]
+        player_section = PATCH.split(
+            "diff --git a/src/server/game/Entities/Player/Player.cpp", 1
+        )[1]
+        self.assertIn('+#include "AccountMgr.h"', object_section)
+        self.assertIn('+#include "WorldSession.h"', object_section)
+        self.assertIn("if (WorldSession const* session = observer->GetSession())",
+                      object_section)
+        self.assertIn("AccountMgr::IsPlayerAccount(session->GetSecurity())",
+                      object_section)
+        self.assertIn("if (WorldSession const* observerSession = u->GetSession())",
+                      player_section)
+        self.assertIn("AccountMgr::IsPlayerAccount(observerSession->GetSecurity())",
+                      player_section)
+        self.assertLess(object_section.index("if (WorldSession const* session"),
+                        object_section.index("AccountMgr::IsPlayerAccount(session"))
+        self.assertLess(player_section.index("if (WorldSession const* observerSession"),
+                        player_section.index("AccountMgr::IsPlayerAccount(observerSession"))
+        self.assertNotIn("+        if (!observer->GetSession()) return false;", object_section)
 
     def test_no_bot_policy_implemented_or_creature_lifecycle_changed(self):
         for forbidden in ("+    player->RewardQuest(", "+    bot->RewardQuest(",
@@ -150,7 +175,10 @@ class ActualPatchedCore(unittest.TestCase):
                         glob.index("OnWorldObjectCanBeSeenByPlayer(u, this)"))
         self.assertLess(glob.index("OnWorldObjectCanBeSeenByPlayer(u, this)"),
                         glob.index("if (IsVisible())"))
-        self.assertIn("AccountMgr::IsPlayerAccount(u->GetSession()->GetSecurity())", glob)
+        self.assertIn("AccountMgr::IsPlayerAccount(observerSession->GetSecurity())", glob)
+        self.assertIn("if (WorldSession const* session = observer->GetSession())", body)
+        self.assertIn("AccountMgr::IsPlayerAccount(session->GetSecurity())", body)
+        self.assertIn("if (WorldSession const* observerSession = u->GetSession())", glob)
 
 
 if __name__ == "__main__":
