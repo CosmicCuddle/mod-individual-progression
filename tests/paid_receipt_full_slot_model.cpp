@@ -57,6 +57,17 @@ namespace
         return l;
     }
 
+
+    // Model the real setter's ordering: update Core's map, then mirror the
+    // receipt cache even for slot 2, which has no purchase-entitlement bit.
+    void MirrorReceiptSetting(CoreVectorModel& core, Policy::Ledger& cached,
+        std::size_t index, std::uint32_t value)
+    {
+        core.UpdatePlayerSetting(index, value);
+        if (index < Policy::Slots)
+            cached.fields[index] = value;
+    }
+
     void WriteAllEight(CoreVectorModel& core, Policy::Ledger const& paid)
     {
         for (std::size_t slot = 0; slot < Policy::Slots; ++slot)
@@ -122,6 +133,25 @@ int main()
     auto const retainedResult = Policy::DecodeRaw(retained.Serialize(), true);
     Check("grandfather evaluation preserved across all slots", retainedResult &&
           retainedResult.ledger.fields[Policy::GrandfatherEvaluated] == 1);
+
+    // Regression: initial packets cache slot 2 = 0; login evaluates it to 1;
+    // first purchase must not restore the stale cached zero through WriteAllEight.
+    Policy::Ledger loginCache = EmptyV1();
+    CoreVectorModel sameSession;
+    WriteAllEight(sameSession, loginCache);
+    MirrorReceiptSetting(sameSession, loginCache, Policy::GrandfatherEvaluated, 1);
+    Check("login evaluation mirrored to cached receipt", loginCache.fields[Policy::GrandfatherEvaluated] == 1);
+    Check("login evaluation recorded in Core settings", sameSession.fields[Policy::GrandfatherEvaluated] == 1);
+    Policy::Ledger purchasedAfterLogin = loginCache;
+    Check("same-session TBC purchase staged after evaluation",
+          Policy::RecordPurchase(purchasedAfterLogin, Policy::Era::Tbc, 3344, 1700000010));
+    WriteAllEight(sameSession, purchasedAfterLogin);
+    auto const afterSession = Policy::DecodeRaw(sameSession.Serialize(), true);
+    Check("same-session purchase did not reset evaluated marker", afterSession &&
+          afterSession.ledger.fields[Policy::GrandfatherEvaluated] == 1);
+    Check("same-session purchase kept paid entitlement", afterSession &&
+          Policy::HasPaidReceipt(afterSession.ledger, Policy::Era::Tbc));
+    Check("same-session paid row canonical", sameSession.Serialize() == Policy::Serialize(purchasedAfterLogin));
 
     Check("no row never auto-decodes as paid", Policy::DecodeRaw({}, false).status == Policy::Status::Missing);
     Check("legacy three-slot row still refuses", Policy::DecodeRaw("1 0 0 ", true).status == Policy::Status::WrongSlotCount);
