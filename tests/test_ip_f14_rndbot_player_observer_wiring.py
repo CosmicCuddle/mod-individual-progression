@@ -100,7 +100,7 @@ class F14RuntimePilot(unittest.TestCase):
         code = method(PLAYER, "bool OnWorldObjectCanBeSeenByPlayer(")
         for banned in ("SaveToDB(", "UpdatePlayerSetting(", "RemoveRewardedQuest("):
             self.assertNotIn(banned, code)
-        self.assertIn("Only on the existing verified login thread", PLAYER)
+        self.assertIn("Only this existing", PLAYER)
 
 if __name__ == "__main__":
     unittest.main()
