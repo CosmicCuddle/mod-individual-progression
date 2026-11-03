@@ -1,0 +1,140 @@
+diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
+--- a/src/server/game/Scripting/ScriptMgr.h
++++ b/src/server/game/Scripting/ScriptMgr.h
+@@ -735,7 +735,9 @@
+     void OnWorldObjectCreate(WorldObject* object);
+     void OnWorldObjectSetMap(WorldObject* object, Map* map);
+     void OnWorldObjectResetMap(WorldObject* object);
+-    void OnWorldObjectUpdate(WorldObject* object, uint32 diff);
++    void OnWorldObjectUpdate(WorldObject* object, uint32 diff);
++    // Observer-specific ALLOW-by-default seam; F14 runtime is UNWIRED.
++    bool OnWorldObjectCanBeSeenByPlayer(Player const* observer, WorldObject const* target);
+ 
+ public: /* PetScript */
+ 
+diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+--- a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
++++ b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+@@ -27,8 +27,9 @@
+     WORLDOBJECTHOOK_ON_WORLD_OBJECT_CREATE,
+     WORLDOBJECTHOOK_ON_WORLD_OBJECT_SET_MAP,
+     WORLDOBJECTHOOK_ON_WORLD_OBJECT_RESET_MAP,
+-    WORLDOBJECTHOOK_ON_WORLD_OBJECT_UPDATE,
+-    WORLDOBJECTHOOK_END
++    WORLDOBJECTHOOK_ON_WORLD_OBJECT_UPDATE,
++    WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER,
++    WORLDOBJECTHOOK_END
+ };
+ 
+ class WorldObjectScript : public ScriptObject
+@@ -73,7 +74,10 @@
+      * @param object Contains information about the WorldObject
+      * @param diff Contains information about the diff time
+      */
+-    virtual void OnWorldObjectUpdate(WorldObject* /*object*/, uint32 /*diff*/) { }
++    virtual void OnWorldObjectUpdate(WorldObject* /*object*/, uint32 /*diff*/) { }
++
++    // Future observer-specific explicit veto only; no module currently overrides.
++    [[nodiscard]] virtual bool OnWorldObjectCanBeSeenByPlayer(Player const* /*observer*/, WorldObject const* /*target*/) { return true; }
+ };
+ 
+ #endif
+diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
+--- a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
++++ b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
+@@ -54,7 +54,14 @@
+     CALL_ENABLED_HOOKS(WorldObjectScript, WORLDOBJECTHOOK_ON_WORLD_OBJECT_UPDATE, script->OnWorldObjectUpdate(object, diff));
+ }
+ 
+-WorldObjectScript::WorldObjectScript(char const* name, std::vector<uint16> enabledHooks)
++bool ScriptMgr::OnWorldObjectCanBeSeenByPlayer(Player const* observer, WorldObject const* target)
++{
++    ASSERT(observer && target);
++    CALL_ENABLED_BOOLEAN_HOOKS(WorldObjectScript, WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER,
++        !script->OnWorldObjectCanBeSeenByPlayer(observer, target));
++}
++
++WorldObjectScript::WorldObjectScript(char const* name, std::vector<uint16> enabledHooks)
+     : ScriptObject(name, WORLDOBJECTHOOK_END)
+ {
+     // If empty - enable all available hooks.
+diff --git a/src/server/game/Entities/Object/Object.cpp b/src/server/game/Entities/Object/Object.cpp
+--- a/src/server/game/Entities/Object/Object.cpp
++++ b/src/server/game/Entities/Object/Object.cpp
+@@ -15,8 +15,9 @@
+  * with this program. If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
+-#include "Object.h"
+-#include "Battlefield.h"
++#include "Object.h"
++#include "AccountMgr.h"
++#include "Battlefield.h"
+ #include "BattlefieldMgr.h"
+ #include "CellImpl.h"
+ #include "Chat.h"
+@@ -55,8 +56,9 @@
+ #include "Util.h"
+ #include "Vehicle.h"
+ #include "World.h"
+-#include "WorldPacket.h"
+-
++#include "WorldPacket.h"
++#include "WorldSession.h"
++
+ /// @todo: this import is not necessary for compilation and marked as unused by the IDE
+ //  however, for some reasons removing it would cause a damn linking issue
+ //  there is probably some underlying problem with imports which should properly addressed
+@@ -1814,10 +1816,19 @@
+     if (this == obj)
+         return true;
+ 
+-    if (CanNeverSee(obj))
+-        return false;
+-
+-    if (obj->IsAlwaysVisibleFor(this) || CanAlwaysSee(obj))
++    if (CanNeverSee(obj))
++        return false;
++
++    // F14 observer-specific prototype. Headless/unauthed observers and GMs
++    // retain their historic visibility. NO module currently vetoes.
++    if (Player const* observer = ToPlayer())
++        if (WorldSession const* session = observer->GetSession())
++            if (AccountMgr::IsPlayerAccount(session->GetSecurity()) &&
++                (obj->IsPlayer() || obj->IsCreature()) &&
++                !sScriptMgr->OnWorldObjectCanBeSeenByPlayer(observer, obj))
++                return false;
++
++    if (obj->IsAlwaysVisibleFor(this) || CanAlwaysSee(obj))
+         return true;
+ 
+     // Creature scripts
+diff --git a/src/server/game/Entities/Player/Player.cpp b/src/server/game/Entities/Player/Player.cpp
+--- a/src/server/game/Entities/Player/Player.cpp
++++ b/src/server/game/Entities/Player/Player.cpp
+@@ -11670,12 +11670,19 @@
+     if (!u)
+         return false;
+ 
+-    // Always can see self
+-    if (u == this)
+-        return true;
+-
+-    // Visible units, always are visible for all players
+-    if (IsVisible())
++    // Always can see self
++    if (u == this)
++        return true;
++
++    // Headless bot observers may have no session, unlike ordinary players.
++    // Preserve the fast visible-player path and GM rights in that case.
++    if (WorldSession const* observerSession = u->GetSession())
++        if (AccountMgr::IsPlayerAccount(observerSession->GetSecurity()) &&
++            !sScriptMgr->OnWorldObjectCanBeSeenByPlayer(u, this))
++            return false;
++
++    // Visible units, always are visible for all players
++    if (IsVisible())
+         return true;
+ 
+     // GMs are visible for higher gms (or players are visible for gms)
