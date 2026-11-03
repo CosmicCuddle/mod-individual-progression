@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/IndividualProgressionF14CombatVisibilityPolicy.h'
       - 'tests/ip_f14_combat_visibility_policy.cpp'
+      - 'tests/ip_f14_active_attack_transition.cpp'
       - '.github/workflows/ip-f14-combat-visibility-model.yml'
   pull_request:
     paths:
@@ -28,3 +29,5 @@ jobs:
           "$RUNNER_TEMP/f14-policy"
           "${{ matrix.compiler }}" -std="${{ matrix.standard }}" -DNDEBUG -Wall -Wextra -Werror -pedantic -I. tests/ip_f14_combat_visibility_policy.cpp -o "$RUNNER_TEMP/f14-policy-ndebug"
           "$RUNNER_TEMP/f14-policy-ndebug"
+          "${{ matrix.compiler }}" -std="${{ matrix.standard }}" -Wall -Wextra -Werror -pedantic -I. tests/ip_f14_active_attack_transition.cpp -o "$RUNNER_TEMP/f14-active-attack"
+          "$RUNNER_TEMP/f14-active-attack"
