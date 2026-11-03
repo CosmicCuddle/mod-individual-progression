@@ -24,7 +24,7 @@ diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h b/src/s
  #include <vector>
  
  enum WorldObjectHook
-@@ -28,7 +29,8 @@
+@@ -28,12 +29,15 @@
      WORLDOBJECTHOOK_ON_WORLD_OBJECT_SET_MAP,
      WORLDOBJECTHOOK_ON_WORLD_OBJECT_RESET_MAP,
      WORLDOBJECTHOOK_ON_WORLD_OBJECT_UPDATE,
@@ -32,9 +32,6 @@ diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h b/src/s
 +    WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER,
 +    WORLDOBJECTHOOK_ON_WHO_LIST_ENTRY_CAN_BE_SEEN_BY_PLAYER,
      WORLDOBJECTHOOK_END
- };
- 
-@@ -33,7 +35,9 @@
  };
  
  // Explicit opt-in compile contract for the isolated IP F14 observer pilot.
