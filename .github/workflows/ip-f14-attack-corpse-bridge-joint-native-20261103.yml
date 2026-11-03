@@ -225,7 +225,7 @@ jobs:
           git -C prototype merge-base --is-ancestor ce69a6891470693a471896b999c4fc97424f8676 HEAD
           git -C prototype merge-base --is-ancestor 9b64bf1e1d624c3d02b02a668aa2f7207d6d097b HEAD
           git -C prototype diff --name-only 9b64bf1e1d624c3d02b02a668aa2f7207d6d097b HEAD -- src conf sql data optional | sort >/tmp/f14-actual.txt
-          printf '%s\n' src/IndividualProgression.cpp src/IndividualProgression.h src/IndividualProgressionPlayer.cpp src/IndividualProgressionF14RefreshPolicy.h conf/individualProgression.conf.dist | sort >/tmp/f14-expected.txt
+          printf '%s\n' src/IndividualProgression.cpp src/IndividualProgression.h src/IndividualProgressionPlayer.cpp src/IndividualProgressionF14RefreshPolicy.h src/IndividualProgressionF14MultiAttackerPolicy.h conf/individualProgression.conf.dist | sort >/tmp/f14-expected.txt
           diff -u /tmp/f14-expected.txt /tmp/f14-actual.txt
           core=acore
           test "$(git -C "$core" rev-parse HEAD:src/server/game/Scripting/ScriptMgr.h)" = 7f0f30d3ca46cb290636c33ca8e1b2b9c0ffa1f8
