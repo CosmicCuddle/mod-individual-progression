@@ -1,59 +1,104 @@
 /*
- * CosmicCuddle Individual Progression — F14 creature-combat visibility policy.
+ * CosmicCuddle Individual Progression — F14 creature combat presentation.
  *
- * PURE, UNWIRED DEVELOPMENT MODEL. There is no runtime hook or configuration
- * reader for this policy. All facts must eventually come from safe, verified
- * observer/target snapshots; this file must not query Playerbots on map threads.
- * Without all required evidence, the policy preserves stock visibility.
+ * PURE, UNWIRED MODEL. No current Core/IP source includes this in a runtime
+ * visibility hook, and no live config enables it.
+ *
+ * The actual per-creature state must eventually be refreshed from a safe
+ * event-driven identity/threat snapshot, not computed by scanning participants
+ * or consulting Playerbots inside the per-viewer visibility hot path.
+ *
+ * Every positive safety proof defaults false. Missing/expired facts => VISIBLE.
  */
 #ifndef INDIVIDUAL_PROGRESSION_F14_COMBAT_VISIBILITY_POLICY_H
 #define INDIVIDUAL_PROGRESSION_F14_COMBAT_VISIBILITY_POLICY_H
 
 namespace IndividualProgressionF14CombatVisibilityPolicy
 {
-    struct Facts
+    // Cached per-creature evidence. Populate only on a safe map-thread event:
+    // engage, new threat/victim, combatant join/leave, reset, death, despawn
+    // and relevant RandomBot identity/ownership changes.
+    struct CreatureSnapshot
     {
-        // The implementation must leave this OFF until independently approved.
-        bool explicitlyEnabled = false;
-        bool observerIsVanilla = false;
-        bool observerIsGameMaster = false;
-        bool targetIsHostileCreature = false;
-        bool targetIsAlive = false;
-        bool targetInCombat = false;
+        bool complete = false;
+        bool current = false;
+        // Conservative first-pilot scope; rare/boss/escort/SmartAI/scripted,
+        // vehicle/charmed/summoned, pet and other special units fail visible.
+        bool plainUnscriptedNonEliteHostileNpc = false;
+        bool alive = false;
+        bool inCombat = false;
 
-        // These require the SAME positive, observer-specific RandomBot identity
-        // and actual player-visibility decision as the eventual F14 bot filter.
-        bool tbcRaceAttackerVerifiedRandomBot = false;
-        bool tbcRaceAttackerActuallyHiddenFromObserver = false;
-        bool everyCombatParticipantHiddenFromObserver = false;
-
-        // Fail open unless complete, current, concurrency-safe facts prove that
-        // concealing the NPC cannot strand another player's target/combat/loot.
-        bool interactionSnapshotComplete = false;
-        bool observerAlreadyTargetingOrInteracting = false;
-        bool anyRealPlayerInvolvedWithTarget = false;
-        bool questLootTapOrSkinRightsAtRisk = false;
-        bool bossEscortSummonOrOtherSpecialTarget = false;
-        bool visibilityOrCombatTransitionPending = false;
+        // ALL participants, not merely one positive attacker, must be
+        // positively identified BE/Draenei rndbots or positively owned
+        // minions of those exact bots. "Hidden by some other rule" is NOT
+        // enough. A missing owner, unknown or human participant fails visible.
+        bool everyParticipantVerifiedTbcRaceRandomBotOrItsMinion = false;
+        bool noRealPlayerCombatThreatTapOrRights = false;
+        bool noPendingThreatOrCombatantChanges = false;
     };
 
-    constexpr bool ShouldConcealCreatureFromObserver(Facts const& f)
+    // Cheap per-observer evidence, with no threat-list walk or mutable PB
+    // RandomPlayerbotMgr lookup during a visibility check.
+    struct ObserverSnapshot
     {
-        return f.explicitlyEnabled &&
-               f.observerIsVanilla &&
-               !f.observerIsGameMaster &&
-               f.targetIsHostileCreature &&
-               f.targetIsAlive &&
-               f.targetInCombat &&
-               f.tbcRaceAttackerVerifiedRandomBot &&
-               f.tbcRaceAttackerActuallyHiddenFromObserver &&
-               f.everyCombatParticipantHiddenFromObserver &&
-               f.interactionSnapshotComplete &&
-               !f.observerAlreadyTargetingOrInteracting &&
-               !f.anyRealPlayerInvolvedWithTarget &&
-               !f.questLootTapOrSkinRightsAtRisk &&
-               !f.bossEscortSummonOrOtherSpecialTarget &&
-               !f.visibilityOrCombatTransitionPending;
+        bool explicitlyEnabled = false;  // This is NOT a live config key.
+        bool positivelyVerifiedNormalPlayer = false; // No GM/security bypass.
+        bool hasVanillaEffectiveProgression = false;
+
+        // Positive evidence from the SAME actual F14 player-hiding policy,
+        // for every actor in the cached creature snapshot. Race is insufficient.
+        bool allParticipantsAlreadyHiddenFromThisObserver = false;
+
+        // "No interaction" must include target selection, existing auras and
+        // DoTs, observer-owned pets/totems/guardians, missiles/spells in flight,
+        // direct/assist threat and combat, and group-shared quest/loot/skin/
+        // kill credit. Any uncertainty in these observations => visible.
+        bool noOwnTargetAuraPetTotemGuardianOrSpellInFlight = false;
+        bool noObserverOrOwnedUnitThreatCombatOrPendingAssist = false;
+        bool provenOutsideCreatureAggroAssistCleaveAndAoeReach = false;
+        bool noObserverOrGroupQuestLootTapSkinOrKillCredit = false;
+
+        // If an era/identity transition or event-based visibility refresh is
+        // pending, show the creature instead of risking invisible ghost hits.
+        bool observerStageAndIdentityStable = false;
+
+        // Cannot be supplied by today's pinned Core: requires an approved
+        // observer-specific deny hook and an immediate threat/exit/death/
+        // progression-change visibility invalidation implementation.
+        bool coreVisibilityAndThreatRefreshVerified = false;
+    };
+
+    constexpr bool ShouldConcealCreatureFromObserver(CreatureSnapshot const& c,
+                                                     ObserverSnapshot const& o)
+    {
+        return o.explicitlyEnabled &&
+               o.positivelyVerifiedNormalPlayer &&
+               o.hasVanillaEffectiveProgression &&
+               o.allParticipantsAlreadyHiddenFromThisObserver &&
+               o.noOwnTargetAuraPetTotemGuardianOrSpellInFlight &&
+               o.noObserverOrOwnedUnitThreatCombatOrPendingAssist &&
+               o.provenOutsideCreatureAggroAssistCleaveAndAoeReach &&
+               o.noObserverOrGroupQuestLootTapSkinOrKillCredit &&
+               o.observerStageAndIdentityStable &&
+               o.coreVisibilityAndThreatRefreshVerified &&
+               c.complete && c.current &&
+               c.plainUnscriptedNonEliteHostileNpc &&
+               c.alive && c.inCombat &&
+               c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion &&
+               c.noRealPlayerCombatThreatTapOrRights &&
+               c.noPendingThreatOrCombatantChanges;
+    }
+
+    // A MODEL of why a runtime visibility refresh will be required.
+    // It does NOT perform it. Event handlers must independently invalidate
+    // cached facts and schedule refresh before hidden creatures can attack.
+    constexpr bool ConcealmentDecisionChanged(CreatureSnapshot const& priorCreature,
+                                              ObserverSnapshot const& priorObserver,
+                                              CreatureSnapshot const& nextCreature,
+                                              ObserverSnapshot const& nextObserver)
+    {
+        return ShouldConcealCreatureFromObserver(priorCreature, priorObserver) !=
+               ShouldConcealCreatureFromObserver(nextCreature, nextObserver);
     }
 }
 
