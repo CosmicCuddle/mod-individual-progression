@@ -23,6 +23,7 @@
 // Lets dependent modules (e.g. Character Services) detect the paid expansion
 // API at compile time and keep building against an IP without it.
 #define COSMIC_IP_PAID_EXPANSION_API_VERSION 1
+#include <atomic>
 #include <regex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -430,7 +431,7 @@ public:
     bool f14ProtectVerifiedRandomBotGroupFloor = false;
     // Experimental F14 world-observer player visibility pilot; OFF by default.
     // Requires the separate Core observer hook; /who and refresh are not ready.
-    bool f14ExperimentalRndbotPlayerVisibility = false;
+    std::atomic<bool> f14ExperimentalRndbotPlayerVisibility{false};
     std::string paidExpansionVendorName;
 
     // progression is derived from rewarded hidden quests (IDs 66000 + progression)
