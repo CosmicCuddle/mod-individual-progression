@@ -32,3 +32,5 @@ jobs:
           "$RUNNER_TEMP/f14-policy-ndebug"
           "${{ matrix.compiler }}" -std="${{ matrix.standard }}" -Wall -Wextra -Werror -pedantic -I. tests/ip_f14_active_attack_transition.cpp -o "$RUNNER_TEMP/f14-active-attack"
           "$RUNNER_TEMP/f14-active-attack"
+          "${{ matrix.compiler }}" -std="${{ matrix.standard }}" -DNDEBUG -Wall -Wextra -Werror -pedantic -I. tests/ip_f14_active_attack_transition.cpp -o "$RUNNER_TEMP/f14-active-attack-ndebug"
+          "$RUNNER_TEMP/f14-active-attack-ndebug"
