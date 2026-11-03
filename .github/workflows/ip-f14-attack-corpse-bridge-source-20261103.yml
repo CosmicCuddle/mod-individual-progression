@@ -14,7 +14,9 @@ on:
       - "tests/core_patches/f14_attack_corpse_event_bridge_prototype.patch"
       - "tests/test_ip_f14_attack_corpse_bridge.py"
       - "tests/test_ip_f14_login_incarnation_token.py"
+      - "src/IndividualProgressionF14ActorCreatureIndex.h"
       - "src/IndividualProgressionF14MultiAttackerPolicy.h"
+      - "tests/f14_actor_creature_index.cpp"
       - "tests/f14_multi_attacker_policy.cpp"
       - "tests/test_ip_f14_core_observer_seam_prototype.py"
       - "tests/test_ip_f19_login_floor_source.py"
@@ -31,7 +33,9 @@ on:
       - "tests/core_patches/f14_attack_corpse_event_bridge_prototype.patch"
       - "tests/test_ip_f14_attack_corpse_bridge.py"
       - "tests/test_ip_f14_login_incarnation_token.py"
+      - "src/IndividualProgressionF14ActorCreatureIndex.h"
       - "src/IndividualProgressionF14MultiAttackerPolicy.h"
+      - "tests/f14_actor_creature_index.cpp"
       - "tests/f14_multi_attacker_policy.cpp"
       - ".github/workflows/ip-f14-attack-corpse-bridge-source-20261103.yml"
 
@@ -63,7 +67,7 @@ jobs:
           set -euo pipefail
           git -C ip merge-base --is-ancestor 9962ab8cb009c23d99b457d8ded618828be12a78 HEAD
           git -C ip diff --name-only 9962ab8cb009c23d99b457d8ded618828be12a78 HEAD -- src conf sql data optional | sort >/tmp/f14-ip-actual.txt
-          printf '%s\n' src/IndividualProgression.cpp src/IndividualProgression.h src/IndividualProgressionPlayer.cpp src/IndividualProgressionF14MultiAttackerPolicy.h | sort >/tmp/f14-ip-expected.txt
+          printf '%s\n' src/IndividualProgression.cpp src/IndividualProgression.h src/IndividualProgressionPlayer.cpp src/IndividualProgressionF14ActorCreatureIndex.h src/IndividualProgressionF14MultiAttackerPolicy.h | sort >/tmp/f14-ip-expected.txt
           diff -u /tmp/f14-ip-expected.txt /tmp/f14-ip-actual.txt
           test "$(git -C core rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
       - name: Apply default-allow observer + cached WHO + attack/corpse patches in order
@@ -137,6 +141,24 @@ jobs:
             done
           done
           echo 'Four compile/run combinations passed ONLY the pure candidate policy.'
+
+      - name: Compile and run pure actor-to-creature expiry index (four compiler combinations)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s ip/src/IndividualProgressionF14ActorCreatureIndex.h
+          test -s ip/tests/f14_actor_creature_index.cpp
+          ! grep -RFq --include='*.cpp' 'IndividualProgressionF14ActorCreatureIndex.h' ip/src
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              "$compiler" -std="$standard" -O2 -DNDEBUG \
+                -Wall -Wextra -Werror -pedantic -Iip/src -Iip \
+                ip/tests/f14_actor_creature_index.cpp -o /tmp/f14-actor-index
+              /tmp/f14-actor-index | tee /tmp/f14-index-result.txt
+              grep -Fqx 'F14 ACTOR INDEX 49/49 PASSED; offline/fail-visible model only' /tmp/f14-index-result.txt
+            done
+          done
+          echo 'The map-wide actor-to-creature index is UNWIRED: model-only, no runtime callback or client visibility.'
 
       - name: Boundary statement
         if: always()
