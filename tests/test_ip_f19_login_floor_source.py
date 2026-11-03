@@ -65,9 +65,20 @@ class Provenance(unittest.TestCase):
         self.assertEqual(f14_delta, [
             "src/IndividualProgression.cpp",
             "src/IndividualProgression.h",
+            "src/IndividualProgressionF14CombatVisibilityPolicy.h",  # #47 pure/unwired research header only
             "src/IndividualProgressionF14LoginPolicy.h",
             "src/IndividualProgressionPlayer.cpp",
         ])
+        # This one additional #47 header is a pure, default-OFF model only.
+        # It MUST NOT be included by any executable source or other src header
+        # until an independently reviewed Core visibility seam and new source
+        # provenance contract are supplied.
+        model = "IndividualProgressionF14CombatVisibilityPolicy.h"
+        for path in (ROOT / "src").rglob("*"):
+            if not path.is_file() or path.suffix not in {".cpp", ".h"} or path.name == model:
+                continue
+            self.assertNotRegex(path.read_text(), r"#\s*include\s*[<\"]" + re.escape(model),
+                                f"Unreviewed F14 runtime includer: {path.relative_to(ROOT)}")
         # The F19 login writer and pure policy must be byte-identical to the
         # frozen reviewed #32; paid-TBC changes cannot silently alter either.
         self.assertEqual(git("diff", "--name-only", REVIEWED_IP_32, REVIEWED_IP_43, "--",
