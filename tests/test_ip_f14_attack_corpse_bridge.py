@@ -80,6 +80,17 @@ class F14TransitionBridge(unittest.TestCase):
         self.assertIn("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);", unit)
         self.assertIn("m_attacking = victim;", unit)
         self.assertIn("SendMeleeAttackStop(victim);", unit)
+        self.assertIn("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);", unit)
+        self.assertIn("InterruptSpell(CURRENT_MELEE_SPELL);", unit)
+        self.assertLess(unit.index("m_attacking = nullptr;"),
+                        unit.index("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);"),
+                        "AttackStop event must follow attack-unlink")
+        self.assertLess(unit.index("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);"),
+                        unit.index("InterruptSpell(CURRENT_MELEE_SPELL);"),
+                        "Capture old target before spell/AI cleanup can invalidate it")
+        self.assertLess(unit.index("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);"),
+                        unit.index("SendMeleeAttackStop(victim);"),
+                        "Old target should be refreshed before later stop packets")
         self.assertIn("Unit* owner = GetCharmerOrOwner();", unit)
         self.assertLess(unit.index("m_attacking = victim;"),
                         unit.index("sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);"))
