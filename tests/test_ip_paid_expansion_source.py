@@ -622,6 +622,9 @@ class StrictReceiptRuntime(unittest.TestCase):
         # copying it and validating RecordPurchase (one use is expected).
         staged = purchase.index("stagedLedger = it->second;") + len("stagedLedger = it->second;")
         self.assertEqual(purchase[staged:purchase.index(all_slots)].count("stagedLedger"), 1)
+        # CS02 X1: forbid rewriting cached slot 2 (or any cache receipt)
+        # before staging; a shared_lock must never cover such a write.
+        self.assertEqual(purchase.count("it->second"), 1)
 
         self.assertNotIn("uint32 const moneySlot", purchase)
         self.assertNotIn("uint32 const timeSlot", purchase)
@@ -674,6 +677,10 @@ class StorageAndThreads(unittest.TestCase):
         # Grok M5e: a second whole-ledger assignment after the good mirror
         # would still reset the grandfather-evaluated receipt slot.
         self.assertEqual(setter.count("receipt->second"), 1)
+        # CS02 X3/X4: no cache erase or alias overwrite after the mirror.
+        # This guards all ledger touches, not just receipt->second writes.
+        self.assertEqual(setter.count("_paidExpansionLedgers"), 2)
+        self.assertEqual(setter.count("receipt"), 3)
         self.assertNotIn("SettingGrandfatherEvaluated", setter)
         self.assertNotIn("return", setter[:mirror])
         self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);", setter)
