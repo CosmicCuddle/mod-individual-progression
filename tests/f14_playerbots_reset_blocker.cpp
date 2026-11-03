@@ -36,7 +36,7 @@ namespace
                                  std::uint8_t rawSavedStage, std::uint32_t level,
                                  std::int32_t progressionLimit = 0)
     {
-        if (flagOn && verifiedHeadlessTbcRaceRrndbot &&
+        if (flagOn && verifiedHeadlessTbcRaceRndbot &&
             rawSavedStage >= 8 && rawSavedStage <= 18 &&
             F14::PreservesAtLeastLevelStage(rawSavedStage, level, progressionLimit))
             return rawSavedStage;
