@@ -1173,10 +1173,9 @@ private:
             "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor", false);
         sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = sConfigMgr->GetOption<bool>(
             "IndividualProgression.F14.ExperimentalRndbotPlayerVisibility", false);
-// World visibility is NOT sufficient: Core's cached /who list bypasses
-        // Player::IsVisibleGloballyFor and this observer script. Until an
-        // independently reviewed positive WHO filter contract also exists,
-//       never allow partial world-only concealment.
+        // World visibility alone is NOT enough: cached /who bypasses
+        // Player::IsVisibleGloballyFor and the observer script. Until an
+        // independently reviewed WHO filter exists, force this pilot OFF.
 #if !defined(COSMIC_F14_OBSERVER_HOOK_VERSION) || !defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)
         if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)
         {
