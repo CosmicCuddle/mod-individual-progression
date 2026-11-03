@@ -34,9 +34,8 @@ class F14TransitionBridge(unittest.TestCase):
         self.assertEqual(PATCH.count("@@ -"), 7)
 
     def test_runner_allowlists_match_the_actual_patch_sets(self):
-        # Source-only CI applies exactly three F14 patches. It must NOT
-        # pretend it also modified the two paid-row Core files. The native
-        # joint job *does* apply the separate paid-row patch first.
+        # Source-only CI applies exactly three F14 patches; the full native
+        # job ALSO applies a separate two-file paid-row Core safety patch.
         patches = (
             PATCH,
             (ROOT / "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch").read_text(),
@@ -44,21 +43,21 @@ class F14TransitionBridge(unittest.TestCase):
         )
         exact = set()
         for content in patches:
-            exact.update(re.findall(r"^diff --git a/(\\S+) b/\\1$", content, re.M))
-        self.assertEqual(len(exact), 10, "three F14 patches should touch 10 distinct Core files")
+            exact.update(re.findall(r"^diff --git a/(\S+) b/\1$", content, re.M))
+        self.assertEqual(len(exact), 10)
 
         source = (ROOT / ".github/workflows/ip-f14-attack-corpse-bridge-source-20261103.yml").read_text()
-        # Match only the expected-path declaration, never tool/log prose.
-        start = source.index("printf '%s\\n' \\\n")
+        start = source.index("src/server/game/Entities/Object/Object.cpp")
         end = source.index("| sort >/tmp/f14-core-expected.txt", start)
-        source_allow = set(re.findall(r"src/server/game/[A-Za-z0-9_./]+\\.(?:cpp|h)",
+        source_allow = set(re.findall(r"src/server/game/[A-Za-z0-9_./]+\.(?:cpp|h)",
                                           source[start:end]))
         self.assertEqual(source_allow, exact)
 
         native = (ROOT / ".github/workflows/ip-f14-attack-corpse-bridge-joint-native-20261103.yml").read_text()
-        start = native.index("printf '%s\\n' \\\n", native.index("Apply F14 attack-target + corpse-ready event bridge"))
+        start = native.index("src/server/game/Entities/Object/Object.cpp",
+                             native.index("Apply F14 attack-target + corpse-ready event bridge"))
         end = native.index("| sort > /tmp/f14-three-patches-expected.txt", start)
-        native_allow = set(re.findall(r"src/server/game/[A-Za-z0-9_./]+\\.(?:cpp|h)",
+        native_allow = set(re.findall(r"src/server/game/[A-Za-z0-9_./]+\.(?:cpp|h)",
                                           native[start:end]))
         self.assertEqual(native_allow, exact | {
             "src/server/game/Entities/Player/PlayerSettings.cpp",
