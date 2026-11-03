@@ -253,6 +253,20 @@ class F14TransitionBridge(unittest.TestCase):
         removed = method(creature, "void Creature::RemoveFromWorld()")
         self.assertLess(removed.index("sScriptMgr->OnCreatureRemoveWorld(this);"),
                         removed.index("Unit::RemoveFromWorld();"))
+        # Pinned Core logout ordering explains why a positive bot GUID cache
+        # can disappear before the eventual AttackStop, and why the stop
+        # fallback must not depend on the old headless session. This order
+        # is NOT proof of a safe map-thread client visibility notification.
+        logout_src = (root / "Server/WorldSession.cpp").read_text()
+        logout = method(logout_src, "void WorldSession::LogoutPlayer(")
+        self.assertLess(logout.index("sScriptMgr->OnPlayerLogout(_player);"),
+                        logout.index("_player->CleanupsBeforeDelete();"))
+        cleanup = method(unit, "void Unit::CleanupBeforeRemoveFromMap(")
+        self.assertLess(cleanup.index("RemoveFromWorld();"),
+                        cleanup.index("CombatStop();"),
+                        "Core commonly stops combat AFTER world removal on logout")
+        combat = method(unit, "void Unit::CombatStop(")
+        self.assertIn("AttackStop();", combat)
         self.assertNotIn("COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION", script)
 
 if __name__ == "__main__":
