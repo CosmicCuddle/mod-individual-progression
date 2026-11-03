@@ -74,29 +74,37 @@ class F14TransitionBridge(unittest.TestCase):
         self.assertIn("UNITHOOK_ON_F14_CREATURE_CORPSE_READY", PATCH)
 
     def test_attack_event_positions(self):
-        unit = PATCH.split("diff --git a/src/server/game/Entities/Unit/Unit.cpp", 1)[1].split("\ndiff --git a/",1)[0]
-        self.assertIn("Unit* const f14PreviousVictim = m_attacking;", unit)
-        self.assertIn("sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);", unit)
-        self.assertIn("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);", unit)
-        self.assertIn("m_attacking = victim;", unit)
-        self.assertIn("SendMeleeAttackStop(victim);", unit)
-        self.assertIn("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);", unit)
-        self.assertIn("InterruptSpell(CURRENT_MELEE_SPELL);", unit)
-        self.assertLess(unit.index("m_attacking = nullptr;"),
-                        unit.index("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);"),
-                        "AttackStop event must follow attack-unlink")
-        self.assertLess(unit.index("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);"),
-                        unit.index("InterruptSpell(CURRENT_MELEE_SPELL);"),
-                        "Capture old target before spell/AI cleanup can invalidate it")
-        self.assertLess(unit.index("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);"),
-                        unit.index("SendMeleeAttackStop(victim);"),
-                        "Old target should be refreshed before later stop packets")
-        self.assertIn("Unit* owner = GetCharmerOrOwner();", unit)
-        self.assertLess(unit.index("m_attacking = victim;"),
-                        unit.index("sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);"))
-        self.assertLess(unit.index("sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);"),
-                        unit.index("Unit* owner = GetCharmerOrOwner();"),
-                        "Notify before unrelated AI or pet callbacks can invalidate old target")
+        unit = PATCH.split("diff --git a/src/server/game/Entities/Unit/Unit.cpp", 1)[1].split("\ndiff --git a/", 1)[0]
+        # A unified diff has both REMOVED (-) and ADDED (+) old code.
+        # Checking raw string indexes would accidentally compare an old
+        # deleted InterruptSpell() with a new added callback, i.e. a false
+        # failure even when the actually patched Core ordering is correct.
+        patched = "\n".join(line[1:] for line in unit.splitlines()
+                            if line.startswith((" ", "+")) and not line.startswith("+++"))
+        for expected in (
+            "Unit* const f14PreviousVictim = m_attacking;",
+            "m_attacking = victim;",
+            "sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);",
+            "m_attacking = nullptr;",
+            "sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);",
+            "InterruptSpell(CURRENT_MELEE_SPELL);",
+            "SendMeleeAttackStop(victim);",
+            "Unit* owner = GetCharmerOrOwner();",
+        ):
+            self.assertIn(expected, patched)
+        self.assertLess(patched.index("m_attacking = victim;"),
+                        patched.index("sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);"))
+        self.assertLess(patched.index("sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);"),
+                        patched.index("Unit* owner = GetCharmerOrOwner();"),
+                        "Attack begin/target switch notify before owner/AI callbacks")
+        self.assertLess(patched.index("m_attacking = nullptr;"),
+                        patched.index("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);"))
+        self.assertLess(patched.index("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);"),
+                        patched.index("InterruptSpell(CURRENT_MELEE_SPELL);"),
+                        "AttackStop event must precede spell/AI cleanup")
+        self.assertLess(patched.index("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);"),
+                        patched.index("SendMeleeAttackStop(victim);"),
+                        "AttackStop event must precede stop packet")
 
     def test_corpse_after_state_promotion(self):
         corpse = PATCH.split("diff --git a/src/server/game/Entities/Creature/Creature.cpp", 1)[1]
