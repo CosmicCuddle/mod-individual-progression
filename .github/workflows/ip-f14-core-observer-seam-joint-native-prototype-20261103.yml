@@ -1,14 +1,17 @@
-# F14 default-ALLOW Core observer hook TEST ONLY, no module callback or player hide.
+# F14 player-only prototype callback wired on disposable Core, OFF by default.
 # Apply on disposable CI core, alongside existing paid row PB fixes, then LINK.
 name: F14 Core observer seam prototype + pinned joint Worldserver (NO HOST)
 
 on:
   push:
     branches:
-      - research/cs01-f14-core-observer-hook-prototype-20261103
+      - feature/cs01-f14-rndbot-player-visibility-wiring-20261103
     paths:
       - "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch"
       - "tests/test_ip_f14_core_observer_seam_prototype.py"
+      - "tests/test_ip_f14_rndbot_player_observer_wiring.py"
+      - "src/**"
+      - "conf/individualProgression.conf.dist"
       - "docs/F14_CORE_OBSERVER_DEFAULT_ALLOW_PROTOTYPE_2026-11-03.md"
       - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
       - ".github/workflows/ip-f14-core-observer-seam-joint-native-prototype-20261103.yml"
@@ -16,6 +19,9 @@ on:
     paths:
       - "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch"
       - "tests/test_ip_f14_core_observer_seam_prototype.py"
+      - "tests/test_ip_f14_rndbot_player_observer_wiring.py"
+      - "src/**"
+      - "conf/individualProgression.conf.dist"
       - "docs/F14_CORE_OBSERVER_DEFAULT_ALLOW_PROTOTYPE_2026-11-03.md"
       - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
       - ".github/workflows/ip-f14-core-observer-seam-joint-native-prototype-20261103.yml"
@@ -25,7 +31,7 @@ permissions:
 
 jobs:
   pinned-paid-vendor-worldserver-link:
-    name: F14 default-allow observer Core + IP47 + PB + Naxx292 + Services16 Worldserver (NO LAUNCH)
+    name: F14 Core + OFF player pilot + PB + Naxx292 + Services16 Worldserver (NO LAUNCH)
     runs-on: ubuntu-24.04
     timeout-minutes: 170
     steps:
@@ -50,11 +56,11 @@ jobs:
           ref: e88cc4099e69f35126b28942a412ca702d20453b
           path: acore/modules/mod-playerbots
           persist-credentials: false
-      - name: Checkout pinned IP #47 with unwired F14 model and inherited paid source (OFF)
+      - name: Checkout exact current IP pilot head (OFF; reviewed parent preserved)
         uses: actions/checkout@v4
         with:
           repository: CosmicCuddle/mod-individual-progression
-          ref: ce69a6891470693a471896b999c4fc97424f8676
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: acore/modules/mod-individual-progression
           persist-credentials: false
       - name: Checkout Naxx #292 P1-P4/P4-H + Hunter ammo/quiver + F15 path redaction
@@ -77,7 +83,7 @@ jobs:
           set -euo pipefail
           test "$(git -C acore rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
           test "$(git -C acore/modules/mod-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
-          test "$(git -C acore/modules/mod-individual-progression rev-parse HEAD)" = ce69a6891470693a471896b999c4fc97424f8676
+          test "$(git -C acore/modules/mod-individual-progression rev-parse HEAD)" = "$(git -C prototype rev-parse HEAD)"
           test "$(git -C acore/modules/mod-naxxramas-core rev-parse HEAD)" = 51d0611476358286505aed3ca806ea250f644f66
           test "$(git -C acore/modules/mod-character-services rev-parse HEAD)" = b5d372eda5cd08b6a650c78a5faeb01ee1c3702d
           cs=acore/modules/mod-character-services
@@ -136,6 +142,9 @@ jobs:
           # Integrated IP #46 adds an independent skip-only RandomBot group
           # safeguard. This is incomplete F14 and MUST remain opt-in/OFF.
           grep -Fqx 'IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0' "$ip/conf/individualProgression.conf.dist"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' "$ip/conf/individualProgression.conf.dist"
+          grep -Fq 'HasF14VerifiedRandomBotIdentity(candidate)' "$ip/src/IndividualProgressionPlayer.cpp"
+          grep -Fq 'GetEffectiveProgression(viewer) >= PROGRESSION_PRE_TBC' "$ip/src/IndividualProgressionPlayer.cpp"
           grep -Fq 'ShouldSkipF14VerifiedRandomBotGroupDowngrade(' "$ip/src/IndividualProgression.cpp"
           grep -Fq 'ShouldSkipF14VerifiedRandomBotGroupDowngrade(player, leaderState)' "$ip/src/IndividualProgressionPlayer.cpp"
           test -s "$ip/tests/f14_group_sync_floor.cpp"
@@ -204,7 +213,10 @@ jobs:
         run: |
           set -euo pipefail
           git -C prototype merge-base --is-ancestor ce69a6891470693a471896b999c4fc97424f8676 HEAD
-          test -z "$(git -C prototype diff --name-only ce69a6891470693a471896b999c4fc97424f8676 HEAD -- src conf sql data optional)"
+          git -C prototype merge-base --is-ancestor 9b64bf1e1d624c3d02b02a668aa2f7207d6d097b HEAD
+          git -C prototype diff --name-only 9b64bf1e1d624c3d02b02a668aa2f7207d6d097b HEAD -- src conf sql data optional | sort >/tmp/f14-actual.txt
+          printf '%s\n' src/IndividualProgression.cpp src/IndividualProgression.h src/IndividualProgressionPlayer.cpp conf/individualProgression.conf.dist | sort >/tmp/f14-expected.txt
+          diff -u /tmp/f14-expected.txt /tmp/f14-actual.txt
           core=acore
           test "$(git -C "$core" rev-parse HEAD:src/server/game/Scripting/ScriptMgr.h)" = 7f0f30d3ca46cb290636c33ca8e1b2b9c0ffa1f8
           test "$(git -C "$core" rev-parse HEAD:src/server/game/Scripting/ScriptDefines/WorldObjectScript.h)" = 30c497114d0f4058f9866d4c6e53ac03f715a269
@@ -226,6 +238,9 @@ jobs:
             src/server/game/Entities/Player/Player.h | sort >/tmp/core-observer-allowed.txt
           diff -u /tmp/core-observer-allowed.txt /tmp/core-observer-actual.txt
           python3 -B -m unittest discover -s prototype/tests -p 'test_ip_f14_core_observer_seam_prototype.py' -v
+          python3 -B -m unittest discover -s prototype/tests -p 'test_ip_f14_rndbot_player_observer_wiring.py' -v
+          python3 -B -m unittest discover -s prototype/tests -p 'test_ip_f19_login_floor_source.py' -v
+          python3 -B -m unittest discover -s prototype/tests -p 'test_ip_combined_c3_f14_partial_login.py' -v
       - name: Apply exactly two pinned Playerbots compatibility edits ON CI RUNNER ONLY
         shell: bash
         run: |
@@ -303,11 +318,11 @@ jobs:
         run: |
           test -s acore-build/src/server/apps/worldserver
           test -x acore-build/src/server/apps/worldserver
-          echo 'PASS: pinned Core + default-allow F14 observer hook + PB + IP47 + Naxx292 + Services16 Worldserver compiled/linked; NO HIDE ACTIVE'
+          echo 'PASS: pinned Core + F14 observer hook + IP OFF player pilot + PB + Naxx292 + Services16 Worldserver compiled/linked; NO HIDE ENABLED'
           echo 'No owner host, accounts, DB, NPC, gold, config, enablement or live archive touched'
       - name: Safety and confidence boundary
         if: always()
         run: |
-          echo 'Core observer prototype + Core paid row + PB two edits exist ONLY on disposable runner. Zero F14 callback registrations; no creature/player visibility behaviour implemented.'
+          echo 'Core observer prototype + Core paid row + PB two edits exist ONLY on disposable runner. F14 player callback is compiled behind an optional Core macro and disabled by default; creature, /who and immediate refresh are not implemented.'
           echo 'Even a successful native link is NOT a completed gossip/payment/restart/gameplay test.'
           echo 'Both expansion feature flags remain OFF; do not deploy without CosmicCuddle approval.'
