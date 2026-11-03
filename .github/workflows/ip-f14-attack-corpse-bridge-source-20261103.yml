@@ -124,11 +124,7 @@ jobs:
                 -Wall -Wextra -Werror -pedantic -Iip \
                 ip/tests/f14_multi_attacker_policy.cpp -o /tmp/f14-multi-attack
               /tmp/f14-multi-attack | tee /tmp/f14-multi-result.txt
-              grep -Eq '^F14 MULTI-ATTACKER [0-9]+/[0-9]+ PASSED; pure/offline model only        if: always()
-        run: |
-          echo 'These are exact-source and runner-only Core patch checks.'
-          echo 'PASS DOES NOT prove native Worldserver link, real player combat, WHO visibility, corpse redraw, threat/loot preservation or deployability.'
- /tmp/f14-multi-result.txt
+              grep -Fqx 'F14 MULTI-ATTACKER 72/72 PASSED; pure/offline model only' /tmp/f14-multi-result.txt
             done
           done
           echo 'Four compile/run combinations passed ONLY the pure candidate policy.'
