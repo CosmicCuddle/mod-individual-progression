@@ -17,7 +17,7 @@ diff --git a/src/PlayerbotAIConfig.h b/src/PlayerbotAIConfig.h
 diff --git a/src/PlayerbotAIConfig.cpp b/src/PlayerbotAIConfig.cpp
 --- a/src/PlayerbotAIConfig.cpp
 +++ b/src/PlayerbotAIConfig.cpp
-@@ -165,8 +165,13 @@
+@@ -165,8 +165,15 @@
      ForceRebuffMarginSecs = std::min(sConfigMgr->GetOption<uint32>("Playerbots.ForceRebuffMarginSecs", 60), 3600u);
      AutoAvoidAoe = sConfigMgr->GetOption<bool>("Playerbots.AutoAvoidAoe", true);
      MaxAoeAvoidRadius = sConfigMgr->GetOption<float>("Playerbots.MaxAoeAvoidRadius", 15.0f);
@@ -28,6 +28,8 @@ diff --git a/src/PlayerbotAIConfig.cpp b/src/PlayerbotAIConfig.cpp
 +    // Empty is the default: preserve stock ResetQuests until owner opt-in.
 +    std::string const resetPreserveIds =
 +        sConfigMgr->GetOption<std::string>("Playerbots.ResetQuestsPreserveQuestIds", "");
++    // Initialize may be called again: OFF must never retain a stale list.
++    ResetQuestsPreserveQuestIds.clear();
 +    if (!resetPreserveIds.empty())
 +        LoadSet<std::set<uint32>>(resetPreserveIds, ResetQuestsPreserveQuestIds);
      TellWhenAvoidAoe = sConfigMgr->GetOption<bool>("Playerbots.TellWhenAvoidAoe", false);
