@@ -9,11 +9,15 @@ on:
     paths:
       - "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch"
       - "tests/test_ip_f14_core_observer_seam_prototype.py"
+      - "docs/F14_CORE_OBSERVER_DEFAULT_ALLOW_PROTOTYPE_2026-11-03.md"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
       - ".github/workflows/ip-f14-core-observer-seam-joint-native-prototype-20261103.yml"
   pull_request:
     paths:
       - "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch"
       - "tests/test_ip_f14_core_observer_seam_prototype.py"
+      - "docs/F14_CORE_OBSERVER_DEFAULT_ALLOW_PROTOTYPE_2026-11-03.md"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
       - ".github/workflows/ip-f14-core-observer-seam-joint-native-prototype-20261103.yml"
 
 permissions:
