@@ -1,0 +1,53 @@
+name: IP paid purchase writes canonical eight-slot receipt (DRAFT, NO HOST)
+
+on:
+  pull_request:
+    paths:
+      - 'src/IndividualProgressionExpansion.cpp'
+      - 'src/IndividualProgressionReceiptPolicy.h'
+      - 'tests/paid_receipt_full_slot_model.cpp'
+      - 'tests/test_ip_paid_expansion_source.py'
+      - '.github/workflows/ip-paid-purchase-all-eight-receipt-20261103.yml'
+  push:
+    paths:
+      - 'src/IndividualProgressionExpansion.cpp'
+      - 'src/IndividualProgressionReceiptPolicy.h'
+      - 'tests/paid_receipt_full_slot_model.cpp'
+      - 'tests/test_ip_paid_expansion_source.py'
+      - '.github/workflows/ip-paid-purchase-all-eight-receipt-20261103.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  receipt-first-purchase-model:
+    name: Canonical eight-slot TBC/Wrath model and source contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - name: Checkout development-only IP source (no game server)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify production PurchaseExpansion always writes all eight slots
+        run: python3 -B -m unittest discover -s tests -p test_ip_paid_expansion_source.py
+      - name: Compile unchanged v1 receipt policy with Core vector-size model
+        shell: bash
+        run: |
+          set -euo pipefail
+          ${{ matrix.compiler }} -std=${{ matrix.std }} -Wall -Wextra -Werror -O2 \
+            tests/paid_receipt_full_slot_model.cpp -o /tmp/ip-paid-full-v1-model
+          /tmp/ip-paid-full-v1-model | tee /tmp/model.out
+          grep -E '^RECEIPT CORE VECTOR MODEL [0-9]+/[0-9]+ passed' /tmp/model.out
+      - name: Safety boundary
+        if: always()
+        run: |
+          echo 'CI models Core index+1 setting vector and compiles real IP receipt policy.'
+          echo 'No actual DB transaction, installed Core source, gold, server or login is touched.'
+          echo 'This does NOT authorise missing-row purchase semantics or paid enablement.'
