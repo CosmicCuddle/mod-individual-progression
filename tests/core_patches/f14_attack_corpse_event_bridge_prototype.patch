@@ -1,7 +1,7 @@
 diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.h b/src/server/game/Scripting/ScriptDefines/UnitScript.h
 --- a/src/server/game/Scripting/ScriptDefines/UnitScript.h
 +++ b/src/server/game/Scripting/ScriptDefines/UnitScript.h
-@@ -44,9 +44,15 @@
+@@ -44,9 +44,16 @@
      UNITHOOK_ON_UNIT_EXIT_COMBAT,
      UNITHOOK_ON_UNIT_DEATH,
 -    UNITHOOK_ON_UNIT_SET_SHAPESHIFT_FORM,
@@ -12,6 +12,7 @@ diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.h b/src/server/g
 +    UNITHOOK_ON_UNIT_SET_SHAPESHIFT_FORM,
 +    UNITHOOK_ON_F14_ATTACK_TARGET_TRANSITION,
 +    UNITHOOK_ON_F14_CREATURE_CORPSE_READY,
++    UNITHOOK_ON_F14_CREATURE_RESPAWNED,
 +    UNITHOOK_END
 +};
 +
@@ -22,19 +23,20 @@ diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.h b/src/server/g
 +class Creature;
  class ByteBuffer;
  struct BuildValuesCachePosPointers;
-@@ -110,5 +116,7 @@
+@@ -110,5 +117,8 @@
      virtual void OnUnitExitCombat(Unit* /*unit*/) { }
      virtual void OnUnitDeath(Unit* /*unit*/, Unit* /*killer*/) { }
 -    virtual void OnUnitSetShapeshiftForm(Unit* /*unit*/, uint8 /*form*/) { }
 +    virtual void OnUnitSetShapeshiftForm(Unit* /*unit*/, uint8 /*form*/) { }
 +    virtual void OnF14AttackTargetTransition(Unit* /*attacker*/, Unit* /*oldVictim*/, Unit* /*newVictim*/) { }
 +    virtual void OnF14CreatureCorpseReady(Creature* /*creature*/) { }
++    virtual void OnF14CreatureRespawned(Creature* /*creature*/) { }
  };
  
 diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp b/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
 --- a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
 +++ b/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
-@@ -135,5 +135,17 @@
+@@ -135,5 +135,23 @@
  }
  
 -void ScriptMgr::OnUnitSetShapeshiftForm(Unit* unit, uint8 form)
@@ -50,19 +52,26 @@ diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp b/src/server
 +        script->OnF14CreatureCorpseReady(creature));
 +}
 +
++void ScriptMgr::OnF14CreatureRespawned(Creature* creature)
++{
++    CALL_ENABLED_HOOKS(UnitScript, UNITHOOK_ON_F14_CREATURE_RESPAWNED,
++        script->OnF14CreatureRespawned(creature));
++}
++
 +void ScriptMgr::OnUnitSetShapeshiftForm(Unit* unit, uint8 form)
  {
      CALL_ENABLED_HOOKS(UnitScript, UNITHOOK_ON_UNIT_SET_SHAPESHIFT_FORM, script->OnUnitSetShapeshiftForm(unit, form));
 diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
 --- a/src/server/game/Scripting/ScriptMgr.h
 +++ b/src/server/game/Scripting/ScriptMgr.h
-@@ -581,5 +581,7 @@
+@@ -581,5 +581,8 @@
      void OnUnitEnterCombat(Unit* unit, Unit* victim);
      void OnUnitExitCombat(Unit* unit);
 -    void OnUnitDeath(Unit* unit, Unit* killer);
 +    void OnUnitDeath(Unit* unit, Unit* killer);
 +    void OnF14AttackTargetTransition(Unit* attacker, Unit* oldVictim, Unit* newVictim);
 +    void OnF14CreatureCorpseReady(Creature* creature);
++    void OnF14CreatureRespawned(Creature* creature);
      void OnUnitSetShapeshiftForm(Unit* unit, uint8 form);
  
 diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
@@ -180,3 +189,16 @@ diff --git a/src/server/game/Entities/Creature/Creature.cpp b/src/server/game/En
 +    else if (state == DeathState::JustRespawned)
      {
          SetFullHealth();
+@@ -2036,7 +2038,12 @@
+         if (GetCreatureData() && GetPhaseMask() != GetCreatureData()->phaseMask)
+             SetPhaseMask(GetCreatureData()->phaseMask, false);
++
++        // Report respawn only after the creature is alive and phase/movement
++        // restoration is complete. This callback does not validate viewer
++        // threat or rights and must not enable experimental concealment.
++        sScriptMgr->OnF14CreatureRespawned(this);
+     }
+ }
+ 
+ /**
+  * @param force Force the respawn by killing the creature.
