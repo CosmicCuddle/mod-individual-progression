@@ -8,6 +8,7 @@
 #include "naxxramas_40.h"
 #include <mutex>
 #include "ReputationMgr.h"
+#include "WorldSession.h"
 #include "PetDefines.h"
 
 IndividualProgression* IndividualProgression::instance()
