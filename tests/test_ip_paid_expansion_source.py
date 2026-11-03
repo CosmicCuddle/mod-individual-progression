@@ -589,10 +589,21 @@ class StrictReceiptRuntime(unittest.TestCase):
         self.assertLess(can.index("_paidExpansionLedgers.find("), can.index("return CheckPurchase("))
         self.assertLess(purchase.index("ReceiptPolicy::RecordPurchase("),
                         purchase.index("player->ModifyMoney(-static_cast<int32>(costCopper));"))
-        self.assertLess(purchase.index("if (!opened)"), purchase.index("uint32 const moneySlot"))
-        self.assertLess(purchase.index("uint32 const moneySlot"), purchase.index("player->SaveToDB(false, false);"))
-        self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot", purchase)
-        self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, timeSlot", purchase)
+        # Core creates a missing PlayerSettingVector at index+1. A first
+        # TBC write ending at slot5 produces a six-token row; v1 requires 8.
+        # No partial receipt may be saved after a debit, and unknown/legacy
+        # rows must still fail closed before money can move.
+        all_slots = "for (uint32 slot = 0; slot < ReceiptPolicy::Slots; ++slot)"
+        write_slot = "player->UpdatePlayerSetting(PaidExpansionSettingSource, slot, stagedLedger.fields[slot]);"
+        self.assertEqual(purchase.count(all_slots), 1)
+        self.assertEqual(purchase.count(write_slot), 1)
+        self.assertLess(purchase.index("if (!opened)"), purchase.index(all_slots))
+        self.assertLess(purchase.index(all_slots), purchase.index(write_slot))
+        self.assertLess(purchase.index(write_slot), purchase.index("player->SaveToDB(false, false);"))
+        self.assertNotIn("uint32 const moneySlot", purchase)
+        self.assertNotIn("uint32 const timeSlot", purchase)
+        self.assertNotIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot", purchase)
+        self.assertNotIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, timeSlot", purchase)
         self.assertEqual(purchase.count("player->SaveToDB(false, false);"), 1)
         self.assertNotIn("PlayerSettingsStore::UpdateSetting(", purchase)
         self.assertNotIn("CharacterDatabase.Execute(", purchase)
