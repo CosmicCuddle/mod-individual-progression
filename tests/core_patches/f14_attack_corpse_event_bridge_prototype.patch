@@ -189,7 +189,13 @@ diff --git a/src/server/game/Entities/Creature/Creature.cpp b/src/server/game/En
 +    else if (state == DeathState::JustRespawned)
      {
          SetFullHealth();
-@@ -2036,7 +2038,12 @@
+@@ -2030,13 +2032,18 @@
+         Unit::setDeathState(DeathState::Alive, despawn);
+ 
+         Motion_Initialize();
+         LoadCreaturesAddon(true);
+         LoadSparringPct();
+ 
          if (GetCreatureData() && GetPhaseMask() != GetCreatureData()->phaseMask)
              SetPhaseMask(GetCreatureData()->phaseMask, false);
 +
