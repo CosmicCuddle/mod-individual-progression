@@ -18,14 +18,24 @@ int main()
     o.noObserverOrGroupQuestLootTapSkinOrKillCredit = true;
     o.observerStageAndIdentityStable = o.coreVisibilityAndThreatRefreshVerified = true;
     o.checkedAgainstCreatureGeneration = 1;
+    o.targetIsAliveAtThisEvaluation = true;
+    o.eligibleHiddenAttackerStillAttackingThisTargetAtThisEvaluation = true;
     const auto before = c;
     unsigned passed = 0;
     const auto check = [&](bool actual, bool expected) { if (actual != expected) return false; ++passed; return true; };
     if (!check(F14::ShouldConcealCreatureFromObserver(c, o), true)) return 1;
+    // Stale cached facts still claim the bot is attacking: live check wins.
+    o.eligibleHiddenAttackerStillAttackingThisTargetAtThisEvaluation = false;
+    if (!check(F14::ShouldConcealCreatureFromObserver(c, o), false)) return 1;
+    o.eligibleHiddenAttackerStillAttackingThisTargetAtThisEvaluation = true;
     c.eligibleHiddenRandomBotCurrentlyAttackingThisCreature = false;
     if (!check(F14::ShouldConcealCreatureFromObserver(c, o), false)) return 1;
     if (!check(c.inCombat, true)) return 1; // still fighting; immediately visible
     c.eligibleHiddenRandomBotCurrentlyAttackingThisCreature = true;
+    // Death must override even a cached object still reporting alive=true.
+    o.targetIsAliveAtThisEvaluation = false;
+    if (!check(F14::ShouldConcealCreatureFromObserver(before, o), false)) return 1;
+    o.targetIsAliveAtThisEvaluation = true;
     c.alive = false;
     if (!check(F14::ShouldConcealCreatureFromObserver(c, o), false)) return 1;
     if (!check(F14::ConcealmentDecisionChanged(before, o, c, o), true)) return 1;
