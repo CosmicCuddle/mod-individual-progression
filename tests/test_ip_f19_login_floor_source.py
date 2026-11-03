@@ -86,6 +86,10 @@ class Provenance(unittest.TestCase):
             git("diff", "--name-only", frozen_ip46, "HEAD", "--", "src").splitlines(),
             ["src/" + model],
             "F14 #47 may add ONLY its unwired policy header; runtime source changed")
+        # Force-include through module build scripts would bypass an src-only
+        # freeze while still compiling the model into live translation units.
+        self.assertEqual(git("diff", "--name-only", frozen_ip46, "HEAD", "--",
+                             ":(glob)**/*.cmake", ":(glob)**/CMakeLists.txt", "include.sh"), "")
         # Independent literal cross-check, including relative path, comment-
         # separated, macro-string and line-continuation includes.
         for path in (ROOT / "src").rglob("*"):
