@@ -468,6 +468,17 @@ bool IndividualProgression::HasF14VerifiedRandomBotIdentity(Player const* player
     return it != _f14VerifiedRandomBotGroupCache.end() && it->second;
 }
 
+// WHO queries carry a cached GUID. Never look up a target Player or call
+// mutable RandomPlayerbotMgr on a session/WHO worker. Missing means ALLOW.
+bool IndividualProgression::HasF14VerifiedRandomBotGuid(ObjectGuid const& guid)
+{
+    if (!guid)
+        return false;
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    auto const it = _f14VerifiedRandomBotGroupCache.find(guid.GetCounter());
+    return it != _f14VerifiedRandomBotGroupCache.end() && it->second;
+}
+
 bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage)
 {
     // Preserve all historical behaviour unless this independent pilot is
