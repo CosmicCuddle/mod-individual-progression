@@ -1,14 +1,13 @@
 diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
 --- a/src/server/game/Scripting/ScriptMgr.h
 +++ b/src/server/game/Scripting/ScriptMgr.h
-@@ -735,7 +735,10 @@
+@@ -735,7 +735,9 @@
      void OnWorldObjectCreate(WorldObject* object);
      void OnWorldObjectSetMap(WorldObject* object, Map* map);
      void OnWorldObjectResetMap(WorldObject* object);
 -    void OnWorldObjectUpdate(WorldObject* object, uint32 diff);
 +    void OnWorldObjectUpdate(WorldObject* object, uint32 diff);
-+    // Optional veto for a real-player observer and an exact player/creature.
-+    // Default allow; F14 policy and visibility invalidation remain unwired.
++    // Observer-specific ALLOW-by-default seam; F14 runtime is UNWIRED.
 +    bool OnWorldObjectCanBeSeenByPlayer(Player const* observer, WorldObject const* target);
  
  public: /* PetScript */
@@ -35,7 +34,7 @@ diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h b/src/s
 -    virtual void OnWorldObjectUpdate(WorldObject* /*object*/, uint32 /*diff*/) { }
 +    virtual void OnWorldObjectUpdate(WorldObject* /*object*/, uint32 /*diff*/) { }
 +
-+    // This does not hide anything unless an explicitly reviewed module vetoes.
++    // Future observer-specific explicit veto only; no module currently overrides.
 +    [[nodiscard]] virtual bool OnWorldObjectCanBeSeenByPlayer(Player const* /*observer*/, WorldObject const* /*target*/) { return true; }
  };
  
@@ -62,7 +61,31 @@ diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp b/src
 diff --git a/src/server/game/Entities/Object/Object.cpp b/src/server/game/Entities/Object/Object.cpp
 --- a/src/server/game/Entities/Object/Object.cpp
 +++ b/src/server/game/Entities/Object/Object.cpp
-@@ -1814,10 +1814,18 @@
+@@ -15,8 +15,9 @@
+  * with this program. If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
+-#include "Object.h"
+-#include "Battlefield.h"
++#include "Object.h"
++#include "AccountMgr.h"
++#include "Battlefield.h"
+ #include "BattlefieldMgr.h"
+ #include "CellImpl.h"
+ #include "Chat.h"
+@@ -55,8 +56,9 @@
+ #include "Util.h"
+ #include "Vehicle.h"
+ #include "World.h"
+-#include "WorldPacket.h"
+-
++#include "WorldPacket.h"
++#include "WorldSession.h"
++
+ /// @todo: this import is not necessary for compilation and marked as unused by the IDE
+ //  however, for some reasons removing it would cause a damn linking issue
+ //  there is probably some underlying problem with imports which should properly addressed
+@@ -1814,10 +1816,19 @@
      if (this == obj)
          return true;
  
@@ -73,13 +96,14 @@ diff --git a/src/server/game/Entities/Object/Object.cpp b/src/server/game/Entiti
 +    if (CanNeverSee(obj))
 +        return false;
 +
-+    // F14 observer-only Core seam PROTOTYPE. No module implements this veto
-+    // yet, so existing world visibility is unchanged. An eventual module
-+    // must verify identity, combat/loot safety and prompt client refresh.
++    // F14 observer-specific prototype. Headless/unauthed observers and GMs
++    // retain their historic visibility. NO module currently vetoes.
 +    if (Player const* observer = ToPlayer())
-+        if ((obj->IsPlayer() || obj->IsCreature()) &&
-+            !sScriptMgr->OnWorldObjectCanBeSeenByPlayer(observer, obj))
-+            return false;
++        if (WorldSession const* session = observer->GetSession())
++            if (AccountMgr::IsPlayerAccount(session->GetSecurity()) &&
++                (obj->IsPlayer() || obj->IsCreature()) &&
++                !sScriptMgr->OnWorldObjectCanBeSeenByPlayer(observer, obj))
++                return false;
 +
 +    if (obj->IsAlwaysVisibleFor(this) || CanAlwaysSee(obj))
          return true;
@@ -102,12 +126,12 @@ diff --git a/src/server/game/Entities/Player/Player.cpp b/src/server/game/Entiti
 +    if (u == this)
 +        return true;
 +
-+    // F14 player-directory seam prototype. The pre-existing hook below
-+    // only handles players already invisible, so veto must be BEFORE
-+    // the ordinary IsVisible() fast return. Preserve GM observability.
-+    if (AccountMgr::IsPlayerAccount(u->GetSession()->GetSecurity()) &&
-+        !sScriptMgr->OnWorldObjectCanBeSeenByPlayer(u, this))
-+        return false;
++    // Headless bot observers may have no session, unlike ordinary players.
++    // Preserve the fast visible-player path and GM rights in that case.
++    if (WorldSession const* observerSession = u->GetSession())
++        if (AccountMgr::IsPlayerAccount(observerSession->GetSecurity()) &&
++            !sScriptMgr->OnWorldObjectCanBeSeenByPlayer(u, this))
++            return false;
 +
 +    // Visible units, always are visible for all players
 +    if (IsVisible())
