@@ -31,7 +31,7 @@ class F14TransitionBridge(unittest.TestCase):
             "src/server/game/Entities/Creature/Creature.cpp"
         })
         self.assertEqual(len(paths), 5)
-        self.assertEqual(PATCH.count("@@ -"), 8)
+        self.assertEqual(PATCH.count("@@ -"), 7)
 
     def test_distinct_partial_contract(self):
         self.assertIn("#define COSMIC_F14_ATTACK_EVENT_HOOK_VERSION 1", PATCH)
@@ -49,6 +49,12 @@ class F14TransitionBridge(unittest.TestCase):
         self.assertIn("sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);", unit)
         self.assertIn("m_attacking = victim;", unit)
         self.assertIn("SendMeleeAttackStop(victim);", unit)
+        self.assertIn("Unit* owner = GetCharmerOrOwner();", unit)
+        self.assertLess(unit.index("m_attacking = victim;"),
+                        unit.index("sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);"))
+        self.assertLess(unit.index("sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);"),
+                        unit.index("Unit* owner = GetCharmerOrOwner();"),
+                        "Notify before unrelated AI or pet callbacks can invalidate old target")
 
     def test_corpse_after_state_promotion(self):
         corpse = PATCH.split("diff --git a/src/server/game/Entities/Creature/Creature.cpp", 1)[1]
