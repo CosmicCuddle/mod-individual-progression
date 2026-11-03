@@ -36,6 +36,18 @@ Pinned Core logs players out by evicting the F14 verified actor cache in `OnPlay
 However, `CombatStop` may occur **after** `RemoveFromWorld`, and a real client/map-thread refresh on an old victim may be unsafe from this teardown context. All paths must be audited for map-thread ownership and for those that never emit attack-stop. The model can deny stale proofs only when the real runtime delivers an actor-expiry or reverify event. Since that actor cache and map-thread collector do not exist yet, **F14 remains FORCED OFF**. Do not issue direct logout-thread packets. The stop fallback is a defensive source prototype, not a gameplay guarantee.
 
 
+
+## Actor login-epoch expiry without AttackStop — isolated child review
+
+The pure, **unwired** model now distinguishes `ActorIncarnationExpired` from an ordinary `AttackEnd`. A RandomBot logout, session replacement, disappearance from the map or another invalidated login epoch **might occur before any stop notification**, or no stop might be delivered at all.
+
+When the map-thread owner eventually sends `ActorIncarnationExpired` with a formerly verified actor's **nonzero login incarnation token**, the model removes that token from this creature's candidate roster, increments the creature revision, revokes any observer proof and marks the complete attacker/rights state uncertain. **Even if another verified bot remains attacking, that old state cannot be used to hide the creature.** A duplicated, unknown or missing expiration also fails visible. Only a fresh full map-thread participant/rights rebuild at the exact current creature instance and generation, followed by independent re-verification, can recover a candidate. It never restores an expired actor from a reusable GUID.
+
+This is an event **contract**, not a working logout/disconnect solution: no caller discovers all creatures attacked by an expiring actor, no map-thread task queue or expiry collector exists, and no Core packets or world visibility are emitted. The existing `OnPlayerLogout` cache eviction and guarded STOP refresh are unchanged. Future integration must deliver expiry to **every affected creature** before any visibility eligibility is reconsidered, including pet/DoT/threat/corpse cases. Dropping this child draft restores the parent model without affecting stored progression or group-floor protection.
+
+The isolated child adds 16 regression assertions (72 to 88 total) and adapts the source-only workflow to compile/run the 88-case model on GCC/Clang C++17/20. Run status must be verified at the exact new head. F14 remains **FORCED OFF**, experimental code is not included by a runtime .cpp, and owner installation or gameplay remains unapproved.
+
+
 ## Hard boundaries
 
 - This model is **NOT INCLUDED from any compiled IP .cpp**, does not track live Core pointers, does not inspect actual Playerbots, threat, gold, quests, stages, spell missiles, loot or GM observers and cannot determine full per-viewer safety. Its positive actor-candidate result is **not** a creature-visibility permission.
