@@ -89,6 +89,23 @@ class F14LoginIncarnationSafety(unittest.TestCase):
         self.assertIn("sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter())", login)
         self.assertNotIn("GetF14VerifiedRandomBotLoginEpoch(", login)
 
+    def test_who_and_observer_guid_reader_fail_visible_without_current_epoch(self):
+        player_reader = function(CORE, "bool IndividualProgression::HasF14VerifiedRandomBotIdentity(")
+        guid_reader = function(CORE, "bool IndividualProgression::HasF14VerifiedRandomBotGuid(")
+        for reader in (player_reader, guid_reader):
+            self.assertIn("std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);", reader)
+            self.assertIn("_f14VerifiedRandomBotGroupCache.find(", reader)
+            self.assertIn("_f14VerifiedRandomBotLoginEpoch.find(", reader)
+            self.assertIn("epoch != _f14VerifiedRandomBotLoginEpoch.end() && epoch->second != 0", reader)
+            self.assertNotIn("sRandomPlayerbotMgr", reader)
+            self.assertNotIn("CharacterDatabase", reader)
+            self.assertNotIn("GetSession()", reader)
+        # Historic verified cache stays useful to the group-progress guard
+        # even if optional visibility epochs are exhausted.
+        group_floor = function(CORE, "bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(")
+        self.assertIn("_f14VerifiedRandomBotGroupCache.find(", group_floor)
+        self.assertNotIn("_f14VerifiedRandomBotLoginEpoch", group_floor)
+
     def test_epoch_used_only_for_verified_attack_start_not_observer_hot_path(self):
         # Actual attack start/target switch must have both positive identity
         # AND a current login incarnation, never just a recycled GUID.
