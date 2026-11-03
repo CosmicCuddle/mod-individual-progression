@@ -426,6 +426,8 @@ public:
     // the expansion vendor opens the next era.
     bool paidExpansionEnabled = false;
     bool paidExpansionGrandfatherStage13 = false;
+    // Independent F14 group-time pilot; leave OFF until owner approval.
+    bool f14ProtectVerifiedRandomBotGroupFloor = false;
     std::string paidExpansionVendorName;
 
     // progression is derived from rewarded hidden quests (IDs 66000 + progression)
@@ -445,6 +447,10 @@ public:
     bool isNormalAccount(Player* player);
     void LoadAccountRegexes();
     void SyncBotsProgressionToLeader(Group* group);
+    // F14: verified GUID is recorded only on the login thread; group workers never call Playerbots.
+    void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
+    void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
+    bool ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage);
     void checkHunterPetSpells(Player* player);
     void checkWarlockPetSpells(Player* player);
     bool isAttuned(Player* player);
@@ -511,6 +517,11 @@ private:
     // Missing or invalid RAW settings are unknown, never free purchases.
     std::unordered_map<uint32, IndividualProgressionReceiptPolicy::Ledger> _paidExpansionLedgers;
     std::shared_mutex _paidExpansionLock;
+
+    // F14 optional GroupSync containment; only positively verified headless
+    // Blood Elf / Draenei RandomBots are present, refreshed on each login.
+    std::unordered_map<uint32, bool> _f14VerifiedRandomBotGroupCache;
+    std::shared_mutex _f14GroupCacheLock;
 };
 
 #define sIndividualProgression IndividualProgression::instance()

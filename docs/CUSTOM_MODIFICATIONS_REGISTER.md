@@ -445,3 +445,60 @@ rewrite existing paid rows or charge any character to test this.
 **Known risks and release gates:** malformed/missing/legacy rows still fail closed; A1/A2 commissioning, migration, DB atomicity, crash/relog, GM bypass, quest10259, native build, owner acceptance unresolved. Preserve owner-final expansion rules.
 **Rollback:** discard/revert this DRAFT revision without touching paid data. Do not repair existing receipts without backups and owner approval.
 **Review:** https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6600242422
+
+## F14-RNDBOT-GROUP-FLOOR (3 Nov 2026) — skip-only expansion floor at group sync
+**Owner:** CosmicCuddle. **Module:** Individual Progression (source only; depends
+on Playerbots positive identity at WorldScript login). **State:** isolated DRAFT,
+default OFF, NOT merged, NOT compiled into an owner binary, NOT gameplay-tested and NOT live.
+
+**Intended behavior:** with the independent
+`IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 1` opt-in
+AND `EnforceGroupRules = 0`, only a positively identified HEADLESS RandomBot
+of race 10 (Blood Elf) or 11 (Draenei), on a configured bot account, with
+an **already rewarded** raw stage 8+ at any level skips a *destructive*
+group-accept or post-join
+`ForceUpdateProgressionState` write whose requested stage is below stage 8.
+No new stage is given; a same-era transfer still occurs. When OFF, the
+existing group path is retained including legacy leader stage-0 handling.
+When `EnforceGroupRules = 1`, the existing per-era grouping policy applies.
+Human characters, controlled Altbots, excluded accounts and unverified bots
+must be unchanged. No direct Playerbots identity calls occur in group handlers.
+
+**Files:** `src/IndividualProgression.{h,cpp}`,
+`src/IndividualProgressionPlayer.cpp`,
+`src/IndividualProgressionF14LoginPolicy.h`,
+`conf/individualProgression.conf.dist`, new source and portable C++ model
+tests and isolated GitHub CI workflow, and this register.
+**Dependencies:** source-matched AzerothCore PlayerScript Login/Logout and
+GroupScript callbacks, `mod-playerbots/src/Bot/RandomPlayerbotMgr.h` with GUID
+`IsRandomBot`, original IP bot-account detection, rewarded progression quest
+markers, GroupPolicy. Missing Playerbots header forces pilot OFF. No new SQL,
+DBC, other module files or client patch.
+
+**Known limitations:** a bot can be reset to stage 0 by Playerbots after
+login; this branch neither restores it nor raises it. It does not hide a bot
+from Vanilla observer visibility or /who, prevent cross-era grouping, restore
+earned stages 9–18, or prove PB identity across unusual login lifecycles.
+This pilot intentionally does not enforce a Wrath group minimum stage 13
+at level 71+; that separate policy needs owner approval. Stage 13+ may
+sync to stage 8 under current group-enforcement OFF behavior.
+Cache identity is refreshed on login and erased at logout only; any
+callback/order deviations or PB respawns require live test. With group rules
+OFF, a verified stage-8 bot may still belong to a Vanilla group even when
+its marker is preserved. This is an unresolved owner-facing policy choice.
+The feature is **not** a complete F14 release.
+
+**Tests/evidence:** Python source contracts cover default OFF, login-only
+positive identification, login/logout cache lifetime, both destructive
+group seams and bot-only behavior. C++17/20 pure policy matrix checks
+floor = 8/13 and no new stage grant. CI/native build results must be
+recorded by exact HEAD separately; no tests claimed in this entry. Real
+owner-client PB login/relog/instanced group, level bands 60/61/70/71,
+leader stage 0/7/8/9/13, F14 OFF, random vs Altbot vs human,
+PB re-randomise, and visibility tests still needed.
+
+**Rollback:** keep OFF; discard this DRAFT code before integration. If a
+future enabled version is deployed, first preserve source/config/character
+backup and require owner approval; switching OFF resumes original
+synchronisation but cannot automatically restore prior progression markers.
+**Review:** https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6600875179

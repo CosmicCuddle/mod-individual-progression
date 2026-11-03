@@ -51,6 +51,22 @@ public:
         if (!player || !player->IsInWorld())
             return;
 
+        // F14 optional group-sync containment. Refresh the GUID on every
+        // selected login, including a false result: do not trust a stale
+        // positive identity from a previous bot session. Only this existing
+        // source-verified login thread may consult currentBots/IsRandomBot.
+        sIndividualProgression->ForgetF14VerifiedRandomBotGroupIdentity(player);
+#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
+        if (sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor &&
+            sIndividualProgression->isBotAccount(player) &&
+            (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
+            player->GetSession() && player->GetSession()->IsHeadless())
+        {
+            sIndividualProgression->RememberF14VerifiedRandomBotGroupIdentity(
+                player, sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()));
+        }
+#endif
+
         if (!sIndividualProgression->isNormalAccount(player)) // bot or exluded account
         {
             if (sIndividualProgression->isBotAccount(player))
@@ -124,6 +140,13 @@ public:
 
             ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Individual Progression: |cffccccccenabled|r");
         }
+    }
+
+    // Release only the F14 group identity cache; paid entitlement cache is
+    // managed separately and must not be affected by this pilot.
+    void OnPlayerLogout(Player* player) override
+    {
+        sIndividualProgression->ForgetF14VerifiedRandomBotGroupIdentity(player);
     }
 
     void OnPlayerGetTrainerSpellState(Player const* player, uint32 /*trainerId*/, uint32 spellId, Trainer::SpellState& state) override
@@ -633,6 +656,12 @@ public:
         // Preserve the existing OFF pathway: bots/excluded accounts sync to
         // the leader's exact tier when accepting; human accounts do not.
         // F14 will separately harden the RNDBOT TBC-race minimum for all paths.
+        // F14 pilot: leave historic OFF grouping semantics unchanged while
+        // refusing only a *downgrade* below a login-verified TBC-race bot floor.
+        // No stage write here; return true still accepts the group.
+        if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState &&
+            sIndividualProgression->ShouldSkipF14VerifiedRandomBotGroupDowngrade(player, leaderState))
+            return true;
         if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState)
             sIndividualProgression->ForceUpdateProgressionState(
                 player, static_cast<ProgressionState>(leaderState));

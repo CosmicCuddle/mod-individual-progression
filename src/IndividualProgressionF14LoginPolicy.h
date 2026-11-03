@@ -26,6 +26,27 @@ namespace IndividualProgressionF14LoginPolicy
         return 13;
     }
 
+    // F14 group-sync containment: a verified TBC-race RandomBot with an
+    // already earned stage 8+ must never be downgraded into Vanilla at ANY
+    // level, including immediately after 70->71. No separate Wrath-stage
+    // group floor is enforced here: that awaits an owner gameplay decision.
+    // Identity is checked separately on the login thread.
+    constexpr std::uint8_t ExpansionRaceFloor(std::uint32_t /*level*/)
+    {
+        return 8;
+    }
+
+    constexpr bool SkipVerifiedGroupDowngrade(std::uint8_t currentStage,
+                                              std::uint8_t requestedStage,
+                                              std::uint32_t level)
+    {
+        std::uint8_t const floor = ExpansionRaceFloor(level);
+        // Only protect existing earned stage markers: never fabricate stage 8.
+        // If a PB reset already deleted the stage, do not interfere with an
+        // ordinary sync that may restore something; the PB reset is unsolved.
+        return currentStage >= floor && requestedStage < floor;
+    }
+
     // F19-1: never preserve a stage below the original level stage.
     // F19-2: never preserve a stage above a nonzero progression limit.
     constexpr bool PreservesAtLeastLevelStage(std::uint8_t savedStage, std::uint32_t level, std::int32_t progressionLimit)

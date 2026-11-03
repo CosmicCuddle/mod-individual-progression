@@ -4,8 +4,11 @@
 
 #include "IndividualProgression.h"
 #include "IndividualProgressionGroupPolicy.h"
+#include "IndividualProgressionF14LoginPolicy.h"
 #include "naxxramas_40.h"
+#include <mutex>
 #include "ReputationMgr.h"
+#include "WorldSession.h"
 #include "PetDefines.h"
 
 IndividualProgression* IndividualProgression::instance()
@@ -436,6 +439,44 @@ bool IndividualProgression::isPlayerInDungeonOrRaid(Player* player)
     return (map && (map->IsDungeon() || map->IsRaid()));
 }
 
+void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified)
+{
+    if (!player)
+        return;
+    std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    uint32 const guid = player->GetGUID().GetCounter();
+    // Refresh even when previous login verified and the next one did not.
+    if (verified)
+        _f14VerifiedRandomBotGroupCache[guid] = true;
+    else
+        _f14VerifiedRandomBotGroupCache.erase(guid);
+}
+
+void IndividualProgression::ForgetF14VerifiedRandomBotGroupIdentity(Player* player)
+{
+    RememberF14VerifiedRandomBotGroupIdentity(player, false);
+}
+
+bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage)
+{
+    // Preserve all historical behaviour unless this independent pilot is
+    // deliberately enabled. Group-policy ON already refuses cross-era joins.
+    if (!enabled || !f14ProtectVerifiedRandomBotGroupFloor || enforceGroupRules ||
+        !player || !player->IsInWorld() || !isBotAccount(player) ||
+        !player->GetSession() || !player->GetSession()->IsHeadless() ||
+        !IndividualProgressionGroupPolicy::IsExpansionRace(player->getRace()))
+        return false;
+
+    {
+        std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+        auto const it = _f14VerifiedRandomBotGroupCache.find(player->GetGUID().GetCounter());
+        if (it == _f14VerifiedRandomBotGroupCache.end() || !it->second)
+            return false;
+    }
+    return IndividualProgressionF14LoginPolicy::SkipVerifiedGroupDowngrade(
+        GetPlayerProgressionFromQuests(player), targetStage, player->GetLevel());
+}
+
 void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
 {
     // Disabling Individual Progression must also disable its group-time quest writes.
@@ -489,6 +530,12 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
             if (memberStage == permittedState)
                 continue;
         }
+
+        // F14 default-OFF: no Playerbots identity access on group/map thread.
+        // When the login-verified TBC-race bot has earned its minimum stage,
+        // never downgrade it below the earned TBC floor 8 at any level.
+        if (ShouldSkipF14VerifiedRandomBotGroupDowngrade(member, permittedState))
+            continue;
 
         ForceUpdateProgressionState(member, static_cast<ProgressionState>(permittedState));
     }
@@ -1111,11 +1158,18 @@ private:
         sIndividualProgression->doableNaxx40Bosses_Razuvious = sConfigMgr->GetOption<bool>("IndividualProgression.doableNaxx40Bosses_Razuvious", false);
         sIndividualProgression->enforceGroupRules = sConfigMgr->GetOption<bool>("IndividualProgression.EnforceGroupRules", false);
         sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = sConfigMgr->GetOption<bool>("IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin", false);
+        sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor", false);
 #if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
         if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin)
         {
             LOG_ERROR("module", "IndividualProgression F14 saved-RandomBot login safeguard requested, but required Playerbots API header is missing: feature is NOT active; forcing OFF");
             sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = false;
+        }
+        if (sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 verified RandomBot group floor requires Playerbots API header; forcing OFF");
+            sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = false;
         }
 #endif
         sIndividualProgression->fishingFix = sConfigMgr->GetOption<bool>("IndividualProgression.FishingFix", true);

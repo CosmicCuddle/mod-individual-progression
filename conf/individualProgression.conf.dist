@@ -43,6 +43,26 @@ IndividualProgression.EnforceGroupRules = 0
 #
 IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0
 
+# IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor
+#
+#        INCOMPLETE F14 / DEVELOPMENT PILOT - DEFAULT OFF.
+#        In EnforceGroupRules=0 only, stop the two group-sync writes from
+#        downgrading a positively identified, HEADLESS BE/Draenei RandomBot
+#        below saved stage 8 at any level. A separate Wrath floor 13 is
+#        deliberately NOT forced by this pilot (owner policy pending).
+#        Positive RandomBot identity is collected on login only, never
+#        queried from a group/map worker. Does not affect human characters,
+#        Altbots, excluded accounts, different races or bots not verified.
+#
+#        Does NOT grant/restore stage 8 to new or PB-reset bots; does NOT
+#        enforce expansion-only grouping, hide Vanilla observers, fix /who,
+#        prevent post-login Playerbots Randomize/ResetQuests or alter the
+#        owner's live config. F14 as a whole remains unfinished.
+#        Must remain OFF until specific owner approval, a native Core/PB
+#        build, backup and actual login/group/quest-reset gameplay tests.
+#
+IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0
+
 # IndividualProgression.PaidExpansion.Enable
 #
 #        DRAFT - paid expansion entitlement. Read at server start only.
