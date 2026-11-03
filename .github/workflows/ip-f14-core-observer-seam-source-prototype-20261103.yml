@@ -1,13 +1,16 @@
-# F14 Core hook proof only. No gameplay hide, no Core repo write or host.
+# F14 Core hook + player-only IP pilot, both OFF and UNINSTALLED.
 name: F14 Core observer visibility hook prototype — exact-source safety
 
 on:
   push:
     branches:
-      - research/cs01-f14-core-observer-hook-prototype-20261103
+      - feature/cs01-f14-rndbot-player-visibility-wiring-20261103
     paths:
       - "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch"
       - "tests/test_ip_f14_core_observer_seam_prototype.py"
+      - "tests/test_ip_f14_rndbot_player_observer_wiring.py"
+      - "src/**"
+      - "conf/individualProgression.conf.dist"
       - "docs/F14_CORE_OBSERVER_DEFAULT_ALLOW_PROTOTYPE_2026-11-03.md"
       - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
       - ".github/workflows/ip-f14-core-observer-seam-source-prototype-20261103.yml"
@@ -15,6 +18,9 @@ on:
     paths:
       - "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch"
       - "tests/test_ip_f14_core_observer_seam_prototype.py"
+      - "tests/test_ip_f14_rndbot_player_observer_wiring.py"
+      - "src/**"
+      - "conf/individualProgression.conf.dist"
       - "docs/F14_CORE_OBSERVER_DEFAULT_ALLOW_PROTOTYPE_2026-11-03.md"
       - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
       - ".github/workflows/ip-f14-core-observer-seam-source-prototype-20261103.yml"
@@ -46,7 +52,10 @@ jobs:
           set -euo pipefail
           test "$(git -C core rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
           git -C ip merge-base --is-ancestor ce69a6891470693a471896b999c4fc97424f8676 HEAD
-          test -z "$(git -C ip diff --name-only ce69a6891470693a471896b999c4fc97424f8676 HEAD -- src conf sql data optional)"
+          git -C ip merge-base --is-ancestor 9b64bf1e1d624c3d02b02a668aa2f7207d6d097b HEAD
+          git -C ip diff --name-only 9b64bf1e1d624c3d02b02a668aa2f7207d6d097b HEAD -- src conf sql data optional | sort >/tmp/f14-actual.txt
+          printf '%s\n' src/IndividualProgression.cpp src/IndividualProgression.h src/IndividualProgressionPlayer.cpp conf/individualProgression.conf.dist | sort >/tmp/f14-expected.txt
+          diff -u /tmp/f14-expected.txt /tmp/f14-actual.txt
           test "$(git -C core rev-parse HEAD:src/server/game/Scripting/ScriptMgr.h)" = 7f0f30d3ca46cb290636c33ca8e1b2b9c0ffa1f8
           test "$(git -C core rev-parse HEAD:src/server/game/Scripting/ScriptDefines/WorldObjectScript.h)" = 30c497114d0f4058f9866d4c6e53ac03f715a269
           test "$(git -C core rev-parse HEAD:src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp)" = a3ec17f35bf44f0068162251c96d4cbdc439e700
@@ -76,8 +85,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B -m unittest discover -s ip/tests -p 'test_ip_f14_core_observer_seam_prototype.py' -v
+          python3 -B -m unittest discover -s ip/tests -p 'test_ip_f14_rndbot_player_observer_wiring.py' -v
       - name: Status and limits
         run: |
           echo "SOURCE-ONLY PASS is NOT a Worldserver compile, game visibility, corpse refresh, or PB integration test."
-          echo "The default hook returns allow; no IP module registers a veto. Nothing is hidden."
+          echo "The IP player-only callback is compile-gated and OFF by default; /who and refresh are not proved."
           echo "No Core fork, merge, config, character DB, or owner host modification."
