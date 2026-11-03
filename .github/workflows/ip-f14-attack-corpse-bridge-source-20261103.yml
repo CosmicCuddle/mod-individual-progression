@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           git -C ip merge-base --is-ancestor 9962ab8cb009c23d99b457d8ded618828be12a78 HEAD
           git -C ip diff --name-only 9962ab8cb009c23d99b457d8ded618828be12a78 HEAD -- src conf sql data optional | sort >/tmp/f14-ip-actual.txt
-          printf '%s\n' src/IndividualProgressionPlayer.cpp | sort >/tmp/f14-ip-expected.txt
+          printf '%s\n' src/IndividualProgressionPlayer.cpp src/IndividualProgressionF14MultiAttackerPolicy.h | sort >/tmp/f14-ip-expected.txt
           diff -u /tmp/f14-ip-expected.txt /tmp/f14-ip-actual.txt
           test "$(git -C core rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
       - name: Apply default-allow observer + cached WHO + attack/corpse patches in order
