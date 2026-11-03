@@ -1145,9 +1145,12 @@ public:
             !candidate->GetSession() || !candidate->GetSession()->IsHeadless() ||
             (candidate->getRace() != RACE_DRAENEI &&
              candidate->getRace() != RACE_BLOODELF) ||
-            !sIndividualProgression->HasF14VerifiedRandomBotIdentity(candidate))
+            !sIndividualProgression->HasF14VerifiedRandomBotIdentity(candidate) ||
+            !sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(candidate->GetGUID()))
             return;
 
+        // The verified per-login epoch check rejects stale GUID-only actors.
+        // This is still NOT a complete map-thread threat/rights/observer proof.
         // The true (forced) path invokes the synchronous nearby-player notifier,
         // NOT Unit::UpdateObjectVisibility(false)'s delayed notification.
         // This is only a narrow ATTACK transition refresh; it does not supply
