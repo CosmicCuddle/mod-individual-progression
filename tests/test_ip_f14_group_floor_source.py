@@ -51,6 +51,7 @@ class IdentitySafety(unittest.TestCase):
         self.assertIn("player->getRace() == RACE_DRAENEI", login)
         self.assertIn("player->getRace() == RACE_BLOODELF", login)
         self.assertIn("sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter())", login)
+        self.assertRegex(login, r"RememberF14VerifiedRandomBotGroupIdentity\(\s*player,\s*sRandomPlayerbotMgr\.IsRandomBot\(player->GetGUID\(\)\.GetCounter\(\)\)\);")
         self.assertIn("RememberF14VerifiedRandomBotGroupIdentity(", login)
         self.assertIn("#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE", login)
         # The older optional F14 login preserve may also check PB identity;
@@ -74,6 +75,7 @@ class IdentitySafety(unittest.TestCase):
                             "player->GetSession()->IsHeadless()"):
             self.assertIn(restriction, should_skip)
         self.assertIn("SkipVerifiedGroupDowngrade(", should_skip)
+        self.assertIn("GetPlayerProgressionFromQuests(player), targetStage", should_skip)
 
 
 class NoDestructiveSync(unittest.TestCase):
@@ -97,7 +99,9 @@ class NoDestructiveSync(unittest.TestCase):
         self.assertEqual(PLAYER.count("ShouldSkipF14VerifiedRandomBotGroupDowngrade(player, leaderState)"), 1)
 
     def test_pure_floor_only_skips_down_without_granting(self):
-        self.assertIn("return level > 70 ? 13 : 8;", POLICY)
+        floor = function(POLICY, "constexpr std::uint8_t ExpansionRaceFloor(")
+        self.assertIn("return 8;", floor)
+        self.assertNotIn("13", floor)
         self.assertIn("return currentStage >= floor && requestedStage < floor;", POLICY)
         self.assertNotIn("RewardQuest(", POLICY)
         self.assertNotIn("ForceUpdateProgressionState(", POLICY)

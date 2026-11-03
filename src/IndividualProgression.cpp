@@ -533,7 +533,7 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
 
         // F14 default-OFF: no Playerbots identity access on group/map thread.
         // When the login-verified TBC-race bot has earned its minimum stage,
-        // never downgrade it below that floor (8, or 13 at level 71+).
+        // never downgrade it below the earned TBC floor 8 at any level.
         if (ShouldSkipF14VerifiedRandomBotGroupDowngrade(member, permittedState))
             continue;
 
