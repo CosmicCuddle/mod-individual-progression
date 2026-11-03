@@ -89,9 +89,20 @@ class F14LoginIncarnationSafety(unittest.TestCase):
         self.assertIn("sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter())", login)
         self.assertNotIn("GetF14VerifiedRandomBotLoginEpoch(", login)
 
-    def test_no_epoch_forgery_in_observer_or_who_hot_path(self):
-        self.assertEqual(PLAYER.count("GetF14VerifiedRandomBotLoginEpoch("), 0,
-                         "Current visibility hooks must not fabricate epoch tokens")
+    def test_epoch_used_only_for_verified_attack_start_not_observer_hot_path(self):
+        # Actual attack start/target switch must have both positive identity
+        # AND a current login incarnation, never just a recycled GUID.
+        attack = function(PLAYER, "void OnF14AttackTargetTransition(")
+        self.assertIn("HasF14VerifiedRandomBotIdentity(candidate)", attack)
+        self.assertIn("GetF14VerifiedRandomBotLoginEpoch(candidate->GetGUID())", attack)
+        self.assertLess(attack.index("HasF14VerifiedRandomBotIdentity(candidate)"),
+                        attack.index("GetF14VerifiedRandomBotLoginEpoch(candidate->GetGUID())"))
+        self.assertEqual(PLAYER.count("GetF14VerifiedRandomBotLoginEpoch("), 1,
+                         "Epoch lookup must be confined to map-event attack-start guard")
+        observer = function(PLAYER, "bool OnWorldObjectCanBeSeenByPlayer(")
+        who = function(PLAYER, "bool OnWhoListEntryCanBeSeenByPlayer(")
+        self.assertNotIn("GetF14VerifiedRandomBotLoginEpoch(", observer)
+        self.assertNotIn("GetF14VerifiedRandomBotLoginEpoch(", who)
         self.assertIn("COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION", CORE)
         self.assertNotIn("#define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION", CORE)
 
