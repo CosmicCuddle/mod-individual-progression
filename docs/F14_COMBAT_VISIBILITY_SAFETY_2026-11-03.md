@@ -6,6 +6,14 @@
 
 Avoid a visible NPC appearing to fight thin air after a *positively verified* Blood Elf/Draenei **RandomBot** is hidden from a **Vanilla** observer. Do not hide ordinary human Blood Elf/Draenei players, Altbots, Selfbots or unknown identities. TBC+ observers retain normal visibility. This is a requested player-experience improvement, not approval of broad NPC concealment or any production change.
 
+## Owner clarification — active attack only; corpse always visible (3 November 2026)
+
+The owner clarified that a Vanilla observer's creature-hide effect is needed **only while a positively identified, already-hidden Blood Elf/Draenei RandomBot is currently attacking that particular living creature**. The creature must return immediately when the last qualifying bot stops attacking it, switches targets, logs out or resets — **even if the creature is still in combat**. Old threat, prior hits and the creature continuing to chase a bot must never prolong hiding. If another qualifying bot continues attacking that same target, the effect may continue subject to all original safety protections.
+
+**Death is an unconditional show event:** once the creature dies, it must immediately reappear as its ordinary corpse, regardless of stale current-attacker, target or combat flags. Its loot sparkle, skinning, quest credit and other usual interactions must not be suppressed. The pure model now includes a distinct positive active-attack fact and the already-existing alive guard; the separate portable transition tests cover both cases. This does **not** implement the Worldserver visibility refresh required to make either transition instantaneous.
+
+Required future refresh triggers include **attack begin, attack stop, target switch and creature death**, not merely combat enter/exit. All earlier real-player rights, no-ghost-hit, TBC observer and human player exceptions remain mandatory.
+
 ## Why source-only model is not safe to wire today
 
 1. Pinned Core `Grimfeather/azerothcore-wotlk@8daffdabe`: `Player::IsVisibleGloballyFor` is not a world-visibility deny hook for normally visible players. Therefore the prerequisite *already-hidden verified RandomBot* is **not** implemented in a safe general world hook.
