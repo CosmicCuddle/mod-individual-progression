@@ -15,6 +15,7 @@ constexpr F14::CreatureSnapshot Creature()
     c.plainUnscriptedNonEliteHostileNpc = true;
     c.alive = true;
     c.inCombat = true;
+    c.eligibleHiddenRandomBotCurrentlyAttackingThisCreature = true;
     c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion = true;
     c.noRealPlayerCombatThreatTapOrRights = true;
     c.noPendingThreatOrCombatantChanges = true;
