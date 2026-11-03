@@ -1175,11 +1175,11 @@ private:
             "IndividualProgression.F14.ExperimentalRndbotPlayerVisibility", false);
         // World visibility alone is NOT enough: cached /who bypasses
         // Player::IsVisibleGloballyFor and the observer script. Until an
-        // independently reviewed WHO filter exists, force this pilot OFF.
-#if !defined(COSMIC_F14_OBSERVER_HOOK_VERSION) || !defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)
+        // independently reviewed WHO filter AND immediate refresh exist, keep OFF.
+#if !defined(COSMIC_F14_OBSERVER_HOOK_VERSION) || !defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION) || !defined(COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION)
         if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)
         {
-            LOG_ERROR("module", "F14 experimental visibility needs both Core observer and WHO filter hooks; forcing OFF");
+            LOG_ERROR("module", "F14 experimental visibility requires Core observer, WHO filter and immediate refresh hooks; forcing OFF");
             sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = false;
         }
 #endif
