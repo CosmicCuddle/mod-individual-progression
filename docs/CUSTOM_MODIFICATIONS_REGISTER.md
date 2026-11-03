@@ -530,3 +530,17 @@ synchronisation but cannot automatically restore prior progression markers.
 | Tests / status | SHA-pinned Core five-file/six-hunk `git apply --check` and Python no-op source contracts; additional disposable Core+PB+IP47+Naxx292+Services16 actual Worldserver link workflow. **Test runs are not certified until exact-head CI reports them**; even a green link proves only ABI/build, not display or combat. |
 | Deployment / rollback / decisions | Discard this test-only draft to roll back; **zero host change**. Actual Core change/fork/integration requires owner approval, actual installed versions/custom-file register, backups, regression, native+gameplay tests and a separately reviewed refresh mechanism. Grok on leave; CS01 review is not independent sign-off. |
 
+
+## IP-F14-PLAYER-OBSERVER-PILOT (3 Nov 2026) — positively verified RandomBot-only player visibility
+
+| Field | Record |
+| --- | --- |
+| Intended behaviour / owner | CosmicCuddle: ordinary Vanilla human observers should not see positively identified Blood Elf/Draenei **RandomBots**, while real humans and other bots remain visible. Separate active-attacker-only creature presentation rule remains pending. |
+| Owning components | IP fork `src/IndividualProgressionPlayer.cpp`, `src/IndividualProgression.cpp/.h`, distributed IP config; optional *disposable CI-only* five-file Core hook asset `tests/core_patches/f14_observer_visibility_default_allow_prototype.patch`; requires compatible historical Playerbots identity API. |
+| Parent / source | Isolated feature branch stacked on IP #50 exact `9b64bf1e1d624c3d02b02a668aa2f7207d6d097b`. Historic Core test pin `Grimfeather/azerothcore-wotlk@8daffdabe`; NOT an identified owner-installed revision. |
+| Configuration / dependencies | `IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0` **default OFF**. Fails OFF when the optional Core hook macro or Playerbots header is missing. Reuses existing session-positive login cache under shared mutex; no new DB/SQL/DBC/client assets. |
+| Preserved behavior / regression | Default-allow Core; all unverified/human BE/Draenei visible; no NPC hiding; no quest/gold/paid receipt/stage writes; GroupSync and F19 preserved. Older C3/F19 provenance tests are maintained against exact historical parents and only explicitly named pilot source deltas. |
+| Live / build / game state | New source and CI edits committed on *unmerged development branch*. Native link for this **new** pilot HEAD and actual gameplay NOT YET VERIFIED. Separate parent Core #50 source CI success and PB #49 link success do not prove this pilot. |
+| Known risks | WHO path not verified; no immediate visibility invalidation; startup/reload cache freshness; hot-path profiling; Core/Playerbots source drift; combat NPC/ghost-hit/loot safety is not addressed. No enabling permitted. |
+| Tests / rollback | See `tests/test_ip_f14_rndbot_player_observer_wiring.py`, Core patch source tests and newly repinned disposable combined-native workflow. Rollback today: discard this branch; zero live changes. Later live rollback would require feature disable, verified binary/config/DB restore and visibility correction. |
+| Decisions / references | [F14 Issue #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9), [core seam #50](https://github.com/CosmicCuddle/mod-individual-progression/pull/50), [combat model #47](https://github.com/CosmicCuddle/mod-individual-progression/pull/47). CosmicCuddle retains final approval. |
