@@ -1083,7 +1083,8 @@ public:
     IndividualProgressionF14AttackEventScript()
         : UnitScript("IndividualProgression_F14AttackEvents", true,
                      {UNITHOOK_ON_F14_ATTACK_TARGET_TRANSITION,
-                      UNITHOOK_ON_F14_CREATURE_CORPSE_READY}) { }
+                      UNITHOOK_ON_F14_CREATURE_CORPSE_READY,
+                      UNITHOOK_ON_F14_CREATURE_RESPAWNED}) { }
 
     void OnF14AttackTargetTransition(Unit* attacker, Unit* oldVictim, Unit* newVictim) override
     {
@@ -1119,6 +1120,19 @@ public:
         // The Core event is emitted AFTER corpse-state promotion. Never hide
         // a corpse; this forced refresh allows the normal visibility policy to
         // restore the dead creature for Vanilla observers if it was hidden.
+        if (!sIndividualProgression->enabled ||
+            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+            !creature || !creature->IsInWorld())
+            return;
+
+        creature->UpdateObjectVisibility(true);
+    }
+
+    void OnF14CreatureRespawned(Creature* creature) override
+    {
+        // The Core event follows the alive transition, movement and phase
+        // restoration. Never inherit the corpse's previous observer status.
+        // This refresh is only an EVENT signal, not a safe concealment proof.
         if (!sIndividualProgression->enabled ||
             !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
             !creature || !creature->IsInWorld())
