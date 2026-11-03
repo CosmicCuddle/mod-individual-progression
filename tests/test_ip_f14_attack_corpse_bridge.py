@@ -165,6 +165,30 @@ class F14TransitionBridge(unittest.TestCase):
             self.assertNotIn(code, corpse)
             self.assertNotIn(code, respawn)
 
+    def test_attack_stop_fails_visible_without_bot_login_identity(self):
+        cls = P.split("class IndividualProgressionF14AttackEventScript", 1)[1].split("\n#endif", 1)[0]
+        attack = method(cls, "void OnF14AttackTargetTransition(")
+        # Stop is invoked after Unit::AttackStop has unlinked its target; a
+        # logged-out actor may lack both its session and positive identity.
+        # Only the SHOW/refresh path may bypass verification. Start/switch
+        # still requires verified rndbot; neither may hide human actors.
+        stop_index = attack.index("if (!newVictim)")
+        checks_index = attack.index("HasF14VerifiedRandomBotIdentity(candidate)")
+        self.assertLess(stop_index, checks_index)
+        stop_block = attack[stop_index:checks_index]
+        self.assertIn("oldVictim->IsCreature()", stop_block)
+        self.assertIn("oldVictim->IsInWorld()", stop_block)
+        self.assertIn("oldVictim->UpdateObjectVisibility(true);", stop_block)
+        self.assertIn("return;", stop_block)
+        self.assertNotIn("GetSession()", stop_block)
+        self.assertNotIn("GetEffectiveProgression(", stop_block)
+        self.assertNotIn("SetPhaseMask(", stop_block)
+        self.assertIn("!attacker || !attacker->IsPlayer()", attack[:stop_index])
+        self.assertIn("!sIndividualProgression->f14ExperimentalRndbotPlayerVisibility",
+                      attack[:stop_index])
+        self.assertIn("candidate->GetSession()->IsHeadless()", attack[checks_index - 450:checks_index])
+        self.assertIn("HasF14VerifiedRandomBotIdentity(candidate)", attack[checks_index:])
+
     def test_existing_world_add_hook_recovers_pre_world_respawn(self):
         # The post-Alive Core respawn event can fire before AddToWorld, when
         # IsInWorld() correctly makes its refresh a no-op. Use existing
