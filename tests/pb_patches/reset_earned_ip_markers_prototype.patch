@@ -54,7 +54,22 @@ diff --git a/src/PlayerbotAIConfig.cpp b/src/PlayerbotAIConfig.cpp
 diff --git a/src/Bot/Factory/PlayerbotFactory.cpp b/src/Bot/Factory/PlayerbotFactory.cpp
 --- a/src/Bot/Factory/PlayerbotFactory.cpp
 +++ b/src/Bot/Factory/PlayerbotFactory.cpp
-@@ -1696,10 +1696,18 @@
+@@ -1684,9 +1684,11 @@
+     }
+ }
+ 
+-void PlayerbotFactory::ResetQuests()
+-{
+-    for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
++void PlayerbotFactory::ResetQuests()
++{
++    // One policy snapshot for the whole reset, even across a config reload.
++    uint32 const preserveMask = sPlayerbotAIConfig.ResetQuestsPreserveMask.load(std::memory_order_acquire);
++    for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
+     {
+         bot->SetQuestSlot(slot, 0);
+     }
+@@ -1696,10 +1698,17 @@
          Quest const* quest = i->second;
  
          uint32 entry = quest->GetQuestId();
@@ -65,12 +80,11 @@ diff --git a/src/Bot/Factory/PlayerbotFactory.cpp b/src/Bot/Factory/PlayerbotFac
 +        if (bot->GetQuestStatus(entry) == QUEST_STATUS_NONE)
 +            continue;
 +
-+        // Preserve only already-rewarded IP markers selected by the opt-in
-+        // mask. An atomic read is safe across map-worker/config reloads.
++        // Preserve only pre-existing rewarded markers explicitly selected
++        // at the start of this reset. Other quests still reset normally.
 +        if (entry >= 66001 && entry <= 66018 &&
 +            bot->GetQuestStatus(entry) == QUEST_STATUS_REWARDED &&
-+            (sPlayerbotAIConfig.ResetQuestsPreserveMask.load(std::memory_order_acquire) &
-+             (uint32(1) << (entry - 66001))) != 0)
++            (preserveMask & (uint32(1) << (entry - 66001))) != 0)
 +            continue;
 +
 +        bot->RemoveRewardedQuest(entry);
