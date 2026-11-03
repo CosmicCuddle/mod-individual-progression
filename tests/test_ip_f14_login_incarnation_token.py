@@ -57,7 +57,13 @@ class F14LoginIncarnationSafety(unittest.TestCase):
         self.assertIn("const std::uint64_t loginEpoch = ++_f14NextRandomBotLoginEpoch;", m)
         self.assertIn("_f14VerifiedRandomBotGroupCache[guid] = true;", m)
         self.assertIn("_f14VerifiedRandomBotLoginEpoch[guid] = loginEpoch;", m)
-        self.assertLess(m.index("if (_f14NextRandomBotLoginEpoch"), m.index("_f14VerifiedRandomBotGroupCache[guid] = true;"))
+        # Established group protections remain verified even if the
+        # visibility-only epoch counter is exhausted. The missing epoch
+        # makes new concealment fail visible without changing group rules.
+        self.assertLess(m.index("_f14VerifiedRandomBotGroupCache[guid] = true;"),
+                        m.index("if (_f14NextRandomBotLoginEpoch"))
+        self.assertLess(m.index("if (_f14NextRandomBotLoginEpoch"),
+                        m.index("_f14VerifiedRandomBotLoginEpoch[guid] = loginEpoch;"))
         self.assertLess(m.index("_f14VerifiedRandomBotGroupCache.erase(guid);"), m.index("_f14VerifiedRandomBotGroupCache[guid] = true;"))
         self.assertNotIn("= player->GetGUID().GetCounter();\n    _f14VerifiedRandomBotLoginEpoch", m)
 
