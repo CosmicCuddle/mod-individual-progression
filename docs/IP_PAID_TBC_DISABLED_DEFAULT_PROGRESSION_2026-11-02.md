@@ -97,3 +97,14 @@ thread/context safety and complete quest hand-ins need independent Core
 review and compatible native build + disposable gameplay. No owner runtime,
 config, SQL or production changes authorised. Parent #41 remains frozen
 while its own native CI finishes. Rollback is discarding this unmerged child.
+
+## 3 Nov — normal client hand-in denial explains preserved quest
+
+The optional, default-OFF paid 10259 packet veto now sends a system message
+*only* on the exact client reward packet that would otherwise silently be
+dropped for a verified paid raw-stage<8 normal character with DDP=1.
+It does not modify quest, stage, gold, receipt, packet cursor or unrelated
+quest reward paths. Existing GM/direct Core RewardQuest bypass remains a
+blocker pending an authoritative Core seam. Source and native CI must still
+pass before owner-controlled gameplay acceptance. Rollback: revert this
+small additive message/test revision on unmerged IP #42.
