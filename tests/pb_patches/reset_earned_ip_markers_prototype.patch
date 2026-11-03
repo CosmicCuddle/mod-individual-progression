@@ -1,0 +1,78 @@
+diff --git a/src/PlayerbotAIConfig.h b/src/PlayerbotAIConfig.h
+--- a/src/PlayerbotAIConfig.h
++++ b/src/PlayerbotAIConfig.h
+@@ -127,8 +127,10 @@
+     uint32 ForceRebuffMarginSecs;
+     bool AutoAvoidAoe;
+     float MaxAoeAvoidRadius;
+-    std::set<uint32> AoeAvoidSpellWhitelist;
+-    bool TellWhenAvoidAoe;
++    std::set<uint32> AoeAvoidSpellWhitelist;
++    // Explicit opt-in: preserve only already rewarded IP markers in PB resets.
++    std::set<uint32> ResetQuestsPreserveQuestIds;
++    bool TellWhenAvoidAoe;
+     std::set<uint32> DisallowedGameObjects;
+     std::set<uint32> AttunementQuests;
+     std::set<uint32> UnobtainableItems;
+diff --git a/src/PlayerbotAIConfig.cpp b/src/PlayerbotAIConfig.cpp
+--- a/src/PlayerbotAIConfig.cpp
++++ b/src/PlayerbotAIConfig.cpp
+@@ -165,8 +165,13 @@
+     ForceRebuffMarginSecs = std::min(sConfigMgr->GetOption<uint32>("Playerbots.ForceRebuffMarginSecs", 60), 3600u);
+     AutoAvoidAoe = sConfigMgr->GetOption<bool>("Playerbots.AutoAvoidAoe", true);
+     MaxAoeAvoidRadius = sConfigMgr->GetOption<float>("Playerbots.MaxAoeAvoidRadius", 15.0f);
+-    LoadSet<std::set<uint32>>(sConfigMgr->GetOption<std::string>("Playerbots.AoeAvoidSpellWhitelist", "50759,57491,13810,29946"),
+-                              AoeAvoidSpellWhitelist);
++    LoadSet<std::set<uint32>>(sConfigMgr->GetOption<std::string>("Playerbots.AoeAvoidSpellWhitelist", "50759,57491,13810,29946"),
++                              AoeAvoidSpellWhitelist);
++    // Empty is the default: preserve stock ResetQuests until owner opt-in.
++    std::string const resetPreserveIds =
++        sConfigMgr->GetOption<std::string>("Playerbots.ResetQuestsPreserveQuestIds", "");
++    if (!resetPreserveIds.empty())
++        LoadSet<std::set<uint32>>(resetPreserveIds, ResetQuestsPreserveQuestIds);
+     TellWhenAvoidAoe = sConfigMgr->GetOption<bool>("Playerbots.TellWhenAvoidAoe", false);
+ 
+     RandomGearLoweringChance = sConfigMgr->GetOption<float>("Playerbots.RandomGearLoweringChance", 0.0f);
+diff --git a/src/Bot/Factory/PlayerbotFactory.cpp b/src/Bot/Factory/PlayerbotFactory.cpp
+--- a/src/Bot/Factory/PlayerbotFactory.cpp
++++ b/src/Bot/Factory/PlayerbotFactory.cpp
+@@ -1696,10 +1696,17 @@
+         Quest const* quest = i->second;
+ 
+         uint32 entry = quest->GetQuestId();
+-        if (bot->GetQuestStatus(entry) == QUEST_STATUS_NONE)
+-            continue;
+-
+-        bot->RemoveRewardedQuest(entry);
++        if (bot->GetQuestStatus(entry) == QUEST_STATUS_NONE)
++            continue;
++
++        // Preserve existing earned IP stage markers only when explicitly
++        // configured. Never create a reward or preserve ordinary quest IDs.
++        if (entry >= 66001 && entry <= 66018 &&
++            bot->GetQuestStatus(entry) == QUEST_STATUS_REWARDED &&
++            sPlayerbotAIConfig.ResetQuestsPreserveQuestIds.count(entry) != 0)
++            continue;
++
++        bot->RemoveRewardedQuest(entry);
+         bot->RemoveActiveQuest(entry, false);
+ 
+     }
+diff --git a/conf/playerbots.conf.dist b/conf/playerbots.conf.dist
+--- a/conf/playerbots.conf.dist
++++ b/conf/playerbots.conf.dist
+@@ -1333,7 +1333,13 @@
+ #
+ 
+ # Quests that will be completed and rewarded for all randombots
+-Playerbots.RandomBotQuestIds = "3802,5505,6502,7761,7848,10277,10285,11492,13188,13189,24499,24511,24710,24712"
++Playerbots.RandomBotQuestIds = "3802,5505,6502,7761,7848,10277,10285,11492,13188,13189,24499,24511,24710,24712"
++
++# PROPOSAL ONLY - default empty, no change to Playerbots resets.
++# Optional IDs of ALREADY REWARDED IP progression marker quests 66001-66018
++# to retain during PlayerbotFactory::ResetQuests. No stage auto-awards.
++# Only enable after owner approval and full installed-version compatibility tests.
++Playerbots.ResetQuestsPreserveQuestIds =
+ 
+ # Randombots will group with nearby randombots to do shared quests
+ # Note: Currently not functioning properly
