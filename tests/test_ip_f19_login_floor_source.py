@@ -65,6 +65,7 @@ class Provenance(unittest.TestCase):
         self.assertEqual(f14_delta, [
             "src/IndividualProgression.cpp",
             "src/IndividualProgression.h",
+            "src/IndividualProgressionF14ActorCreatureIndex.h",  # #55 pure/unwired map-wide expiry fan-out model
             "src/IndividualProgressionF14CombatVisibilityPolicy.h",  # #47 pure/unwired research header only
             "src/IndividualProgressionF14LoginPolicy.h",
             "src/IndividualProgressionF14MultiAttackerPolicy.h",  # #54 pure/unwired multi-actor event model
@@ -95,6 +96,7 @@ class Provenance(unittest.TestCase):
         self.assertEqual(
             git("diff", "--name-only", reviewed_f14_seam, "HEAD", "--", "src").splitlines(),
             ["src/IndividualProgression.cpp", "src/IndividualProgression.h",
+             "src/IndividualProgressionF14ActorCreatureIndex.h",
              "src/IndividualProgressionF14MultiAttackerPolicy.h",
              "src/IndividualProgressionF14RefreshPolicy.h",
              "src/IndividualProgressionPlayer.cpp"],
@@ -111,10 +113,19 @@ class Provenance(unittest.TestCase):
         # without any runtime translation-unit or nested-header inclusion.
         multi_attacker_model = "IndividualProgressionF14MultiAttackerPolicy.h"
         for path in (ROOT / "src").rglob("*"):
-            if not path.is_file() or path.suffix not in {".cpp", ".h", ".hpp"} or path.name == multi_attacker_model:
+            if not path.is_file() or path.suffix not in {".cpp", ".h", ".hpp"} or path.name in {multi_attacker_model, "IndividualProgressionF14ActorCreatureIndex.h"}:
                 continue
             self.assertNotIn(multi_attacker_model, path.read_text(),
                              f"Unreviewed multi-attacker model reference: {path.relative_to(ROOT)}")
+        # Only this new pure model header may depend on the multi-attacker
+        # model; actual translation units and all other headers must not
+        # include or refer to the actor-creature index itself.
+        actor_creature_index = "IndividualProgressionF14ActorCreatureIndex.h"
+        for path in (ROOT / "src").rglob("*"):
+            if not path.is_file() or path.suffix not in {".cpp", ".h", ".hpp"} or path.name == actor_creature_index:
+                continue
+            self.assertNotIn(actor_creature_index, path.read_text(),
+                             f"Unreviewed F14 actor-creature index reference: {path.relative_to(ROOT)}")
         # Force-include through module build scripts would bypass an src-only
         # freeze while still compiling the model into live translation units.
         self.assertEqual(git("diff", "--name-only", frozen_ip46, "HEAD", "--",
