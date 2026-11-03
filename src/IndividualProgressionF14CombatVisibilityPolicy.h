@@ -79,6 +79,15 @@ namespace IndividualProgressionF14CombatVisibilityPolicy
         // This is a viewer/creature PAIR fact set, not just a viewer cache.
         // All observer checks must be made against this exact creature state.
         std::uint32_t checkedAgainstCreatureGeneration = 0;
+
+        // These two proofs must be evaluated from live Unit/attacker state
+        // on the owning map thread for THIS visibility decision, not copied
+        // from the creature or viewer cached snapshot. A dead Unit ALWAYS
+        // overrides stale cached alive/attack=true; attack-stop / target
+        // switch must likewise fail visible despite old combat snapshots.
+        // No runtime reader exists in this source-only model yet.
+        bool targetIsAliveAtThisEvaluation = false;
+        bool eligibleHiddenAttackerStillAttackingThisTargetAtThisEvaluation = false;
     };
 
     constexpr bool ShouldConcealCreatureFromObserver(CreatureSnapshot const& c,
@@ -96,6 +105,8 @@ namespace IndividualProgressionF14CombatVisibilityPolicy
                o.noObserverOrGroupQuestLootTapSkinOrKillCredit &&
                o.observerStageAndIdentityStable &&
                o.coreVisibilityAndThreatRefreshVerified &&
+               o.targetIsAliveAtThisEvaluation &&
+               o.eligibleHiddenAttackerStillAttackingThisTargetAtThisEvaluation &&
                c.complete && c.current &&
                c.plainUnscriptedNonEliteHostileNpc &&
                c.alive && c.inCombat &&
