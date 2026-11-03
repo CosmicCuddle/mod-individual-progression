@@ -77,7 +77,6 @@ class F14LoginIncarnationSafety(unittest.TestCase):
         login = function(PLAYER, "void OnPlayerLogin(Player* player) override")
         self.assertLess(login.index("ForgetF14VerifiedRandomBotGroupIdentity(player);"),
                         login.index("RememberF14VerifiedRandomBotGroupIdentity("))
-        self.assertIn("candidate", login.replace("player", "candidate"))
         self.assertIn("player->GetSession()->IsHeadless()", login)
         self.assertIn("player->getRace() == RACE_BLOODELF", login)
         self.assertIn("player->getRace() == RACE_DRAENEI", login)
