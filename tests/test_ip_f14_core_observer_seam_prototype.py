@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FROZEN = "ce69a6891470693a471896b999c4fc97424f8676"
+FROZEN = "9b64bf1e1d624c3d02b02a668aa2f7207d6d097b"  # exact Core-seam-only parent
 PATCH = (ROOT / "tests/core_patches/f14_observer_visibility_default_allow_prototype.patch").read_text()
 PINNED_PATHS = {
     "src/server/game/Entities/Object/Object.cpp",
@@ -35,11 +35,17 @@ def git(*args):
 
 
 class PrototypeBoundary(unittest.TestCase):
-    def test_stacked_on_frozen_f14_branch_without_runtime_changes(self):
+    def test_stacked_on_exact_core_seam_parent_with_scoped_runtime_edits(self):
         subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor",
                         FROZEN, "HEAD"], check=True)
+        self.assertEqual(
+            set(git("diff", "--name-only", FROZEN, "HEAD", "--",
+                    "src", "conf", "sql", "data", "optional").splitlines()),
+            {"src/IndividualProgression.cpp", "src/IndividualProgression.h",
+             "src/IndividualProgressionPlayer.cpp",
+             "conf/individualProgression.conf.dist"})
         self.assertEqual(git("diff", "--name-only", FROZEN, "HEAD", "--",
-                             "src", "conf", "sql", "data", "optional"), "")
+                             "sql", "data", "optional"), "")
 
     def test_only_five_existing_pinned_core_paths_touched(self):
         paths = re.findall(r"^diff --git a/(\S+) b/\1$", PATCH, re.M)
@@ -140,11 +146,16 @@ class PrototypeBoundary(unittest.TestCase):
                           "IsRandomBot", "RandomPlayerbotMgr"):
             self.assertNotIn(forbidden, PATCH)
 
-    def test_ci_source_files_only(self):
-        changed = git("diff", "--name-only", FROZEN, "HEAD").splitlines()
+    def test_only_known_optional_pilot_paths_added(self):
+        changed = set(git("diff", "--name-only", FROZEN, "HEAD").splitlines())
         self.assertTrue(changed)
         self.assertTrue(all(p.startswith(("tests/", "docs/", ".github/workflows/"))
-                            for p in changed), changed)
+                            for p in changed -
+                            {"src/IndividualProgression.cpp",
+                             "src/IndividualProgression.h",
+                             "src/IndividualProgressionPlayer.cpp",
+                             "conf/individualProgression.conf.dist"}), changed)
+        self.assertIn("#define COSMIC_F14_OBSERVER_HOOK_VERSION 1", PATCH)
 
 
 class ActualPatchedCore(unittest.TestCase):

@@ -82,10 +82,19 @@ class Provenance(unittest.TestCase):
         frozen_ip46 = "cbc8de8e77f07b9d982e7f4993e1a4c292f8c6bf"
         subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor",
                         frozen_ip46, "HEAD"], check=True)
+        # Preserve the original #47 read-only model boundary exactly at the
+        # reviewed #50 parent, then explicitly inspect the new #51 runtime
+        # delta. Do not silently broaden the frozen F19/paid baseline.
+        reviewed_f14_seam = "9b64bf1e1d624c3d02b02a668aa2f7207d6d097b"
         self.assertEqual(
-            git("diff", "--name-only", frozen_ip46, "HEAD", "--", "src").splitlines(),
+            git("diff", "--name-only", frozen_ip46, reviewed_f14_seam, "--", "src").splitlines(),
             ["src/" + model],
-            "F14 #47 may add ONLY its unwired policy header; runtime source changed")
+            "Reviewed #50 must still leave only the unwired #47 model in src")
+        self.assertEqual(
+            git("diff", "--name-only", reviewed_f14_seam, "HEAD", "--", "src").splitlines(),
+            ["src/IndividualProgression.cpp", "src/IndividualProgression.h",
+             "src/IndividualProgressionPlayer.cpp"],
+            "Pilot may edit only three named existing IP source files")
         # Force-include through module build scripts would bypass an src-only
         # freeze while still compiling the model into live translation units.
         self.assertEqual(git("diff", "--name-only", frozen_ip46, "HEAD", "--",
@@ -113,6 +122,16 @@ class Provenance(unittest.TestCase):
         # subsection for old #30 config provenance; separate F14 tests pin it.
         first = "# IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor"
         last = "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0"
+        self.assertEqual(current.count(first), 1)
+        self.assertEqual(current.count(last), 1)
+        start = current.index(first)
+        end = current.index(last, start) + len(last)
+        self.assertEqual(current[end:end + 2], "\n\n")
+        current = current[:start] + current[end + 2:]
+        # Reconstruct the original default-OFF config: the separately
+        # reviewable player-visibility pilot must never alter paid/F19 flags.
+        first = "# IndividualProgression.F14.ExperimentalRndbotPlayerVisibility"
+        last = "IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0"
         self.assertEqual(current.count(first), 1)
         self.assertEqual(current.count(last), 1)
         start = current.index(first)

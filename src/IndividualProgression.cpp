@@ -457,6 +457,17 @@ void IndividualProgression::ForgetF14VerifiedRandomBotGroupIdentity(Player* play
     RememberF14VerifiedRandomBotGroupIdentity(player, false);
 }
 
+// Read-only, lock-protected identity: never ask mutable Playerbots state
+// from a per-viewer Core visibility worker. Absence always means visible.
+bool IndividualProgression::HasF14VerifiedRandomBotIdentity(Player const* player)
+{
+    if (!player)
+        return false;
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    auto const it = _f14VerifiedRandomBotGroupCache.find(player->GetGUID().GetCounter());
+    return it != _f14VerifiedRandomBotGroupCache.end() && it->second;
+}
+
 bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage)
 {
     // Preserve all historical behaviour unless this independent pilot is
@@ -1160,6 +1171,18 @@ private:
         sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = sConfigMgr->GetOption<bool>("IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin", false);
         sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = sConfigMgr->GetOption<bool>(
             "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor", false);
+        sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ExperimentalRndbotPlayerVisibility", false);
+        // World visibility alone is NOT enough: cached /who bypasses
+        // Player::IsVisibleGloballyFor and the observer script. Until an
+        // independently reviewed WHO filter exists, force this pilot OFF.
+#if !defined(COSMIC_F14_OBSERVER_HOOK_VERSION) || !defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)
+        if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)
+        {
+            LOG_ERROR("module", "F14 experimental visibility needs both Core observer and WHO filter hooks; forcing OFF");
+            sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = false;
+        }
+#endif
 #if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
         if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin)
         {
@@ -1170,6 +1193,11 @@ private:
         {
             LOG_ERROR("module", "IndividualProgression F14 verified RandomBot group floor requires Playerbots API header; forcing OFF");
             sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = false;
+        }
+        if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)
+        {
+            LOG_ERROR("module", "F14 experimental RandomBot world visibility requires Playerbots identity API; forcing OFF");
+            sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = false;
         }
 #endif
         sIndividualProgression->fishingFix = sConfigMgr->GetOption<bool>("IndividualProgression.FishingFix", true);

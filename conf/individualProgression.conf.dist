@@ -63,6 +63,22 @@ IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0
 #
 IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0
 
+# IndividualProgression.F14.ExperimentalRndbotPlayerVisibility
+#
+#        EXPERIMENTAL F14 WORLD-PLAYER HOOK ONLY; DEFAULT OFF.
+#        Requires the optional Core observer script seam and verified
+#        HEADLESS Blood Elf/Draenei RandomBot identity cached at login.
+#        For an ordinary human observer still below effective TBC stage 8,
+#        the callback would deny visibility of that verified RandomBot.
+#        Never hides real human characters, other bots, GM observers or NPCs.
+#
+#        This is NOT full F14: /who, immediate visibility refresh on login,
+#        teleport, progression change, logout and combat-triggered creature
+#        presentation are NOT finished. Do NOT enable or deploy this pilot.
+#        No host configuration has been changed by this development branch.
+#
+IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0
+
 # IndividualProgression.PaidExpansion.Enable
 #
 #        DRAFT - paid expansion entitlement. Read at server start only.

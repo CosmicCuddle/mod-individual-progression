@@ -66,6 +66,15 @@ def without_f14_group_floor_player(src: str) -> str:
              "    void OnPlayerGetTrainerSpellState(")
     strip_to("        // F14 pilot: leave historic OFF grouping semantics unchanged while\\n".replace("\\n", "\n"),
              "        if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState)")
+    # Strip only the new, conditional observer callback, not existing player
+    # login / group code. The separate F14 pilot test owns this source.
+    strip_to("// F14 *player-only* WorldObjectScript observer pilot.",
+             "void AddSC_mod_individual_progression_player()")
+    registration = ("#if defined(COSMIC_F14_OBSERVER_HOOK_VERSION)\n"
+                    "    new IndividualProgressionF14ObserverScript();\n"
+                    "#endif\n")
+    assert src.count(registration) == 1
+    src = src.replace(registration, "")
     return src
 
 
@@ -89,7 +98,31 @@ def without_f14_group_floor_core_config(src: str) -> str:
         piece = piece.replace("\\n", "\n")
         assert src.count(piece) == 1, "F14 config addition missing or modified"
         src = src.replace(piece, "")
-    return src
+    pilot = (
+        '        sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = sConfigMgr->GetOption<bool>(\n'
+        '            "IndividualProgression.F14.ExperimentalRndbotPlayerVisibility", false);\n'
+        '        // World visibility alone is NOT enough: cached /who bypasses\n'
+        '        // Player::IsVisibleGloballyFor and the observer script. Until an\n'
+        '        // independently reviewed WHO filter exists, force this pilot OFF.\n'
+        '#if !defined(COSMIC_F14_OBSERVER_HOOK_VERSION) || !defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)\n'
+        '        if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)\n'
+        '        {\n'
+        '            LOG_ERROR("module", "F14 experimental visibility needs both Core observer and WHO filter hooks; forcing OFF");\n'
+        '            sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = false;\n'
+        '        }\n'
+        '#endif\n'
+    )
+    assert src.count(pilot) == 1, "F14 pilot Core seam config guard drifted"
+    src = src.replace(pilot, "")
+    pilot_missing_pb = (
+        '        if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)\n'
+        '        {\n'
+        '            LOG_ERROR("module", "F14 experimental RandomBot world visibility requires Playerbots identity API; forcing OFF");\n'
+        '            sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = false;\n'
+        '        }\n'
+    )
+    assert src.count(pilot_missing_pb) == 1
+    return src.replace(pilot_missing_pb, "")
 HEADER = (ROOT / "src/IndividualProgression.h").read_text()
 CONF = (ROOT / "conf/individualProgression.conf.dist").read_text()
 
