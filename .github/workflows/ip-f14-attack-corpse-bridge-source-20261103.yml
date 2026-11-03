@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - research/cs01-f14-attack-corpse-event-bridge-20261103
+      - research/cs01-f14-actor-expiry-fail-visible-20261103
     paths:
       - "src/IndividualProgression.cpp"
       - "src/IndividualProgression.h"
@@ -22,6 +23,7 @@ on:
   pull_request:
     branches:
       - research/cs01-f14-visibility-refresh-epoch-model-20261103
+      - research/cs01-f14-attack-corpse-event-bridge-20261103
     paths:
       - "src/IndividualProgression.cpp"
       - "src/IndividualProgression.h"
@@ -131,7 +133,7 @@ jobs:
                 -Wall -Wextra -Werror -pedantic -Iip \
                 ip/tests/f14_multi_attacker_policy.cpp -o /tmp/f14-multi-attack
               /tmp/f14-multi-attack | tee /tmp/f14-multi-result.txt
-              grep -Fqx 'F14 MULTI-ATTACKER 72/72 PASSED; pure/offline model only' /tmp/f14-multi-result.txt
+              grep -Fqx 'F14 MULTI-ATTACKER 88/88 PASSED; pure/offline model only' /tmp/f14-multi-result.txt
             done
           done
           echo 'Four compile/run combinations passed ONLY the pure candidate policy.'
