@@ -618,6 +618,10 @@ class StrictReceiptRuntime(unittest.TestCase):
         valid_return = purchase.index("return PurchaseResult::EntryUnavailable;", recorded)
         valid_return += len("return PurchaseResult::EntryUnavailable;")
         self.assertNotIn("stagedLedger", purchase[valid_return:purchase.index(all_slots)])
+        # Grok M7g: nobody may edit the staged cache receipt between
+        # copying it and validating RecordPurchase (one use is expected).
+        staged = purchase.index("stagedLedger = it->second;") + len("stagedLedger = it->second;")
+        self.assertEqual(purchase[staged:purchase.index(all_slots)].count("stagedLedger"), 1)
 
         self.assertNotIn("uint32 const moneySlot", purchase)
         self.assertNotIn("uint32 const timeSlot", purchase)
@@ -667,6 +671,9 @@ class StorageAndThreads(unittest.TestCase):
         self.assertIn("if (receipt != _paidExpansionLedgers.end() && index < ReceiptPolicy::Slots)\n        receipt->second.fields[index] = value;", setter)
         # M5 family: disallow a second receipt-slot write or early exit.
         self.assertEqual(setter.count("receipt->second.fields["), 1)
+        # Grok M5e: a second whole-ledger assignment after the good mirror
+        # would still reset the grandfather-evaluated receipt slot.
+        self.assertEqual(setter.count("receipt->second"), 1)
         self.assertNotIn("SettingGrandfatherEvaluated", setter)
         self.assertNotIn("return", setter[:mirror])
         self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);", setter)
