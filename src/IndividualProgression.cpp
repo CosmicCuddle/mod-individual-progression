@@ -453,13 +453,18 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
     if (!verified)
         return;
 
+    // Keep the historically protected group/login identity independent
+    // of the optional F14 visibility epoch. A token exhaustion must NEVER
+    // weaken established RandomBot group-progression safeguards.
+    _f14VerifiedRandomBotGroupCache[guid] = true;
+
     // Epoch 0 is always invalid, and wrap would reuse an old token.
-    // Once exhausted, refuse new positive identities rather than wrap.
+    // On exhaustion, group protections survive but no new event/visibility
+    // incarnation token is issued. The missing token fails visible.
     if (_f14NextRandomBotLoginEpoch == std::numeric_limits<std::uint64_t>::max())
         return;
 
     const std::uint64_t loginEpoch = ++_f14NextRandomBotLoginEpoch;
-    _f14VerifiedRandomBotGroupCache[guid] = true;
     _f14VerifiedRandomBotLoginEpoch[guid] = loginEpoch;
 }
 
