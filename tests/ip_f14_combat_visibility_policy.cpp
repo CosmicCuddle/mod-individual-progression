@@ -37,6 +37,8 @@ constexpr F14::ObserverSnapshot Observer()
     o.noObserverOrGroupQuestLootTapSkinOrKillCredit = true;
     o.observerStageAndIdentityStable = true;
     o.coreVisibilityAndThreatRefreshVerified = true;
+    o.targetIsAliveAtThisEvaluation = true;
+    o.eligibleHiddenAttackerStillAttackingThisTargetAtThisEvaluation = true;
     return o;
 }
 
@@ -83,6 +85,10 @@ int main()
     o = o0; o.noObserverOrGroupQuestLootTapSkinOrKillCredit = false; visible("quest, loot, tap or group kill-credit", c, o);
     o = o0; o.observerStageAndIdentityStable = false; visible("tier or identity update pending", c, o);
     o = o0; o.coreVisibilityAndThreatRefreshVerified = false; visible("Core seam/refresh missing", c, o);
+    o = o0; o.targetIsAliveAtThisEvaluation = false;
+    visible("live death always defeats stale matching alive/attacking cache", c0, o);
+    o = o0; o.eligibleHiddenAttackerStillAttackingThisTargetAtThisEvaluation = false;
+    visible("live bot attack-stop defeats stale matching combat snapshot", c0, o);
 
     c = c0; c.complete = false; visible("incomplete combat snapshot", c, o0);
     c = c0; c.current = false; visible("expired combat snapshot", c, o0);
