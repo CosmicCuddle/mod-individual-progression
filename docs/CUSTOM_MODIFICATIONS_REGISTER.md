@@ -6,6 +6,18 @@
 **Authority:** CosmicCuddle's approved gameplay rules; coordination Issues are the two-way decision log.  
 **Operating rule:** Update this register for every proposed or implemented IP customization. Review it and actual owner source before upstream integration. Keep retired entries, and distinguish requested behaviour, committed source, passing builds, owner-reported game tests, verified live binaries and merged releases.
 
+## IP-F14-RESET-NEGATIVE-20261103 — Playerbots progression-marker reset release blocker (DRAFT, TEST ONLY)
+
+| Field | Record |
+| --- | --- |
+| Intended behaviour | Protect already **earned** RandomBot IP stage marker quests 66001–66018 from future Playerbots full `ResetQuests` destruction without fabricating stage 8/13 or changing ordinary quest reset; implementation is **not yet authorised or available**. This child only models the present loss and prevents an unsafe IP save-hook workaround. |
+| Owner / decision | CosmicCuddle. Source blocker [coordination #11, B1](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6604947427), current policy [F14 #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9). Grok on break; CS01 self-review does not constitute independent sign-off. |
+| Component, source refs | IP test-only branch `test/cs01-f14-playerbots-reset-blocker-20261103` based on protected DRAFT #46 `26d5b7a1`; external historical PB `e88cc409`, Core `8daffdabe`. No changes to `src/`, configured defaults, DB/SQL/DBC/client, or owner host. |
+| Affected files | `tests/f14_playerbots_reset_blocker.cpp`; `tests/test_ip_f14_playerbots_reset_blocker.py`; `docs/F14_PLAYERBOTS_RESET_PRESERVATION_BLOCKER_2026-11-03.md`; dedicated isolated `ip-f14-playerbots-reset-blocker-20261103.yml`; this register only. |
+| Dependencies / risks | Playerbots owns `ResetQuests` and must eventually preserve already rewarded 66001–66018 only via default-empty, approved keep-list or reviewed Core/PB hook. Full randomisation can persist stage loss to DB; IP F19 login/group floor cannot restore it. Never use `OnPlayerSave`, `RewardQuest` or `ForceUpdateProgressionState(8)` to recreate unknown history. Real owner-installed revisions and current RandomBot DB remain unverified. |
+| Tests / status | Portable C++ negative model and Python source guard with exact pinned PB source checkout via CI; a PASS documents the **bug**, not its repair. Actual full Worldserver and gameplay preservation tests have not been done. Every F14 opt-in stays **OFF**. |
+| Rollback and release | Discard this isolated draft test branch with no gameplay effect. Keep stage-changing F14 **BLOCKED_CORE_PB_HOOK** until approved PB/Core fix, exact combined native link, character DB backups, staging tests and owner approval. |
+
 ## IP-GROUP-SAFETY-002-INTEGRATION — Offline-leader no-stage0 port to combined Hunter/grouping (DRAFT)
 
 | Field | Record |
