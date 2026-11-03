@@ -67,6 +67,7 @@ class Provenance(unittest.TestCase):
             "src/IndividualProgression.h",
             "src/IndividualProgressionF14CombatVisibilityPolicy.h",  # #47 pure/unwired research header only
             "src/IndividualProgressionF14LoginPolicy.h",
+            "src/IndividualProgressionF14MultiAttackerPolicy.h",  # #54 pure/unwired multi-actor event model
             "src/IndividualProgressionF14RefreshPolicy.h",  # #53 pure/unwired event generation model
             "src/IndividualProgressionPlayer.cpp",
         ])
@@ -94,6 +95,7 @@ class Provenance(unittest.TestCase):
         self.assertEqual(
             git("diff", "--name-only", reviewed_f14_seam, "HEAD", "--", "src").splitlines(),
             ["src/IndividualProgression.cpp", "src/IndividualProgression.h",
+             "src/IndividualProgressionF14MultiAttackerPolicy.h",
              "src/IndividualProgressionF14RefreshPolicy.h",
              "src/IndividualProgressionPlayer.cpp"],
             "Pilot may edit only three named existing IP source files plus one separate pure refresh model")
@@ -105,6 +107,14 @@ class Provenance(unittest.TestCase):
                 continue
             self.assertNotIn(refresh_model, path.read_text(),
                              f"Unreviewed F14 refresh model reference: {path.relative_to(ROOT)}")
+        # Multi-attacker policy must also remain a pure standalone header,
+        # without any runtime translation-unit or nested-header inclusion.
+        multi_attacker_model = "IndividualProgressionF14MultiAttackerPolicy.h"
+        for path in (ROOT / "src").rglob("*"):
+            if not path.is_file() or path.suffix not in {".cpp", ".h", ".hpp"} or path.name == multi_attacker_model:
+                continue
+            self.assertNotIn(multi_attacker_model, path.read_text(),
+                             f"Unreviewed multi-attacker model reference: {path.relative_to(ROOT)}")
         # Force-include through module build scripts would bypass an src-only
         # freeze while still compiling the model into live translation units.
         self.assertEqual(git("diff", "--name-only", frozen_ip46, "HEAD", "--",
