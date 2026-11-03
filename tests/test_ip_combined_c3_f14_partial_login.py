@@ -86,7 +86,7 @@ def without_f14_group_floor_core_config(src: str) -> str:
         '        }\\n',
     )
     for piece in additions:
-        piece = piece.replace("\\\\n", "\\n")
+        piece = piece.replace("\\n", "\n")
         assert src.count(piece) == 1, "F14 config addition missing or modified"
         src = src.replace(piece, "")
     return src

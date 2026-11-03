@@ -88,7 +88,7 @@ class Provenance(unittest.TestCase):
         self.assertEqual(current.count(last), 1)
         start = current.index(first)
         end = current.index(last, start) + len(last)
-        self.assertEqual(current[end:end + 2], "\\n\\n".replace("\\\\n", "\\n"))
+        self.assertEqual(current[end:end + 2], "\n\n")
         current = current[:start] + current[end + 2:]
         old = ("#            A TBC purchase grants stage 8 (start of TBC). A Wrath purchase\n"
                "#            grants no stage; an unpaid stage 13 counts as TBC (level 70 cap,\n"
