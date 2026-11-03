@@ -9,6 +9,7 @@ int main()
     c.alive = c.inCombat = c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion = true;
     c.noRealPlayerCombatThreatTapOrRights = c.noPendingThreatOrCombatantChanges = true;
     c.eligibleHiddenRandomBotCurrentlyAttackingThisCreature = true;
+    c.generation = 1;
     o.explicitlyEnabled = o.positivelyVerifiedNormalPlayer = o.hasVanillaEffectiveProgression = true;
     o.allParticipantsAlreadyHiddenFromThisObserver = true;
     o.noOwnTargetAuraPetTotemGuardianOrSpellInFlight = true;
@@ -16,6 +17,8 @@ int main()
     o.provenOutsideCreatureAggroAssistCleaveAndAoeReach = true;
     o.noObserverOrGroupQuestLootTapSkinOrKillCredit = true;
     o.observerStageAndIdentityStable = o.coreVisibilityAndThreatRefreshVerified = true;
+    o.checkedAgainstCreatureGeneration = 1;
+    const auto before = c;
     unsigned passed = 0;
     const auto check = [&](bool actual, bool expected) { if (actual != expected) return false; ++passed; return true; };
     if (!check(F14::ShouldConcealCreatureFromObserver(c, o), true)) return 1;
@@ -25,7 +28,6 @@ int main()
     c.eligibleHiddenRandomBotCurrentlyAttackingThisCreature = true;
     c.alive = false;
     if (!check(F14::ShouldConcealCreatureFromObserver(c, o), false)) return 1;
-    if (!check(F14::ConcealmentDecisionChanged(F14::CreatureSnapshot{
-        true, true, true, true, true, true, true, true, true}, o, c, o), true)) return 1;
+    if (!check(F14::ConcealmentDecisionChanged(before, o, c, o), true)) return 1;
     std::cout << passed << " active-attack/corpse policy assertions passed\n";
 }
