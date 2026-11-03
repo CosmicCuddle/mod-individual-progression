@@ -26,3 +26,5 @@ jobs:
         run: |
           "${{ matrix.compiler }}" -std="${{ matrix.standard }}" -Wall -Wextra -Werror -pedantic -I. tests/ip_f14_combat_visibility_policy.cpp -o "$RUNNER_TEMP/f14-policy"
           "$RUNNER_TEMP/f14-policy"
+          "${{ matrix.compiler }}" -std="${{ matrix.standard }}" -DNDEBUG -Wall -Wextra -Werror -pedantic -I. tests/ip_f14_combat_visibility_policy.cpp -o "$RUNNER_TEMP/f14-policy-ndebug"
+          "$RUNNER_TEMP/f14-policy-ndebug"
