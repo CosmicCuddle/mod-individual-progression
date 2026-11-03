@@ -13,6 +13,7 @@ constexpr F14::CreatureSnapshot Creature()
     c.complete = true;
     c.current = true;
     c.generation = 1; // Present, current creature state.
+    c.creatureIdentityToken = 0x1001ULL; // Unique living target instance.
     c.plainUnscriptedNonEliteHostileNpc = true;
     c.alive = true;
     c.inCombat = true;
@@ -28,6 +29,7 @@ constexpr F14::ObserverSnapshot Observer()
     F14::ObserverSnapshot o{};
     o.explicitlyEnabled = true;
     o.checkedAgainstCreatureGeneration = 1;
+    o.checkedAgainstCreatureIdentityToken = 0x1001ULL;
     o.positivelyVerifiedNormalPlayer = true;
     o.hasVanillaEffectiveProgression = true;
     o.allParticipantsAlreadyHiddenFromThisObserver = true;
@@ -106,6 +108,15 @@ int main()
     c = c0; c.generation = 0;
     o = o0; o.checkedAgainstCreatureGeneration = 0;
     visible("zero generation never authorizes concealment", c, o);
+    c = c0; c.creatureIdentityToken = 0;
+    visible("missing creature identity token cannot conceal", c, o0);
+    o = o0; o.checkedAgainstCreatureIdentityToken = 0;
+    visible("missing viewer-pair identity token cannot conceal", c0, o);
+    c = c0; c.creatureIdentityToken = 0x2002ULL;
+    visible("different creature at same generation cannot reuse viewer A proof", c, o0);
+    o = o0; o.checkedAgainstCreatureIdentityToken = 0x2002ULL;
+    visible("viewer B proof cannot match creature A at same generation", c0, o);
+    hide("independent viewer B proof matches new creature identity", c, o);
     c = c0; c.generation = 2;
     o = o0; o.checkedAgainstCreatureGeneration = 2;
     hide("fresh viewer-target pair matches new creature generation", c, o);
