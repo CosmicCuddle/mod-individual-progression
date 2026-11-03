@@ -13,6 +13,8 @@
 #ifndef INDIVIDUAL_PROGRESSION_F14_COMBAT_VISIBILITY_POLICY_H
 #define INDIVIDUAL_PROGRESSION_F14_COMBAT_VISIBILITY_POLICY_H
 
+#include <cstdint>
+
 namespace IndividualProgressionF14CombatVisibilityPolicy
 {
     // Cached per-creature evidence. Populate only on a safe map-thread event:
@@ -37,6 +39,11 @@ namespace IndividualProgressionF14CombatVisibilityPolicy
         bool everyParticipantVerifiedTbcRaceRandomBotOrItsMinion = false;
         bool noRealPlayerCombatThreatTapOrRights = false;
         bool noPendingThreatOrCombatantChanges = false;
+
+        // Nonzero revision of this target's combat/attack/rights facts.
+        // A participant, threat, active-attack or ownership change must
+        // invalidate all previously checked viewer-target pairs.
+        std::uint32_t generation = 0;
     };
 
     // Cheap per-observer evidence, with no threat-list walk or mutable PB
@@ -68,12 +75,18 @@ namespace IndividualProgressionF14CombatVisibilityPolicy
         // observer-specific deny hook and an immediate threat/exit/death/
         // progression-change visibility invalidation implementation.
         bool coreVisibilityAndThreatRefreshVerified = false;
+
+        // This is a viewer/creature PAIR fact set, not just a viewer cache.
+        // All observer checks must be made against this exact creature state.
+        std::uint32_t checkedAgainstCreatureGeneration = 0;
     };
 
     constexpr bool ShouldConcealCreatureFromObserver(CreatureSnapshot const& c,
                                                      ObserverSnapshot const& o)
     {
-        return o.explicitlyEnabled &&
+        return c.generation != 0 &&
+               c.generation == o.checkedAgainstCreatureGeneration &&
+               o.explicitlyEnabled &&
                o.positivelyVerifiedNormalPlayer &&
                o.hasVanillaEffectiveProgression &&
                o.allParticipantsAlreadyHiddenFromThisObserver &&
