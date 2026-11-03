@@ -7,6 +7,7 @@
 #include "IndividualProgressionF14LoginPolicy.h"
 #include "naxxramas_40.h"
 #include <mutex>
+#include <limits>
 #include "ReputationMgr.h"
 #include "WorldSession.h"
 #include "PetDefines.h"
@@ -445,11 +446,21 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
         return;
     std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
     uint32 const guid = player->GetGUID().GetCounter();
-    // Refresh even when previous login verified and the next one did not.
-    if (verified)
-        _f14VerifiedRandomBotGroupCache[guid] = true;
-    else
-        _f14VerifiedRandomBotGroupCache.erase(guid);
+    // Always evict the previous login incarnation, even if this call is
+    // an unverified login. An old GUID cannot resurrect a stale attack proof.
+    _f14VerifiedRandomBotGroupCache.erase(guid);
+    _f14VerifiedRandomBotLoginEpoch.erase(guid);
+    if (!verified)
+        return;
+
+    // Epoch 0 is always invalid, and wrap would reuse an old token.
+    // Once exhausted, refuse new positive identities rather than wrap.
+    if (_f14NextRandomBotLoginEpoch == std::numeric_limits<std::uint64_t>::max())
+        return;
+
+    const std::uint64_t loginEpoch = ++_f14NextRandomBotLoginEpoch;
+    _f14VerifiedRandomBotGroupCache[guid] = true;
+    _f14VerifiedRandomBotLoginEpoch[guid] = loginEpoch;
 }
 
 void IndividualProgression::ForgetF14VerifiedRandomBotGroupIdentity(Player* player)
@@ -477,6 +488,23 @@ bool IndividualProgression::HasF14VerifiedRandomBotGuid(ObjectGuid const& guid)
     std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
     auto const it = _f14VerifiedRandomBotGroupCache.find(guid.GetCounter());
     return it != _f14VerifiedRandomBotGroupCache.end() && it->second;
+}
+
+// Read-only, incarnation-safe actor identity. Never consult mutable Playerbots
+// state on visibility/session workers. Zero means no current verified login.
+std::uint64_t IndividualProgression::GetF14VerifiedRandomBotLoginEpoch(ObjectGuid const& guid)
+{
+    if (!guid || !guid.IsPlayer())
+        return 0;
+
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    uint32 const lowGuid = guid.GetCounter();
+    auto const verified = _f14VerifiedRandomBotGroupCache.find(lowGuid);
+    if (verified == _f14VerifiedRandomBotGroupCache.end() || !verified->second)
+        return 0;
+
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(lowGuid);
+    return epoch == _f14VerifiedRandomBotLoginEpoch.end() ? 0 : epoch->second;
 }
 
 bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage)
