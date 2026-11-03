@@ -102,25 +102,68 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 +    sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);
  
      Unit* owner = GetCharmerOrOwner();
-@@ -7265,10 +7272,12 @@
-     }
+@@ -7243,31 +7243,36 @@
  
+     Unit* victim = m_attacking;
+ 
+-    m_attacking->_removeAttacker(this);
+-    m_attacking = nullptr;
+-
+-    // Clear our target
+-    SetTarget(ObjectGuid::Empty);
+-
+-    ClearUnitState(UNIT_STATE_MELEE_ATTACKING);
+-
+-    InterruptSpell(CURRENT_MELEE_SPELL);
+-
+-    // reset only at real combat stop
+-    if (Creature* creature = ToCreature())
+-    {
+-        creature->SetNoCallAssistance(false);
+-
+-        if (creature->HasSearchedAssistance())
+-        {
+-            creature->SetNoSearchAssistance(false);
+-        }
+-    }
+-
 -    SendMeleeAttackStop(victim);
 -
 -    return true;
 -}
--
--void Unit::CombatStop(bool includingCast, bool mutualPvP)
++    m_attacking->_removeAttacker(this);
++    m_attacking = nullptr;
++
++    // Clear our target
++    SetTarget(ObjectGuid::Empty);
++
++    // Notify once the old target is unlinked, BEFORE spell interruption,
++    // AI/assistance cleanup and packet sends may change target lifetime.
++    // This synchronous callback must not retain Unit* beyond its return.
++    sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);
++
++    ClearUnitState(UNIT_STATE_MELEE_ATTACKING);
++
++    InterruptSpell(CURRENT_MELEE_SPELL);
++
++    // reset only at real combat stop
++    if (Creature* creature = ToCreature())
++    {
++        creature->SetNoCallAssistance(false);
++
++        if (creature->HasSearchedAssistance())
++        {
++            creature->SetNoSearchAssistance(false);
++        }
++    }
++
 +    SendMeleeAttackStop(victim);
 +
-+    // Synchronous event after unlink; consumers must not retain Unit pointers.
-+    sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);
 +    return true;
 +}
-+
-+void Unit::CombatStop(bool includingCast, bool mutualPvP)
+ 
+ void Unit::CombatStop(bool includingCast, bool mutualPvP)
  {
-     if (includingCast && IsNonMeleeSpellCast(false))
 diff --git a/src/server/game/Entities/Creature/Creature.cpp b/src/server/game/Entities/Creature/Creature.cpp
 --- a/src/server/game/Entities/Creature/Creature.cpp
 +++ b/src/server/game/Entities/Creature/Creature.cpp
