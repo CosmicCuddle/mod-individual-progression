@@ -108,3 +108,25 @@ quest reward paths. Existing GM/direct Core RewardQuest bypass remains a
 blocker pending an authoritative Core seam. Source and native CI must still
 pass before owner-controlled gameplay acceptance. Rollback: revert this
 small additive message/test revision on unmerged IP #42.
+
+## 3 Nov — safe whole-ledger write before single save (isolated draft)
+
+A genuine first-time TBC receipt must contain all eight v1 fields.
+Pinned Core's `UpdatePlayerSetting` only grows a new vector through the
+largest index written. The previous TBC purchase source wrote indices
+0/3/4/5 and thus would produce six tokens on an initially absent vector,
+which the strict login reader correctly rejects. The new purchase path,
+after successful `RecordPurchase` and eligibility/refund safety checks,
+writes the **entire already-validated** `stagedLedger.fields[0..7]` before
+its one `SaveToDB`. Neither the paid bit nor previously evaluated state is
+invented, and no second DB transaction or price alteration is added.
+
+Importantly, this does **not** enable a first purchase for a character whose
+paid-source row is genuinely MISSING. Current source still refuses such a
+purchase before any money is taken. Whether owner-approved commissioning or
+first-use empty rows are permitted is a separate pending decision. Existing
+three-token/malformed/unknown rows must never be overwritten or treated as
+unpaid. All paid switches remain OFF. The portable test simulates Core
+vector resizing and compiles the real v1 decoder, but a source-matched
+Worldserver plus disposable database relog/rollback acceptance remain
+mandatory before live use.

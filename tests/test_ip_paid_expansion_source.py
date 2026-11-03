@@ -589,10 +589,28 @@ class StrictReceiptRuntime(unittest.TestCase):
         self.assertLess(can.index("_paidExpansionLedgers.find("), can.index("return CheckPurchase("))
         self.assertLess(purchase.index("ReceiptPolicy::RecordPurchase("),
                         purchase.index("player->ModifyMoney(-static_cast<int32>(costCopper));"))
-        self.assertLess(purchase.index("if (!opened)"), purchase.index("uint32 const moneySlot"))
-        self.assertLess(purchase.index("uint32 const moneySlot"), purchase.index("player->SaveToDB(false, false);"))
-        self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot", purchase)
-        self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, timeSlot", purchase)
+        # Core creates a missing PlayerSettingVector at index+1. A first
+        # TBC write ending at slot5 produces a six-token row; v1 requires 8.
+        # No partial receipt may be saved after a debit, and unknown/legacy
+        # rows must still fail closed before money can move.
+        all_slots = "for (uint32 slot = 0; slot < ReceiptPolicy::Slots; ++slot)"
+        write_slot = "player->UpdatePlayerSetting(PaidExpansionSettingSource, slot, stagedLedger.fields[slot]);"
+        self.assertEqual(purchase.count(all_slots), 1)
+        self.assertEqual(purchase.count(write_slot), 1)
+        # Pin the entire unguarded loop: skipping a slot must fail.
+        self.assertRegex(purchase, re.escape(all_slots) +
+                         r"\s*\n\s*" + re.escape(write_slot) + r"\s*\n\s*\{")
+        # A later same-session purchase needs the updated cached receipt.
+        cache_store = "_paidExpansionLedgers[player->GetGUID().GetCounter()] = stagedLedger;"
+        self.assertEqual(purchase.count(cache_store), 1)
+        self.assertLess(purchase.index("if (!opened)"), purchase.index(all_slots))
+        self.assertLess(purchase.index(all_slots), purchase.index(write_slot))
+        self.assertLess(purchase.index(write_slot), purchase.index(cache_store))
+        self.assertLess(purchase.index(cache_store), purchase.index("player->SaveToDB(false, false);"))
+        self.assertNotIn("uint32 const moneySlot", purchase)
+        self.assertNotIn("uint32 const timeSlot", purchase)
+        self.assertNotIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot", purchase)
+        self.assertNotIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, timeSlot", purchase)
         self.assertEqual(purchase.count("player->SaveToDB(false, false);"), 1)
         self.assertNotIn("PlayerSettingsStore::UpdateSetting(", purchase)
         self.assertNotIn("CharacterDatabase.Execute(", purchase)
@@ -621,11 +639,20 @@ class StorageAndThreads(unittest.TestCase):
         self.assertNotIn("OnPlayerLogout", code(script))
         self.assertNotIn("ForgetPaidExpansionEntitlement", EXP + HEADER)
 
-    def test_cache_holds_purchase_bits_only(self):
+    def test_cache_tracks_purchase_bits_but_mirrors_all_receipt_slots(self):
+        # Grandfather evaluation is a receipt slot, not a purchase bit.
+        # Later full-ledger saves must not restore a stale slot-2 value.
         bit = code(body(EXP, "uint8 BitForSetting(uint32 index)"))
         self.assertNotIn("SettingGrandfatherEvaluated", bit)
         setter = code(body(EXP, "void IndividualProgression::SetPaidExpansionFlag(Player* player, uint32 index, uint32 value)"))
-        self.assertLess(setter.index("if (!bit)\n        return;"), setter.index("std::unique_lock"))
+        lock = setter.index("std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);")
+        mirror = setter.index("receipt->second.fields[index] = value;")
+        nonpurchase_return = setter.index("if (!bit)\n        return;")
+        bits = setter.index("uint8& bits = _paidExpansionFlags[guid];")
+        self.assertTrue(lock < mirror < nonpurchase_return < bits)
+        self.assertIn("index < ReceiptPolicy::Slots", setter)
+        self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);", setter)
+        self.assertNotIn("_paidExpansionFlags[guid]", setter[:nonpurchase_return])
 
     def test_grandfather_evaluates_every_gated_character_once(self):
         gf = code(body(EXP, "void IndividualProgression::EvaluatePaidExpansionGrandfather(Player* player)"))

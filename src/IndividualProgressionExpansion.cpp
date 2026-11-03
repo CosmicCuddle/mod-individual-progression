@@ -38,7 +38,7 @@ namespace
     constexpr uint8 PaidExpansionBitTbc = 0x1;
     constexpr uint8 PaidExpansionBitWrath = 0x2;
 
-    // Only purchase slots are mirrored in the cache.
+    // Purchase bits are TBC/Wrath only; the cached receipt mirrors all slots.
     uint8 BitForSetting(uint32 index)
     {
         switch (index)
@@ -218,13 +218,15 @@ void IndividualProgression::SetPaidExpansionFlag(Player* player, uint32 index, u
     player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);
 
     uint8 const bit = BitForSetting(index);
-    if (!bit)
-        return;
     std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
     uint32 const guid = player->GetGUID().GetCounter();
     auto const receipt = _paidExpansionLedgers.find(guid);
-    if (receipt != _paidExpansionLedgers.end())
+    // The evaluation marker (slot 2) is not a purchase bit, but MUST
+    // stay current in the ledger that PurchaseExpansion later writes whole.
+    if (receipt != _paidExpansionLedgers.end() && index < ReceiptPolicy::Slots)
         receipt->second.fields[index] = value;
+    if (!bit)
+        return;
     uint8& bits = _paidExpansionFlags[guid];
     if (value != FlagNone)
         bits |= bit;
@@ -364,13 +366,15 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
         return PurchaseResult::EntryUnavailable;
     }
 
-    // 5. Append the validated receipt to the same in-memory Player settings
-    // saved alongside gold and flags by this one SaveToDB transaction.
-    uint32 const moneySlot = era == Era::Tbc ? ReceiptPolicy::TbcCopper : ReceiptPolicy::WrathCopper;
-    uint32 const timeSlot = era == Era::Tbc ? ReceiptPolicy::TbcEpoch : ReceiptPolicy::WrathEpoch;
-    player->UpdatePlayerSetting(PaidExpansionSettingSource, ReceiptPolicy::Version, ReceiptPolicy::Version1);
-    player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot, stagedLedger.fields[moneySlot]);
-    player->UpdatePlayerSetting(PaidExpansionSettingSource, timeSlot, stagedLedger.fields[timeSlot]);
+    // 5. Store ALL eight validated v1 slots in the same Player settings map
+    // before the single character+gold SaveToDB transaction. Core's
+    // UpdatePlayerSetting creates a missing vector with index+1 elements.
+    // A first TBC write ending at slot 5 would otherwise save only six
+    // tokens, and the strict decoder would reject the paid entitlement at
+    // next login. Never infer that a missing/legacy row can be purchased:
+    // those still fail closed in CanPurchaseExpansion before any debit.
+    for (uint32 slot = 0; slot < ReceiptPolicy::Slots; ++slot)
+        player->UpdatePlayerSetting(PaidExpansionSettingSource, slot, stagedLedger.fields[slot]);
     {
         std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
         _paidExpansionLedgers[player->GetGUID().GetCounter()] = stagedLedger;
