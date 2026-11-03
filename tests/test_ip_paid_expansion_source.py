@@ -607,6 +607,29 @@ class StrictReceiptRuntime(unittest.TestCase):
         self.assertLess(purchase.index(all_slots), purchase.index(write_slot))
         self.assertLess(purchase.index(write_slot), purchase.index(cache_store))
         self.assertLess(purchase.index(cache_store), purchase.index("player->SaveToDB(false, false);"))
+        # No post-RecordPurchase direct assignment may zero any staged receipt
+        # slot before debit. M7 used: stagedLedger.fields[2] = 0;.
+        validated_to_write = purchase[purchase.index("ReceiptPolicy::RecordPurchase("):
+                                      purchase.index(all_slots)]
+        self.assertNotRegex(validated_to_write, r"stagedLedger\s*\.\s*fields\s*\[[^\]]+\]\s*=(?!=)")
+        # M7 family: no staged-ledger mutation is allowed after validation
+        # and before the canonical full-vector write (alias/.at()/reset).
+        recorded = purchase.index("ReceiptPolicy::RecordPurchase(")
+        valid_return = purchase.index("return PurchaseResult::EntryUnavailable;", recorded)
+        valid_return += len("return PurchaseResult::EntryUnavailable;")
+        self.assertNotIn("stagedLedger", purchase[valid_return:purchase.index(all_slots)])
+        # Grok M7g: nobody may edit the staged cache receipt between
+        # copying it and validating RecordPurchase (one use is expected).
+        staged = purchase.index("stagedLedger = it->second;") + len("stagedLedger = it->second;")
+        self.assertEqual(purchase[staged:purchase.index(all_slots)].count("stagedLedger"), 1)
+        # CS02 X1: forbid rewriting cached slot 2 (or any cache receipt)
+        # before staging; a shared_lock must never cover such a write.
+        self.assertEqual(purchase.count("it->second"), 1)
+        # CS02 X1b/X1c: freeze the entire shared-lock cache read.
+        # Equivalent alias or at(guid) writes must not be introduced here.
+        self.assertIn("    {\n        std::shared_lock<std::shared_mutex> lock(_paidExpansionLock);\n        auto const it = _paidExpansionLedgers.find(player->GetGUID().GetCounter());\n        if (it == _paidExpansionLedgers.end())\n            return PurchaseResult::EntryUnavailable;\n        stagedLedger = it->second;\n    }\n", purchase)
+        self.assertEqual(purchase.count("_paidExpansionLedgers"), 3)
+
         self.assertNotIn("uint32 const moneySlot", purchase)
         self.assertNotIn("uint32 const timeSlot", purchase)
         self.assertNotIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot", purchase)
@@ -650,7 +673,20 @@ class StorageAndThreads(unittest.TestCase):
         nonpurchase_return = setter.index("if (!bit)\n        return;")
         bits = setter.index("uint8& bits = _paidExpansionFlags[guid];")
         self.assertTrue(lock < mirror < nonpurchase_return < bits)
-        self.assertIn("index < ReceiptPolicy::Slots", setter)
+        # The mirror must not contain an extra condition excluding slot 2.
+        # Grok's M5 mutation (&& index != SettingGrandfatherEvaluated) must die.
+        self.assertIn("if (receipt != _paidExpansionLedgers.end() && index < ReceiptPolicy::Slots)\n        receipt->second.fields[index] = value;", setter)
+        # M5 family: disallow a second receipt-slot write or early exit.
+        self.assertEqual(setter.count("receipt->second.fields["), 1)
+        # Grok M5e: a second whole-ledger assignment after the good mirror
+        # would still reset the grandfather-evaluated receipt slot.
+        self.assertEqual(setter.count("receipt->second"), 1)
+        # CS02 X3/X4: no cache erase or alias overwrite after the mirror.
+        # This guards all ledger touches, not just receipt->second writes.
+        self.assertEqual(setter.count("_paidExpansionLedgers"), 2)
+        self.assertEqual(setter.count("receipt"), 3)
+        self.assertNotIn("SettingGrandfatherEvaluated", setter)
+        self.assertNotIn("return", setter[:mirror])
         self.assertIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);", setter)
         self.assertNotIn("_paidExpansionFlags[guid]", setter[:nonpurchase_return])
 
