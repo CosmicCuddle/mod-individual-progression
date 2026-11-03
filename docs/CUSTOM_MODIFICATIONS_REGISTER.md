@@ -557,3 +557,15 @@ synchronisation but cannot automatically restore prior progression markers.
 | Known risks | WHO entries are periodic cache snapshots; logout/mid-refresh stale visibility, GUID reuse and identity/era changes, thread ownership of viewer-stage reads, WHO counts, missing client create/destroy and combat threat refresh, other social discovery routes require review before any enablement |
 | Tests / status | Source and full pinned Worldserver compile workflows newly authored; **new exact-head results pending**. No in-game tests, no installed baseline verification, no independent Grok review (on break), no merge or deploy |
 | Rollback / decisions | Discard this isolated unmerged branch. Preserve prior #51 and all original features. Any future deploy needs installed-source inventory, restorable character DB/config/binary backups, full negative/positive gameplay matrix and CosmicCuddle approval; [Issue #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9) |
+
+
+## IP F14 REFRESH-EPOCH MODEL — 3 Nov 2026
+
+| Field | Record |
+| --- | --- |
+| Intended owner behaviour | Under eligible verified Blood Elf/Draenei **RandomBot-only** active attacks on a living creature, a Vanilla observer's concealment must stop immediately when the last attacker stops/switches target, the creature dies, or any rights/threat/viewer identity changes. Corpse/loot always returns normally. Real human expansion races remain visible. |
+| Owner/component | CosmicCuddle / Individual Progression policy source only. `src/IndividualProgressionF14RefreshPolicy.h`, `tests/f14_visibility_refresh_policy.cpp`, dedicated four-way CI, this register, separate design document. Parent F14 WHO DRAFT #52 `e24d6d7954ea0adee772dfa9a82c0e07a61d4e64`. |
+| Source/config/DB/DBC | Pure C++ header, **not included from runtime**; no config, SQL, DBC, client, Core, Playerbots, Naxx or paid expansion changes. F14 test flags remain OFF and no refresh-version Core hook is defined. |
+| Event model / known risk | Stale per-viewer snapshots fail visible, identity+generation prevent reuse, death/attack-stop transitions clear eligible visibility facts, incomplete proof or wrong refresh acknowledgement revokes previous approval. Caller still needs a map-thread event collector, complete participant/rights proof, actual per-client visibility refresh, WHO parity, memory lifecycle/thread safety and combat/loot invariants. |
+| Tests / live | **Local pure model 56/56 tests PASSED** on g++/clang++ × C++17/20 (each compiled/run with -O2 -DNDEBUG -Wall/-Wextra/-Werror/-pedantic). GitHub CI newly added; exact run status must be inspected independently. **No native Worldserver with this header linked into runtime, no in-game test or host install.** |
+| Rollback/decision | Discard unmerged research branch; no owner-host files changed. No approval to enable F14 or to affect live users. [Issue #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9), [design](https://github.com/CosmicCuddle/mod-individual-progression/blob/research/cs01-f14-visibility-refresh-epoch-model-20261103/docs/F14_VISIBILITY_REFRESH_EVENT_MODEL_2026-11-03.md). |
