@@ -15,7 +15,7 @@ diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/S
 diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
 --- a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
 +++ b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
-@@ -27,8 +27,9 @@
+@@ -27,8 +27,12 @@
      WORLDOBJECTHOOK_ON_WORLD_OBJECT_CREATE,
      WORLDOBJECTHOOK_ON_WORLD_OBJECT_SET_MAP,
      WORLDOBJECTHOOK_ON_WORLD_OBJECT_RESET_MAP,
@@ -25,6 +25,9 @@ diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h b/src/s
 +    WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER,
 +    WORLDOBJECTHOOK_END
  };
++
++// Explicit opt-in compile contract for the isolated IP F14 observer pilot.
++#define COSMIC_F14_OBSERVER_HOOK_VERSION 1
  
  class WorldObjectScript : public ScriptObject
 @@ -73,7 +74,10 @@
