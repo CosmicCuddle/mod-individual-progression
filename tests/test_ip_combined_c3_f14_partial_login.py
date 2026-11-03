@@ -83,6 +83,11 @@ def without_f14_group_floor_player(src: str) -> str:
                         "#endif\n")
     assert src.count(new_registration) == 1
     src = src.replace(new_registration, "")
+    # The optional AllCreatureScript AddWorld watcher is a separate F14-only
+    # script; it is never part of the frozen C3 player/login implementation.
+    new_addworld_registration = "    new IndividualProgressionF14WorldAddScript();\n"
+    assert src.count(new_addworld_registration) == 1
+    src = src.replace(new_addworld_registration, "")
     return src
 
 
