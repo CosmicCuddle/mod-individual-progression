@@ -165,6 +165,21 @@ class F14TransitionBridge(unittest.TestCase):
             self.assertNotIn(code, corpse)
             self.assertNotIn(code, respawn)
 
+    def test_attack_start_requires_positive_identity_plus_login_incarnation(self):
+        cls = P.split("class IndividualProgressionF14AttackEventScript", 1)[1].split("\n#endif", 1)[0]
+        attack = method(cls, "void OnF14AttackTargetTransition(")
+        gate = "GetF14VerifiedRandomBotLoginEpoch(candidate->GetGUID())"
+        self.assertIn("HasF14VerifiedRandomBotIdentity(candidate)", attack)
+        self.assertIn(gate, attack)
+        self.assertLess(attack.index("HasF14VerifiedRandomBotIdentity(candidate)"),
+                        attack.index(gate))
+        self.assertLess(attack.index(gate),
+                        attack.index("newVictim->UpdateObjectVisibility(true);"))
+        # A logged-out bot can still trigger an old target SHOW refresh;
+        # only the START/SWITCH path requires the current epoch.
+        self.assertLess(attack.index("if (!newVictim)"), attack.index(gate))
+        self.assertNotIn(gate, attack[:attack.index("if (!newVictim)")])
+
     def test_attack_stop_fails_visible_without_bot_login_identity(self):
         cls = P.split("class IndividualProgressionF14AttackEventScript", 1)[1].split("\n#endif", 1)[0]
         attack = method(cls, "void OnF14AttackTargetTransition(")
