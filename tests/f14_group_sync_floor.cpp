@@ -1,6 +1,7 @@
 // Portable, no AzerothCore/DB: model only the F14 verified group downgrade floor.
 #include "../src/IndividualProgressionF14LoginPolicy.h"
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 namespace Policy = IndividualProgressionF14LoginPolicy;
 static_assert(Policy::ExpansionRaceFloor(1) == 8, "new TBC-race floor");
