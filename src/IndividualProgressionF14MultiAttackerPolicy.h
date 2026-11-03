@@ -26,6 +26,7 @@ namespace IndividualProgressionF14MultiAttackerPolicy
     {
         VerifiedAttackBegin,
         AttackEnd,
+        ActorIncarnationExpired,
         CreatureDied,
         CreatureDespawned,
         CreatureRespawned,
@@ -129,6 +130,20 @@ namespace IndividualProgressionF14MultiAttackerPolicy
 
         if (actorToken == 0)
         {
+            out.state.uncertain = true;
+            return out;
+        }
+
+        if (event == Event::ActorIncarnationExpired)
+        {
+            // Login identity can expire BEFORE Core emits AttackStop, or the
+            // stop may never arrive (logout, map removal, pet/DoT teardown).
+            // Drop this incarnation but deny concealment even if another
+            // verified bot remains: actor/threat/tap/rights must be rebuilt.
+            // An unknown expiry still invalidates the complete snapshot.
+            for (auto& known : out.state.verifiedAttackers)
+                if (known == actorToken)
+                    known = 0;
             out.state.uncertain = true;
             return out;
         }

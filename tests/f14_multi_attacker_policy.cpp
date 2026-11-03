@@ -105,6 +105,40 @@ int main()
     check("bad count above bounded max fails visible",
           F::ReplaceWithFullyVerifiedRoster(rebuilt.state, 0xB001, 6, freshRoster, F::MaxTrackedAttackers + 1, true).state.uncertain, true);
 
+    // A logout can invalidate the actor's login epoch BEFORE AttackStop, or
+    // no stop may be delivered at all. Never retain that actor as a hide
+    // candidate or automatically re-approve the other attackers.
+    auto expired = F::OnEvent(rechecked, F::Event::ActorIncarnationExpired, 1002);
+    check("login expiry revokes positive proof", F::HasVerifiedAttackerCandidates(expired.state), false);
+    check("login expiry removes stale actor only", F::ActiveAttackers(expired.state) == 1, true);
+    check("login expiry advances revision", expired.state.generation == 7, true);
+    check("login expiry marks rights unknown", expired.state.uncertain, true);
+    check("direct reverify cannot bypass expiry uncertainty",
+          F::ReverifyCompleteParticipantFacts(expired.state, 0xB001, 7, true).completeCurrentParticipantProof, false);
+    auto repeatExpiry = F::OnEvent(expired.state, F::Event::ActorIncarnationExpired, 1002);
+    check("late repeated expiry remains uncertain", repeatExpiry.state.uncertain, true);
+    check("late repeated expiry leaves other actor intact", F::ActiveAttackers(repeatExpiry.state) == 1, true);
+    auto absentExpiry = F::OnEvent(rechecked, F::Event::ActorIncarnationExpired);
+    check("missing login epoch fails visible", absentExpiry.state.uncertain, true);
+    auto unknownExpiry = F::OnEvent(rechecked, F::Event::ActorIncarnationExpired, 9999);
+    check("unknown login epoch fails visible", unknownExpiry.state.uncertain, true);
+    std::array<std::uint64_t, F::MaxTrackedAttackers> remainingOnly{};
+    remainingOnly[0] = 1003;
+    auto staleRecovery = F::ReplaceWithFullyVerifiedRoster(
+        expired.state, 0xB001, 6, remainingOnly, 1, true);
+    check("stale pre-expiry roster cannot recover", staleRecovery.state.uncertain, true);
+    auto completeRecovery = F::ReplaceWithFullyVerifiedRoster(
+        expired.state, 0xB001, 7, remainingOnly, 1, true);
+    check("current complete roster clears expiry uncertainty", completeRecovery.state.uncertain, false);
+    check("fresh roster retains only remaining login", completeRecovery.state.verifiedAttackers[0] == 1003 &&
+          F::ActiveAttackers(completeRecovery.state) == 1, true);
+    check("roster recovery alone cannot conceal", F::HasVerifiedAttackerCandidates(completeRecovery.state), false);
+    auto fullRecovery = F::ReverifyCompleteParticipantFacts(completeRecovery.state, 0xB001, 8, true);
+    check("full fresh rights proof can requalify remaining bot", F::HasVerifiedAttackerCandidates(fullRecovery), true);
+    auto lastExpiry = F::OnEvent(fullRecovery, F::Event::ActorIncarnationExpired, 1003);
+    check("last bot logout removes all active attackers", F::ActiveAttackers(lastExpiry.state) == 0, true);
+    check("last bot logout fails visible", F::HasVerifiedAttackerCandidates(lastExpiry.state), false);
+
     auto died = F::OnEvent(rechecked, F::Event::CreatureDied);
     check("death marks corpse not alive", died.state.alive, false);
     check("death clears all tracked active actors", F::ActiveAttackers(died.state) == 0, true);
