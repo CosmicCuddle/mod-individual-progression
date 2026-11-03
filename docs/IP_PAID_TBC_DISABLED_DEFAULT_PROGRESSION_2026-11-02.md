@@ -73,3 +73,38 @@ test startup config, real paid character settings, quest log and staged
 completion with DDP switching, as well as actual Core hook ordering; CI is
 source/policy evidence only. Undo by reverting this draft's header/policy/hook
 additions before merging. No host operation or payment has occurred.
+
+## 2 Nov — separate packet-level defence-in-depth, not full reward protection
+
+The pinned Core `QuestHandler.cpp::HandleQuestgiverChooseRewardOpcode` calls
+`CanRewardQuest` followed by `RewardQuest` for an already-COMPLETE quest;
+it does not call `CompleteQuest` (the PlayerScript veto) again. That is a
+**separate, real remaining route** past the original paid DDP guard.
+
+On an **isolated child of PR #41**, the new
+`IndividualProgression_PaidTbcQuestRewardPacketGuard` checks the normal
+`CMSG_QUESTGIVER_CHOOSE_REWARD` packet before Core processes it. It returns
+false only for a verified *already-paid, stage<8, gated normal human lacking
+stage8 start privilege*, when default progression is disabled, and only for
+quest 10259. It leaves all other packets to Core, does not alter the received
+packet, charge/refund money or mutate character/quest data. This is an
+extra safeguard for **the normal client reward hand-in**, not an assertion
+that command/script/server-internal `RewardQuest` calls are covered.
+
+**Release blocker stays active:** the pinned Core supplies no general
+pre-`RewardQuest` veto in its PlayerScript interface; all nonpacket paths,
+thread/context safety and complete quest hand-ins need independent Core
+review and compatible native build + disposable gameplay. No owner runtime,
+config, SQL or production changes authorised. Parent #41 remains frozen
+while its own native CI finishes. Rollback is discarding this unmerged child.
+
+## 3 Nov — normal client hand-in denial explains preserved quest
+
+The optional, default-OFF paid 10259 packet veto now sends a system message
+*only* on the exact client reward packet that would otherwise silently be
+dropped for a verified paid raw-stage<8 normal character with DDP=1.
+It does not modify quest, stage, gold, receipt, packet cursor or unrelated
+quest reward paths. Existing GM/direct Core RewardQuest bypass remains a
+blocker pending an authoritative Core seam. Source and native CI must still
+pass before owner-controlled gameplay acceptance. Rollback: revert this
+small additive message/test revision on unmerged IP #42.

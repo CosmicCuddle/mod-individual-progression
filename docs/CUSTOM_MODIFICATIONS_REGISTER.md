@@ -369,3 +369,25 @@ Depends on Core before-complete hook and strict ledger reads; native link
 and actual staged gameplay remain unproven. Paid feature default OFF.
 Rollback: revert reviewed draft changes; never delete paid ledger data.
 Owner still decides refusal vs narrow paid quest grant under DDP.
+
+**IP-PAID-10259-CLIENT-REWARD-PACKET-GUARD — DRAFT child (2 Nov 2026):**
+Default-OFF parent paid mode; adds only a narrow `ServerScript`
+`CMSG_QUESTGIVER_CHOOSE_REWARD` interception to existing
+`IndividualProgressionExpansion.cpp` registration, guarding the client
+hand-in of an already-COMPLETE quest 10259 for a positively verified
+already-paid stage<8 human when `DisableDefaultProgression=1`.
+Includes Python source contracts, limitations and staged native test needs.
+No new SQL/DBC/config key, no payment, quest or character modification.
+Core direct/nonpacket `RewardQuest` remains unsupported until separate
+pre-reward gate is reviewed. Source parent IP #41 exact `ee6f893c`;
+rollback by dropping the isolated child branch. No live deployment.
+
+**IP-Paid-TBC-10259 packet UX addendum (3 Nov 2026):** In existing DRAFT
+IP #42, the normal client packet veto now sends a single explanatory
+`ChatHandler(session).PSendSysMessage` when blocking an unsafe
+already-COMPLETE 10259 hand-in under default progression OFF. The quest,
+paid receipt, gold, progression and packet remain unmodified. Updated source
+assertions; no new config/SQL/DBC/Core interface. Runtime source only:
+`src/IndividualProgressionExpansion.cpp`; same overall default-OFF flag.
+GM/nonpacket reward bypass unresolved. Rollback: revert this additive draft
+code/test; do not change payment records. Native and owner gameplay pending.

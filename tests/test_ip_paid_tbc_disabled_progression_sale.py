@@ -64,6 +64,27 @@ class SafePaidTbcSale(unittest.TestCase):
         self.assertNotIn("RemoveActiveQuest(", hook)
         self.assertNotIn("ModifyMoney(", hook)
 
+    def test_existing_complete_quest_client_reward_packet_is_refused_before_core_handler(self):
+        self.assertIn('#include "ScriptDefines/ServerScript.h"', SOURCE)
+        self.assertEqual(SOURCE.count("SERVERHOOK_CAN_PACKET_RECEIVE"), 1)
+        self.assertIn("new IndividualProgression_PaidTbcQuestRewardPacketGuard();", SOURCE)
+        guard = method(SOURCE, "bool CanPacketReceive(WorldSession* session, WorldPacket const& packet) override")
+        self.assertIn("packet.GetOpcode() != CMSG_QUESTGIVER_CHOOSE_REWARD", guard)
+        self.assertIn("!session->GetPlayer() || packet.size() < 16", guard)
+        self.assertIn("sIndividualProgression->MustHoldPaidTbcQuestReward(player)", guard)
+        self.assertLess(guard.index("MustHoldPaidTbcQuestReward(player)"), guard.index("copy >> questGiver >> questId >> reward;"))
+        self.assertIn("WorldPacket copy(packet);", guard)
+        self.assertIn("copy.rpos(0);", guard)
+        self.assertIn("copy >> questGiver >> questId >> reward;", guard)
+        self.assertIn('ChatHandler(session).PSendSysMessage(', guard)
+        self.assertIn("Your quest and TBC purchase are preserved.", guard)
+        self.assertLess(guard.index("if (questId != INTO_THE_BREACH)"), guard.index("ChatHandler(session)"))
+        self.assertLess(guard.index("ChatHandler(session)"), guard.index("return false;"))
+        self.assertLess(guard.index("if (questId != INTO_THE_BREACH)"), guard.rindex("return false;"))
+        self.assertEqual(guard.count("return false;"), 1)
+        for forbidden in ("RewardQuest(", "ModifyMoney(", "SetQuestStatus(", "IncompleteQuest(", "ForceUpdateProgressionState(", "AddQuest("):
+            self.assertNotIn(forbidden, guard)
+
     def test_paid_existing_buyer_guard_preserves_owner_exemptions(self):
         policy = (ROOT / "src/IndividualProgressionExpansionPolicy.h").read_text()
         guard = method(policy, "constexpr bool PaidTbcRewardWouldStrand(")

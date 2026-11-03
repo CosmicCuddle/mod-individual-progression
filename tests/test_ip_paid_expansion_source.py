@@ -540,10 +540,16 @@ class UnpaidTbcQuestAccessGate(unittest.TestCase):
         {
             new IndividualProgression_PaidExpansionPlayerScript();
             new IndividualProgression_PaidExpansionQuestGossip();
+            new IndividualProgression_PaidTbcQuestRewardPacketGuard();
         }"""
         self.assertEqual(" ".join(active.split()), " ".join(expected_add_sc.split()))
         self.assertEqual(active.count("new IndividualProgression_PaidExpansionQuestGossip();"), 1)
         self.assertEqual(EXP.count("new IndividualProgression_PaidExpansionQuestGossip();"), 1)
+        # Extra narrow before-RewardQuest packet gate is present exactly once;
+        # the two historically registered scripts keep their original order.
+        self.assertEqual(active.count("new IndividualProgression_PaidTbcQuestRewardPacketGuard();"), 1)
+        self.assertLess(active.index("new IndividualProgression_PaidExpansionQuestGossip();"),
+                        active.index("new IndividualProgression_PaidTbcQuestRewardPacketGuard();"))
 
         script = body(EXP, "class IndividualProgression_PaidExpansionPlayerScript")
         self.assertNotRegex(script, r"(?m)^\s*#\s*if(?:def|ndef)?\b")
