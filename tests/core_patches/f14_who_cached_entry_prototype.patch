@@ -1,0 +1,94 @@
+diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
+--- a/src/server/game/Scripting/ScriptMgr.h
++++ b/src/server/game/Scripting/ScriptMgr.h
+@@ -737,7 +737,8 @@
+     void OnWorldObjectResetMap(WorldObject* object);
+     void OnWorldObjectUpdate(WorldObject* object, uint32 diff);
+     // Observer-specific ALLOW-by-default seam; F14 runtime is UNWIRED.
+-    bool OnWorldObjectCanBeSeenByPlayer(Player const* observer, WorldObject const* target);
++    bool OnWorldObjectCanBeSeenByPlayer(Player const* observer, WorldObject const* target);
++    bool OnWhoListEntryCanBeSeenByPlayer(Player const* observer, ObjectGuid const& targetGuid, uint8 targetRace);
+ 
+ public: /* PetScript */
+ 
+diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+--- a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
++++ b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+@@ -18,7 +18,8 @@
+ #ifndef SCRIPT_OBJECT_WORLD_OBJECT_SCRIPT_H_
+ #define SCRIPT_OBJECT_WORLD_OBJECT_SCRIPT_H_
+ 
+-#include "ScriptObject.h"
++#include "ScriptObject.h"
++#include "ObjectGuid.h"
+ #include <vector>
+ 
+ enum WorldObjectHook
+@@ -28,12 +29,15 @@
+     WORLDOBJECTHOOK_ON_WORLD_OBJECT_SET_MAP,
+     WORLDOBJECTHOOK_ON_WORLD_OBJECT_RESET_MAP,
+     WORLDOBJECTHOOK_ON_WORLD_OBJECT_UPDATE,
+-    WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER,
++    WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER,
++    WORLDOBJECTHOOK_ON_WHO_LIST_ENTRY_CAN_BE_SEEN_BY_PLAYER,
+     WORLDOBJECTHOOK_END
+ };
+ 
+ // Explicit opt-in compile contract for the isolated IP F14 observer pilot.
+-#define COSMIC_F14_OBSERVER_HOOK_VERSION 1
++#define COSMIC_F14_OBSERVER_HOOK_VERSION 1
++// WHO source is a cached GUID/race entry, never a dereferenced target Player.
++#define COSMIC_F14_WHO_FILTER_HOOK_VERSION 1
+ 
+ class WorldObjectScript : public ScriptObject
+ {
+@@ -80,7 +84,10 @@
+     virtual void OnWorldObjectUpdate(WorldObject* /*object*/, uint32 /*diff*/) { }
+ 
+     // Future observer-specific explicit veto only; no module currently overrides.
+-    [[nodiscard]] virtual bool OnWorldObjectCanBeSeenByPlayer(Player const* /*observer*/, WorldObject const* /*target*/) { return true; }
++    [[nodiscard]] virtual bool OnWorldObjectCanBeSeenByPlayer(Player const* /*observer*/, WorldObject const* /*target*/) { return true; }
++
++    // Return true (ALLOW) unless a registered script positively vetoes.
++    [[nodiscard]] virtual bool OnWhoListEntryCanBeSeenByPlayer(Player const* /*observer*/, ObjectGuid const& /*targetGuid*/, uint8 /*targetRace*/) { return true; }
+ };
+ 
+ #endif
+diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
+--- a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
++++ b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
+@@ -61,7 +61,14 @@
+         !script->OnWorldObjectCanBeSeenByPlayer(observer, target));
+ }
+ 
+-WorldObjectScript::WorldObjectScript(char const* name, std::vector<uint16> enabledHooks)
++bool ScriptMgr::OnWhoListEntryCanBeSeenByPlayer(Player const* observer, ObjectGuid const& targetGuid, uint8 targetRace)
++{
++    ASSERT(observer);
++    CALL_ENABLED_BOOLEAN_HOOKS(WorldObjectScript, WORLDOBJECTHOOK_ON_WHO_LIST_ENTRY_CAN_BE_SEEN_BY_PLAYER,
++        !script->OnWhoListEntryCanBeSeenByPlayer(observer, targetGuid, targetRace));
++}
++
++WorldObjectScript::WorldObjectScript(char const* name, std::vector<uint16> enabledHooks)
+     : ScriptObject(name, WORLDOBJECTHOOK_END)
+ {
+     // If empty - enable all available hooks.
+diff --git a/src/server/game/Handlers/MiscHandler.cpp b/src/server/game/Handlers/MiscHandler.cpp
+--- a/src/server/game/Handlers/MiscHandler.cpp
++++ b/src/server/game/Handlers/MiscHandler.cpp
+@@ -307,7 +307,14 @@
+             continue;
+         }
+ 
+-        // check if target's level is in level range
++        // Optional F14 per-observer filter of the cached WHO GUID/race.
++        // NEVER retrieve the target Player from this request worker.
++        // Absent/veto-free hooks return ALLOW; GM accounts bypass the filter.
++        if (AccountMgr::IsPlayerAccount(GetSecurity()) &&
++            !sScriptMgr->OnWhoListEntryCanBeSeenByPlayer(_player, target.GetGuid(), target.GetRace()))
++            continue;
++
++        // check if target's level is in level range
+         uint8 lvl = target.GetLevel();
+         if (lvl < levelMin || lvl > levelMax)
+         {

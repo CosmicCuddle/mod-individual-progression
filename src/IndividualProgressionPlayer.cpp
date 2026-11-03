@@ -1011,8 +1011,14 @@ class IndividualProgressionF14ObserverScript : public WorldObjectScript
 {
 public:
     IndividualProgressionF14ObserverScript()
+#if defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)
+        : WorldObjectScript("IndividualProgression_F14Observer",
+                            {WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER,
+                             WORLDOBJECTHOOK_ON_WHO_LIST_ENTRY_CAN_BE_SEEN_BY_PLAYER}) { }
+#else
         : WorldObjectScript("IndividualProgression_F14Observer",
                             {WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER}) { }
+#endif
 
     bool OnWorldObjectCanBeSeenByPlayer(Player const* observer, WorldObject const* target) override
     {
@@ -1042,6 +1048,31 @@ public:
         // A normal observer at stage 8 or higher sees the verified RandomBot.
         return sIndividualProgression->GetEffectiveProgression(viewer) >= PROGRESSION_PRE_TBC;
     }
+
+#if defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)
+    bool OnWhoListEntryCanBeSeenByPlayer(Player const* observer, ObjectGuid const& targetGuid,
+                                          uint8 targetRace) override
+    {
+        // WHO is a cached snapshot. Do NOT fetch or dereference the target Player.
+        // Reuse only login-verified RandomBot GUID identity; default ALLOW.
+        if (!sIndividualProgression->enabled ||
+            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+            !observer || !targetGuid || observer->GetGUID() == targetGuid ||
+            (targetRace != RACE_DRAENEI && targetRace != RACE_BLOODELF) ||
+            !sIndividualProgression->HasF14VerifiedRandomBotGuid(targetGuid))
+            return true;
+
+        // Core's WHO handler also bypasses this hook for GM observers.
+        if (!observer->IsInWorld() || !observer->GetSession() ||
+            observer->GetSession()->IsHeadless())
+            return true;
+        Player* viewer = const_cast<Player*>(observer);
+        if (!sIndividualProgression->isNormalAccount(viewer))
+            return true;
+
+        return sIndividualProgression->GetEffectiveProgression(viewer) >= PROGRESSION_PRE_TBC;
+    }
+#endif
 };
 #endif
 
