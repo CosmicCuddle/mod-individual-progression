@@ -1,0 +1,85 @@
+# PROTOTYPE ONLY. Applies an unapproved PB keep-list patch to a disposable
+# pinned historical checkout, NOT the owner's live source or a Playerbots fork.
+name: PB ResetQuests earned IP marker opt-in prototype (NO HOST)
+
+on:
+  push:
+    branches:
+      - research/cs01-pb-reset-marker-keep-list-20261103
+  pull_request:
+    paths:
+      - "tests/pb_patches/reset_earned_ip_markers_prototype.patch"
+      - "tests/test_ip_pb_keep_list_prototype.py"
+      - "tests/pb_reset_keep_list_prototype.cpp"
+      - "docs/F14_PLAYERBOTS_KEEP_LIST_PROTOTYPE_2026-11-03.md"
+      - ".github/workflows/ip-pb-reset-marker-keep-list-prototype-20261103.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-pb-keep-list:
+    name: PB patch / model — ${{ matrix.compiler }} C++${{ matrix.standard }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [17, 20]
+    steps:
+      - name: Checkout current IP prototype with full parent history
+        uses: actions/checkout@v4
+        with:
+          path: ip
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout exact historical Playerbots source
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: pinned-pb
+          persist-credentials: false
+      - name: Assert unchanged pinned PB source and no IP executable edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C pinned-pb rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          test "$(git -C pinned-pb rev-parse HEAD:src/PlayerbotAIConfig.h)" = 5e89efabd56bab0ade95a313bc218ea51825bb78
+          test "$(git -C pinned-pb rev-parse HEAD:src/PlayerbotAIConfig.cpp)" = 4653b646ac62ad56722a9f09430fc98c367f1fb0
+          test "$(git -C pinned-pb rev-parse HEAD:src/Bot/Factory/PlayerbotFactory.cpp)" = d6fd00d45a28cb619cb02864e7b52d98b5fd35b8
+          test "$(git -C pinned-pb rev-parse HEAD:conf/playerbots.conf.dist)" = 5fa02b70a82db9f7d2aeb3c3952b5f2835c8366a
+          git -C ip merge-base --is-ancestor 536e9ec8f145b05a82eba38a006ce70f6c92d732 HEAD
+          test -z "$(git -C ip diff --name-only 536e9ec8f145b05a82eba38a006ce70f6c92d732 HEAD -- src conf sql data optional)"
+      - name: Validate prototype patch and apply ONLY to disposable pinned PB
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C pinned-pb apply --check ../ip/tests/pb_patches/reset_earned_ip_markers_prototype.patch
+          git -C pinned-pb apply ../ip/tests/pb_patches/reset_earned_ip_markers_prototype.patch
+          git -C pinned-pb diff --check
+          git -C pinned-pb diff --name-only | sort > /tmp/pb-prototype-files.txt
+          printf '%s\n' 'src/PlayerbotAIConfig.h' 'src/PlayerbotAIConfig.cpp' 'src/Bot/Factory/PlayerbotFactory.cpp' 'conf/playerbots.conf.dist' | sort > /tmp/pb-approved-files.txt
+          diff -u /tmp/pb-approved-files.txt /tmp/pb-prototype-files.txt
+      - name: Run source safety contracts against exact patched PB
+        shell: bash
+        env:
+          COSMIC_PB_PATCHED_ROOT: ${{ github.workspace }}/pinned-pb
+        run: |
+          set -euo pipefail
+          cd ip
+          python3 -B -m unittest discover -s tests -p 'test_ip_pb_keep_list_prototype.py' -v
+      - name: Compile and exercise pure keep-list policy (NO SERVER)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ip
+          "${{ matrix.compiler }}" -std=c++${{ matrix.standard }} -O2 -Wall -Wextra -Werror -pedantic \
+            tests/pb_reset_keep_list_prototype.cpp -o /tmp/pb-keep-list-policy
+          /tmp/pb-keep-list-policy | tee /tmp/pb-keep-list.txt
+          grep -Eq '^F14 Playerbots keep-list candidate model: [0-9]+/[0-9]+ checks passed; PROTOTYPE ONLY, no gameplay\.$' /tmp/pb-keep-list.txt
+      - name: Guarded scope declaration
+        run: |
+          echo "PROTOTYPE ONLY: PB source patched only in ephemeral CI clone."
+          echo "Config remains empty/default OFF; no owner-live worldserver, data, or fork edited."
+          echo "Actual Core/PB/Individual Progression/native integration and owner decision remain blockers."
