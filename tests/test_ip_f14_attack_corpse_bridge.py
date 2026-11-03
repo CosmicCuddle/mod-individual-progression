@@ -31,7 +31,7 @@ class F14TransitionBridge(unittest.TestCase):
             "src/server/game/Entities/Creature/Creature.cpp"
         })
         self.assertEqual(len(paths), 5)
-        self.assertEqual(PATCH.count("@@ -"), 7)
+        self.assertEqual(PATCH.count("@@ -"), 8)
 
     def test_runner_allowlists_match_the_actual_patch_sets(self):
         # Source-only CI applies exactly three F14 patches; the full native
@@ -72,6 +72,8 @@ class F14TransitionBridge(unittest.TestCase):
         self.assertIn("new IndividualProgressionF14AttackEventScript();", P)
         self.assertIn("UNITHOOK_ON_F14_ATTACK_TARGET_TRANSITION", PATCH)
         self.assertIn("UNITHOOK_ON_F14_CREATURE_CORPSE_READY", PATCH)
+        self.assertIn("UNITHOOK_ON_F14_CREATURE_RESPAWNED", PATCH)
+        self.assertIn("void OnF14CreatureRespawned(", PATCH)
 
     def test_attack_event_positions(self):
         unit = PATCH.split("diff --git a/src/server/game/Entities/Unit/Unit.cpp", 1)[1].split("\ndiff --git a/", 1)[0]
@@ -116,6 +118,28 @@ class F14TransitionBridge(unittest.TestCase):
                         patched.index("sScriptMgr->OnF14CreatureCorpseReady(this);"),
                         "Corpse-ready event must occur AFTER the corpse state is committed")
 
+    def test_respawn_refresh_after_alive_movement_and_phase_restoration(self):
+        creature = PATCH.split("diff --git a/src/server/game/Entities/Creature/Creature.cpp", 1)[1]
+        patched = "\n".join(line[1:] for line in creature.splitlines()
+                            if line.startswith((" ", "+")) and not line.startswith("+++"))
+        for expected in (
+            "Unit::setDeathState(DeathState::Alive, despawn);",
+            "Motion_Initialize();",
+            "LoadCreaturesAddon(true);",
+            "SetPhaseMask(GetCreatureData()->phaseMask, false);",
+            "sScriptMgr->OnF14CreatureRespawned(this);",
+        ):
+            self.assertIn(expected, patched)
+        for before in (
+            "Unit::setDeathState(DeathState::Alive, despawn);",
+            "Motion_Initialize();",
+            "LoadCreaturesAddon(true);",
+            "SetPhaseMask(GetCreatureData()->phaseMask, false);",
+        ):
+            self.assertLess(patched.index(before),
+                            patched.index("sScriptMgr->OnF14CreatureRespawned(this);"),
+                            f"Respawn hook must follow {before}")
+
     def test_verified_rndbot_only_and_force_immediate(self):
         cls = P.split("class IndividualProgressionF14AttackEventScript",1)[1].split("\n#endif",1)[0]
         attack = method(cls, "void OnF14AttackTargetTransition(")
@@ -129,12 +153,17 @@ class F14TransitionBridge(unittest.TestCase):
                     "newVictim->UpdateObjectVisibility(true)"):
             self.assertIn(yes, attack)
         corpse = method(cls, "void OnF14CreatureCorpseReady(")
+        respawn = method(cls, "void OnF14CreatureRespawned(")
         self.assertIn("!sIndividualProgression->f14ExperimentalRndbotPlayerVisibility", corpse)
         self.assertIn("creature->UpdateObjectVisibility(true)", corpse)
+        self.assertIn("!sIndividualProgression->f14ExperimentalRndbotPlayerVisibility", respawn)
+        self.assertIn("!creature || !creature->IsInWorld()", respawn)
+        self.assertIn("creature->UpdateObjectVisibility(true)", respawn)
         for code in ("UpdateObjectVisibility(false)", "sRandomPlayerbotMgr", "ModifyMoney(", "RewardQuest(",
                      "SetPhaseMask(", "DestroyForVisiblePlayers(", "SaveToDB(", "CharacterDatabase"):
             self.assertNotIn(code, attack.replace("Unit::UpdateObjectVisibility(false)'s delayed notification", ""))
             self.assertNotIn(code, corpse)
+            self.assertNotIn(code, respawn)
 
     def test_logout_avoids_unreviewed_cross_thread_visibility_work(self):
         # Core/Playerbots session teardown can invalidate a verified actor
@@ -163,6 +192,9 @@ class F14TransitionBridge(unittest.TestCase):
         self.assertIn("void OnF14AttackTargetTransition(", mgr)
         self.assertEqual(unit.count("sScriptMgr->OnF14AttackTargetTransition(this,"), 2)
         self.assertEqual(creature.count("sScriptMgr->OnF14CreatureCorpseReady(this);"), 1)
+        self.assertEqual(creature.count("sScriptMgr->OnF14CreatureRespawned(this);"), 1)
+        self.assertIn("UNITHOOK_ON_F14_CREATURE_RESPAWNED", script)
+        self.assertIn("void OnF14CreatureRespawned(", mgr)
         self.assertNotIn("COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION", script)
 
 if __name__ == "__main__":
