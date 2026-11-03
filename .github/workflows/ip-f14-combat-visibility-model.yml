@@ -11,6 +11,7 @@ on:
     paths:
       - 'src/IndividualProgressionF14CombatVisibilityPolicy.h'
       - 'tests/ip_f14_combat_visibility_policy.cpp'
+      - 'tests/ip_f14_active_attack_transition.cpp'
       - '.github/workflows/ip-f14-combat-visibility-model.yml'
 
 jobs:
