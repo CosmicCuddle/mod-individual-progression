@@ -171,6 +171,57 @@ namespace IndividualProgressionF14MultiAttackerPolicy
         return out;
     }
 
+    // Recover after an unknown/human combatant has LEFT only by replacing the
+    // WHOLE roster using a fresh, complete, map-thread actor/rights snapshot.
+    // An old snapshot/generation must never resurrect an earlier hide decision.
+    // The returned state still lacks positive observer/rights/refresh proof.
+    constexpr Transition ReplaceWithFullyVerifiedRoster(
+        State previous, std::uint64_t creatureInstance,
+        std::uint32_t expectedGeneration,
+        std::array<std::uint64_t, MaxTrackedAttackers> const& roster,
+        std::size_t rosterCount, bool allActorsAndRightsVerified)
+    {
+        Transition out{};
+        out.state = previous;
+        out.state.completeCurrentParticipantProof = false;
+
+        if (!previous.alive || creatureInstance == 0 ||
+            creatureInstance != previous.creatureInstanceToken ||
+            expectedGeneration == 0 ||
+            expectedGeneration != previous.generation ||
+            previous.generation == std::numeric_limits<std::uint32_t>::max() ||
+            rosterCount > MaxTrackedAttackers || !allActorsAndRightsVerified)
+        {
+            out.state.uncertain = true;
+            return out;
+        }
+
+        State replacement{};
+        replacement.creatureInstanceToken = creatureInstance;
+        replacement.generation = expectedGeneration + 1;
+        replacement.alive = true;
+        for (std::size_t i = 0; i < rosterCount; ++i)
+        {
+            if (roster[i] == 0)
+            {
+                out.state.uncertain = true;
+                return out;
+            }
+
+            for (std::size_t j = 0; j < i; ++j)
+                if (roster[j] == roster[i])
+                {
+                    out.state.uncertain = true;
+                    return out;
+                }
+
+            replacement.verifiedAttackers[i] = roster[i];
+        }
+
+        out.state = replacement;
+        return out;
+    }
+
     // Proof comes from a separate COMPLETE, same map-thread participant,
     // threat, rights, identity and eligibility snapshot. Setting it does not
     // approve concealment and cannot bypass uncertainty or an empty roster.
