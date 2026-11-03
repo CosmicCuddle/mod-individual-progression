@@ -19,6 +19,7 @@ namespace IndividualProgressionF14ActorCreatureIndex
     namespace Policy = IndividualProgressionF14MultiAttackerPolicy;
     constexpr std::size_t MaxKnownCreatures = 32;
     constexpr std::size_t MaxExpiredLogins = 64;
+    constexpr std::size_t MaxRetiredCreatures = 64;
 
     struct ExpiryFanout
     {
@@ -65,7 +66,8 @@ namespace IndividualProgressionF14ActorCreatureIndex
             {
                 Policy::State const& candidate = states[i];
                 if (!candidate.alive || !candidate.creatureInstanceToken ||
-                    !candidate.generation || candidate.uncertain)
+                    !candidate.generation || candidate.uncertain ||
+                    WasCreatureRetired(candidate.creatureInstanceToken))
                     return false;
 
                 for (std::size_t j = 0; j < i; ++j)
@@ -127,19 +129,27 @@ namespace IndividualProgressionF14ActorCreatureIndex
             return result;
         }
 
-        // Creature removal/respawn invalidates the full index. Never retain
-        // the old incarnation, even if a DB spawn/GUID later looks identical.
+        // A removed creature incarnation is permanently retired for this
+        // index lifetime. A later "complete" snapshot may NEVER reintroduce
+        // its token, even if a DB spawn/GUID is reused. Capacity exhaustion
+        // denies all future concealment rather than forgetting old identity.
         bool RemoveCreature(std::uint64_t creatureToken)
         {
             _complete = false;
+            if (!creatureToken || !RememberRetiredCreature(creatureToken))
+            {
+                _poisoned = true;
+                return false;
+            }
+
+            bool wasIndexed = false;
             for (Policy::State& creature : _creatures)
-                if (creature.creatureInstanceToken == creatureToken &&
-                    creatureToken != 0)
+                if (creature.creatureInstanceToken == creatureToken)
                 {
                     creature = {};
-                    return true;
+                    wasIndexed = true;
                 }
-            return false;
+            return wasIndexed;
         }
 
     private:
@@ -149,6 +159,27 @@ namespace IndividualProgressionF14ActorCreatureIndex
                 if (token != 0 && expired == token)
                     return true;
             return false;
+        }
+
+        bool WasCreatureRetired(std::uint64_t token) const
+        {
+            for (auto retired : _retiredCreatures)
+                if (token != 0 && retired == token)
+                    return true;
+            return false;
+        }
+
+        bool RememberRetiredCreature(std::uint64_t token)
+        {
+            if (WasCreatureRetired(token))
+                return true; // Repeated remove does not revive a creature.
+            for (auto& retired : _retiredCreatures)
+                if (retired == 0)
+                {
+                    retired = token;
+                    return true;
+                }
+            return false; // No eviction: exhausted ledger poisons this index.
         }
 
         bool RememberExpiredLogin(std::uint64_t token)
@@ -166,6 +197,7 @@ namespace IndividualProgressionF14ActorCreatureIndex
 
         std::array<Policy::State, MaxKnownCreatures> _creatures{};
         std::array<std::uint64_t, MaxExpiredLogins> _expiredLogins{};
+        std::array<std::uint64_t, MaxRetiredCreatures> _retiredCreatures{};
         bool _complete = false;
         bool _poisoned = false;
     };
