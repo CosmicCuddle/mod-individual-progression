@@ -84,7 +84,9 @@ class Provenance(unittest.TestCase):
         before, remainder = current.split(begin, 1)
         new_comments, after = remainder.split(end, 1)
         # This new block is comment-only until its single expected OFF key.
-        self.assertNotIn("\nIndividualProgression.", "\n" + new_comments)
+        self.assertTrue(all(not line.strip() or line.strip().startswith("#")
+                            for line in new_comments.splitlines()),
+                        "F14 pilot may contain comments only; no active conf keys")
         self.assertEqual(before + after, git("show", FROZEN_PARENT + ":" + path))
 
 
