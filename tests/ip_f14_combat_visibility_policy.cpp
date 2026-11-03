@@ -64,7 +64,8 @@ int main()
         check(name, F14::ShouldConcealCreatureFromObserver(c, o), false);
     };
 
-    const auto c0 = Creature(), o0 = Observer();
+    const auto c0 = Creature();
+    const auto o0 = Observer();
     hide("verified isolated bot-only fight", c0, o0);
 
     auto c = c0;
