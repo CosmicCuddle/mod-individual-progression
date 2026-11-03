@@ -11,6 +11,10 @@
 - `Unit::UpdateObjectVisibility(false)` on pinned Core is **delayed** via `NOTIFY_VISIBILITY_CHANGED`, whereas `true` directly traverses nearby visibility by `Acore::VisibleChangesNotifier` (via `WorldObject::UpdateObjectVisibility(true)`). This is why the proposed immediate transition path uses `true`. **This is a source-level event notification, not verified in-client timing or correctness.**
 - Added `tests/test_ip_f14_attack_corpse_bridge.py` and an independent pinned full-core/native CI workflow to apply all three Core patches and compile IP + historical Playerbots + Naxx #292 + Character Services #16. Test-only Core/Playerbots patches never enter the owner's installations.
 
+## Session teardown / logout is an explicit F14 release blocker
+
+A positively verified RandomBot may lose its headless session or have its GUID identity cache cleared **before** `Unit::AttackStop` is emitted. Current `IndividualPlayerProgression::OnPlayerLogout` only calls `ForgetF14VerifiedRandomBotGroupIdentity`. The new attack-stop callback requires a still-in-world Player, headless session and positive verified identity before refreshing the former creature. Consequently **the current hook cannot guarantee creature reappearance on a bot logout**. F14 remains FORCED OFF. Do **not** add an unreviewed direct `UpdateObjectVisibility(true)` inside the logout hook: the owner map-thread/observer update ordering is not verified. An explicit map-thread actor-identity-expiry event, cached previous creature identity, conservative fail-visible invalidation and client render acceptance tests are required. No production-player or bot logout behavior has been changed.
+
 ## Critical intentionally incomplete features
 
 - The new Core macro is **`COSMIC_F14_ATTACK_EVENT_HOOK_VERSION`**, NOT `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION`. The latter remains **undefined** in all three patches. The feature option `IndividualProgression.F14.ExperimentalRndbotPlayerVisibility` is **forced OFF**, even if a configuration attempted to switch it on.
