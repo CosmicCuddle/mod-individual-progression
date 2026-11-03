@@ -136,6 +136,20 @@ class F14TransitionBridge(unittest.TestCase):
             self.assertNotIn(code, attack.replace("Unit::UpdateObjectVisibility(false)'s delayed notification", ""))
             self.assertNotIn(code, corpse)
 
+    def test_logout_avoids_unreviewed_cross_thread_visibility_work(self):
+        # Core/Playerbots session teardown can invalidate a verified actor
+        # without an AttackStop callback carrying an eligible headless
+        # session. We intentionally DO NOT update NPC visibility directly
+        # inside an unverified OnPlayerLogout worker; a separate audited
+        # map-thread refresh/identity-expiry bridge is mandatory before F14 ON.
+        logout = method(P, "void OnPlayerLogout(Player* player) override")
+        self.assertIn("ForgetF14VerifiedRandomBotGroupIdentity(player)", logout)
+        self.assertNotIn("UpdateObjectVisibility(", logout)
+        self.assertNotIn("SetPhaseMask(", logout)
+        self.assertNotIn("sRandomPlayerbotMgr", logout)
+        self.assertIn("COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION", CORE)
+        self.assertIn("f14ExperimentalRndbotPlayerVisibility", CORE)
+
     def test_real_patched_core_when_available(self):
         path = os.environ.get("COSMIC_F14_PATCHED_CORE")
         if not path:
