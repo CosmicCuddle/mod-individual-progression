@@ -656,8 +656,13 @@ public:
         // Preserve the existing OFF pathway: bots/excluded accounts sync to
         // the leader's exact tier when accepting; human accounts do not.
         // F14 will separately harden the RNDBOT TBC-race minimum for all paths.
+        // F14 pilot: leave historic OFF grouping semantics unchanged while
+        // refusing only a *downgrade* below a login-verified TBC-race bot floor.
+        // No stage write here; return true still accepts the group.
         if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState &&
-            !sIndividualProgression->ShouldSkipF14VerifiedRandomBotGroupDowngrade(player, leaderState))
+            sIndividualProgression->ShouldSkipF14VerifiedRandomBotGroupDowngrade(player, leaderState))
+            return true;
+        if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState)
             sIndividualProgression->ForceUpdateProgressionState(
                 player, static_cast<ProgressionState>(leaderState));
 
