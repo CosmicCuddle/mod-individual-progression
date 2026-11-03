@@ -1077,6 +1077,34 @@ public:
 #endif
 
 #if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION)
+// Pinned Core already dispatches AllCreatureScript after AddToWorld and
+// before RemoveFromWorld. No new Core lifecycle patch is required for this.
+#include "AllCreatureScript.h"
+class IndividualProgressionF14WorldAddScript final : public AllCreatureScript
+{
+public:
+    IndividualProgressionF14WorldAddScript()
+        : AllCreatureScript("IndividualProgression_F14WorldAdd") { }
+
+    void OnCreatureAddWorld(Creature* creature) override
+    {
+        // A respawn may have promoted Alive before the creature was in-world.
+        // A later AddToWorld event is the first valid visibility notification.
+        // This does NOT conceal anything, allocate a spawn identity, or make
+        // actor/threat/rights/observer facts valid; full F14 is forced OFF.
+        if (!sIndividualProgression->enabled ||
+            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+            !creature || !creature->IsInWorld())
+            return;
+
+        creature->UpdateObjectVisibility(true);
+    }
+
+    // The Core's normal RemoveFromWorld cleanup owns packet destruction.
+    // Never force client visibility from the remove hook while in teardown;
+    // the future per-creature actor cache must invalidate there separately.
+};
+
 class IndividualProgressionF14AttackEventScript : public UnitScript
 {
 public:
@@ -1152,6 +1180,7 @@ void AddSC_mod_individual_progression_player()
     new IndividualProgressionF14ObserverScript();
 #endif
 #if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION)
+    new IndividualProgressionF14WorldAddScript();
     new IndividualProgressionF14AttackEventScript();
 #endif
 }
