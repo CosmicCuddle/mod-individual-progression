@@ -1116,15 +1116,32 @@ public:
 
     void OnF14AttackTargetTransition(Unit* attacker, Unit* oldVictim, Unit* newVictim) override
     {
-        // An unverified or human actor must never trigger the F14 refresh.
-        // This optional hook is synchronous and must not retain Unit pointers.
+        // This optional hook is synchronous and must not retain Unit
+        // pointers. Only positive verified RandomBots can cause the
+        // attack-START / target-switch refresh used by the hide candidate.
         if (!sIndividualProgression->enabled ||
             !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
             !attacker || !attacker->IsPlayer())
             return;
 
         Player* candidate = attacker->ToPlayer();
-        if (!candidate || !candidate->IsInWorld() ||
+        if (!candidate)
+            return;
+
+        // FAIL-VISIBLE STOP FALLBACK. After the Core unlinks the attacker,
+        // the former creature must be re-evaluated even if a RandomBot's
+        // session or positive GUID identity was evicted during logout.
+        // Any player's stop is permitted to request a conservative refresh;
+        // it does NOT hide anything, change loot/threat/phase, or grant F14
+        // identity. This covers only paths that actually emit AttackStop.
+        if (!newVictim)
+        {
+            if (oldVictim && oldVictim->IsCreature() && oldVictim->IsInWorld())
+                oldVictim->UpdateObjectVisibility(true);
+            return;
+        }
+
+        if (!candidate->IsInWorld() ||
             !candidate->GetSession() || !candidate->GetSession()->IsHeadless() ||
             (candidate->getRace() != RACE_DRAENEI &&
              candidate->getRace() != RACE_BLOODELF) ||
