@@ -480,8 +480,12 @@ bool IndividualProgression::HasF14VerifiedRandomBotIdentity(Player const* player
     if (!player)
         return false;
     std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
-    auto const it = _f14VerifiedRandomBotGroupCache.find(player->GetGUID().GetCounter());
-    return it != _f14VerifiedRandomBotGroupCache.end() && it->second;
+    uint32 const lowGuid = player->GetGUID().GetCounter();
+    auto const it = _f14VerifiedRandomBotGroupCache.find(lowGuid);
+    if (it == _f14VerifiedRandomBotGroupCache.end() || !it->second)
+        return false;
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(lowGuid);
+    return epoch != _f14VerifiedRandomBotLoginEpoch.end() && epoch->second != 0;
 }
 
 // WHO queries carry a cached GUID. Never look up a target Player or call
@@ -492,7 +496,10 @@ bool IndividualProgression::HasF14VerifiedRandomBotGuid(ObjectGuid const& guid)
         return false;
     std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
     auto const it = _f14VerifiedRandomBotGroupCache.find(guid.GetCounter());
-    return it != _f14VerifiedRandomBotGroupCache.end() && it->second;
+    if (it == _f14VerifiedRandomBotGroupCache.end() || !it->second)
+        return false;
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(guid.GetCounter());
+    return epoch != _f14VerifiedRandomBotLoginEpoch.end() && epoch->second != 0;
 }
 
 // Read-only, incarnation-safe actor identity. Never consult mutable Playerbots
