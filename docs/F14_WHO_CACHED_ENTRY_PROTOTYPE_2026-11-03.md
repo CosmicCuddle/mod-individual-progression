@@ -1,0 +1,26 @@
+# F14 /who cached-GUID filter — isolated Core + IP prototype
+
+**Owner:** CosmicCuddle. **Maintenance:** CS01. **Date:** 3 Nov 2026. **State:** unmerged DRAFT, default-OFF, proposed WHO seam + partial IP callback, no owner-host configuration or executable changes. **Parent:** [IP #51](https://github.com/CosmicCuddle/mod-individual-progression/pull/51), exactly `acfdeb8adafc14d56cdb1734700e8b0f164a67bb`. **Pinned historical Core:** `Grimfeather/azerothcore-wotlk@8daffdabe9202c228e45d833c9a1d399597a15cd` (NOT verified as installed owner Core).
+
+## Verified gap
+
+Pinned [Core `MiscHandler.cpp` HandleWhoOpcode lines 296–310](https://github.com/Grimfeather/azerothcore-wotlk/blob/8daffdabe9202c228e45d833c9a1d399597a15cd/src/server/game/Handlers/MiscHandler.cpp#L296-L310) iterates `sWhoListCacheMgr->GetWhoList()`. Entries are value snapshots, not live Player objects. [WhoListCacheMgr.h](https://github.com/Grimfeather/azerothcore-wotlk/blob/8daffdabe9202c228e45d833c9a1d399597a15cd/src/server/game/Cache/WhoListCacheMgr.h) provides cached GUID, race and security. A WorldObjectScript world-visibility callback alone never runs there and would permit a hidden bot to remain listed.
+
+## Implemented in THIS DRAFT
+
+1. **Runner-only four-file WHO Core patch** in `tests/core_patches/f14_who_cached_entry_prototype.patch`, applied **after** the independent five-file default-ALLOW world observer patch #50. It adds a versioned, default-ALLOW `WorldObjectScript::OnWhoListEntryCanBeSeenByPlayer(Player const*, ObjectGuid const&, uint8)` and `ScriptMgr` dispatcher. The WHO handler invokes this hook only for ordinary player-account observers with **cached GUID + race** from a WHO entry, not a target Player pointer. GMs retain historical WHO visibility. The WHO callback does not alter the WHO cache, target phase, packet payload or player storage.
+2. **IP source callback** in `IndividualProgressionPlayer.cpp`, compiled only with the optional WHO Core API. It reuses the pre-existing login-verified headless Blood Elf/Draenei **RandomBot** GUID identity cache behind its `shared_mutex` (via new `HasF14VerifiedRandomBotGuid`). It never calls mutable `RandomPlayerbotMgr::IsRandomBot`, `ObjectAccessor::FindPlayer` or DB reads from WHO. Non-ordinary observers, excluded accounts, targets lacking positive identity, human characters, unknown races and self are allowed. A positively verified bot may be omitted only for an ordinary observer with effective personal stage below 8 **when a future fully approved runtime feature can actually be enabled**.
+3. **Still unconditionally locked OFF in this prototype**: even if the world+WHO hook macros exist, the IP setting `IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0` is forced OFF unless a **third absent** `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION` contract exists. Neither Core patch defines this macro; there is no immediate client visibility or safe threat refresh implementation. The WHO proposal does not make the feature usable. Existing paid receipt, group and quest reset logic are untouched.
+4. Added `tests/test_ip_f14_who_cache_prototype.py` and **a separate disposable-native CI workflow** that applies the historical paid-row guard, world observer hook, new WHO hook and two pinned historical PB compatibility edits on a GitHub runner, before compiling all original Core, IP, Naxx #292, PB and Character Services #16 together. No server launch. Native PASS is unverified until CI completes.
+
+## Risks and further work
+
+- WHO is a periodically refreshed **cached** list. A bot logout removes its positive runtime GUID verification before WHO may drop its stale entry; a short-lived visibility discrepancy may remain. Race/faction/role swaps, GUID reuse, login/exit and multithread publication require explicit snapshots, expiring/tombstone handling and tests before enablement.
+- The observer's effective IP progression read from the WHO/session handler requires a thread-ownership review, plus stage-change refresh. GM/headless Playerbots can have sessions unlike ordinary players; never dereference unverified/null target Player or assume bot account == positive RandomBot identity.
+- In-world client create/destroy visibility invalidation on login, logout, teleport, stage change, attack begin/stop, target switches and NPC death is not yet implemented. Prevent *invisible ghost hits* and preserve corpse/loot/quest/group rights.
+- WHO list is only one player discovery surface. Inspect friend lists, group information, target APIs, chat and map visibility for owner-approved scope and inconsistent disclosure before live deployment.
+- Core owner/fork, exact installed modules and configs, backup/restore ability, macro ABI compatibility, native compilation, manual gameplay and independent review must all be verified. No production approval exists.
+
+**Rollback now:** close/discard this DRAFT branch; nothing to restore on owner host. Future deployment requires verified backups and owner signoff.
+
+**Coordination:** [Issue #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9), [readiness #4](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/4). Grok/Claude remain on owner-confirmed breaks; no independent review claimed.
