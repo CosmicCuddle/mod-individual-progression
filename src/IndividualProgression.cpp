@@ -4,7 +4,9 @@
 
 #include "IndividualProgression.h"
 #include "IndividualProgressionGroupPolicy.h"
+#include "IndividualProgressionF14LoginPolicy.h"
 #include "naxxramas_40.h"
+#include <mutex>
 #include "ReputationMgr.h"
 #include "PetDefines.h"
 
