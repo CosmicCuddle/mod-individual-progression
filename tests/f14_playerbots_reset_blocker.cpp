@@ -9,6 +9,7 @@
  */
 #include "../src/IndividualProgressionF14LoginPolicy.h"
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 
 namespace F14 = IndividualProgressionF14LoginPolicy;
@@ -31,7 +32,7 @@ namespace
 
     // This is an explicit MODEL of the reviewed IP OnPlayerLogin guard, NOT
     // an execution of that callback or a live RandomPlayerbotMgr query.
-    std::uint8_t ModelLoginStage(bool flagOn, bool verifiedHeadlessTbcRaceRrndbot,
+    std::uint8_t ModelLoginStage(bool flagOn, bool verifiedHeadlessTbcRaceRndbot,
                                  std::uint8_t rawSavedStage, std::uint32_t level,
                                  std::int32_t progressionLimit = 0)
     {
