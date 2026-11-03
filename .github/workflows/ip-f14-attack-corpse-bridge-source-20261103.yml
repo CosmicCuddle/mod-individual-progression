@@ -155,7 +155,7 @@ jobs:
                 -Wall -Wextra -Werror -pedantic -Iip/src -Iip \
                 ip/tests/f14_actor_creature_index.cpp -o /tmp/f14-actor-index
               /tmp/f14-actor-index | tee /tmp/f14-index-result.txt
-              grep -Fqx 'F14 ACTOR INDEX 49/49 PASSED; offline/fail-visible model only' /tmp/f14-index-result.txt
+              grep -Fqx 'F14 ACTOR INDEX 61/61 PASSED; offline/fail-visible model only' /tmp/f14-index-result.txt
             done
           done
           echo 'The map-wide actor-to-creature index is UNWIRED: model-only, no runtime callback or client visibility.'
