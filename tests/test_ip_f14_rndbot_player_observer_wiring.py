@@ -35,7 +35,9 @@ class F14RuntimePilot(unittest.TestCase):
                                         CONF, re.M)), 1)
         self.assertIn("std::atomic<bool> f14ExperimentalRndbotPlayerVisibility{false};", HEADER)
         self.assertIn('"' + KEY + '", false)', CORE)
-        self.assertIn("#if !defined(COSMIC_F14_OBSERVER_HOOK_VERSION)", CORE)
+        self.assertIn("#if !defined(COSMIC_F14_OBSERVER_HOOK_VERSION) || !defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)", CORE)
+        self.assertNotIn("COSMIC_F14_WHO_FILTER_HOOK_VERSION", PATCH,
+                         "Unimplemented WHO seam must not be falsely advertised by Core patch")
         self.assertIn("f14ExperimentalRndbotPlayerVisibility = false;", CORE)
         self.assertIn("F14 experimental RandomBot world visibility requires Playerbots identity API", CORE)
         self.assertIn("#define COSMIC_F14_OBSERVER_HOOK_VERSION 1", PATCH)
