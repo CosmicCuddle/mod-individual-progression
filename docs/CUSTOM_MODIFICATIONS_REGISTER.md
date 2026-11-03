@@ -544,3 +544,16 @@ synchronisation but cannot automatically restore prior progression markers.
 | Known risks | **Confirmed** WHO cache bypass in historical Core `MiscHandler.cpp` lines 296–310; option is hard-forced OFF without separate WHO filter macro, so world-only hiding cannot activate. No immediate visibility invalidation; startup/reload cache freshness; hot-path profiling; Core/Playerbots source drift; combat NPC/ghost-hit/loot safety is not addressed. No enabling permitted. |
 | Tests / rollback | See `tests/test_ip_f14_rndbot_player_observer_wiring.py`, Core patch source tests and newly repinned disposable combined-native workflow. Rollback today: discard this branch; zero live changes. Later live rollback would require feature disable, verified binary/config/DB restore and visibility correction. |
 | Decisions / references | [F14 Issue #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9), [core seam #50](https://github.com/CosmicCuddle/mod-individual-progression/pull/50), [combat model #47](https://github.com/CosmicCuddle/mod-individual-progression/pull/47). CosmicCuddle retains final approval. |
+
+
+## IP-F14-WHO-CACHED-ENTRY (3 Nov 2026) — per-viewer WHO filter prototype
+
+| Field | Record |
+| --- | --- |
+| Intended owner behavior | CosmicCuddle: positively verified Blood Elf/Draenei RandomBots remain hidden **both** in-world and on `/who` only from normal Vanilla observers; never hide ordinary human Blood Elves/Draenei, unverified bots, GMs, Altbots, or TBC-era observers |
+| Source / owning components | IP DRAFT child of #51 at `acfdeb8ada`, historical Grimfeather Core `8daffdabe` test-only four-file WHO patch applied after #50 observer hook, IP `IndividualProgressionPlayer.cpp`, `IndividualProgression.cpp/.h`; separate disposable CI workflow, source tests and this document |
+| Config / SQL / DBC / client | `IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0` unchanged default OFF. Compiled option **forced OFF** without ALL THREE versioned interfaces: world observer hook, WHO cached entry hook **and currently absent immediate visibility refresh hook**. No SQL/DBC/client or saved-character data edits |
+| Positive identity and exclusions | Use original login-verified headless rndbot cache under shared mutex by GUID, plus WHO cached race; no cross-thread target Player lookup or mutable PB identity from WHO worker. GM/unknown/real human/Altbot returns ALLOW |
+| Known risks | WHO entries are periodic cache snapshots; logout/mid-refresh stale visibility, GUID reuse and identity/era changes, thread ownership of viewer-stage reads, WHO counts, missing client create/destroy and combat threat refresh, other social discovery routes require review before any enablement |
+| Tests / status | Source and full pinned Worldserver compile workflows newly authored; **new exact-head results pending**. No in-game tests, no installed baseline verification, no independent Grok review (on break), no merge or deploy |
+| Rollback / decisions | Discard this isolated unmerged branch. Preserve prior #51 and all original features. Any future deploy needs installed-source inventory, restorable character DB/config/binary backups, full negative/positive gameplay matrix and CosmicCuddle approval; [Issue #9](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/9) |
