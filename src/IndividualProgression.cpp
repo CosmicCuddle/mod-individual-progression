@@ -1111,11 +1111,18 @@ private:
         sIndividualProgression->doableNaxx40Bosses_Razuvious = sConfigMgr->GetOption<bool>("IndividualProgression.doableNaxx40Bosses_Razuvious", false);
         sIndividualProgression->enforceGroupRules = sConfigMgr->GetOption<bool>("IndividualProgression.EnforceGroupRules", false);
         sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = sConfigMgr->GetOption<bool>("IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin", false);
+        sIndividualProgression->f14EnforceVerifiedRandomBotTbcFloorOnLogin = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.EnforceVerifiedRandomBotTbcFloorOnLogin", false);
 #if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
         if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin)
         {
             LOG_ERROR("module", "IndividualProgression F14 saved-RandomBot login safeguard requested, but required Playerbots API header is missing: feature is NOT active; forcing OFF");
             sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = false;
+        }
+        if (sIndividualProgression->f14EnforceVerifiedRandomBotTbcFloorOnLogin)
+        {
+            LOG_ERROR("module", "Individual Progression F14 TBC RandomBot floor requested without Playerbots header: forcing this incomplete feature OFF");
+            sIndividualProgression->f14EnforceVerifiedRandomBotTbcFloorOnLogin = false;
         }
 #endif
         sIndividualProgression->fishingFix = sConfigMgr->GetOption<bool>("IndividualProgression.FishingFix", true);

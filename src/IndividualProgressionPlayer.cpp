@@ -56,6 +56,43 @@ public:
             if (sIndividualProgression->isBotAccount(player))
                 sIndividualProgression->UpdateRNDbotSpells(player); // give class spells to RNDbots that have been removed from trainers by IP.
             
+            // F14 NEW owner-priority SOURCE PILOT, default OFF. Only a
+            // positively selected, headless race10/11 RandomBot on an
+            // IP bot account may receive the TBC stage floor here.
+            // No humans, Altbots, SelfBots or guessed bot identities.
+            // Group/creation/reinitialisation may still need separate guards.
+            bool verifiedRandomBotTbcFloorHandled = false;
+#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
+            if (sIndividualProgression->f14EnforceVerifiedRandomBotTbcFloorOnLogin &&
+                sIndividualProgression->isBotAccount(player) &&
+                (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
+                player->GetSession() && player->GetSession()->IsHeadless() &&
+                sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()))
+            {
+                uint8 const savedStage = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+                uint8 const floorStage =
+                    IndividualProgressionF14LoginPolicy::TbcRaceFloorStage(player->GetLevel());
+
+                // The normal login would forcibly erase earned progression.
+                // When the saved stage already satisfies the floor, DO NOT
+                // run the destructive level-based ForceUpdateProgressionState.
+                if (savedStage >= floorStage &&
+                    savedStage <= IndividualProgressionGroupPolicy::LastSupportedStage)
+                    verifiedRandomBotTbcFloorHandled = true;
+                else if (IndividualProgressionF14LoginPolicy::NeedsTbcRaceFloor(
+                             savedStage, player->GetLevel()))
+                {
+                    // Draft policy exception: an identified RandomBot's raw
+                    // race floor may be >Vanilla ProgressionLimit. This does
+                    // not alter any human's effective cap or group admission.
+                    sIndividualProgression->ForceUpdateProgressionState(
+                        player, static_cast<ProgressionState>(floorStage));
+                    verifiedRandomBotTbcFloorHandled = true;
+                }
+            }
+#endif
+            // END F14 new verified RandomBot stage-floor block.
+
             // F14 partial safeguard, OFF by default. Only preserve an already
             // recorded TBC/WotLK stage for a positively selected headless RNDbot.
             // This does not initialize stage 8, grant TBC, alter normal players,
@@ -85,7 +122,7 @@ public:
             }
 
 #endif
-            if (!preserveVerifiedRandomBotStage)
+            if (!preserveVerifiedRandomBotStage && !verifiedRandomBotTbcFloorHandled)
             {
                 if (player->GetLevel() <= 60)
                     sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(0));

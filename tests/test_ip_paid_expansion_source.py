@@ -11,6 +11,10 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from f14_stage_floor_source_normalize import (
+    FROZEN_PARENT, strip_login_pilot, strip_header_pilot,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 PARENT_20 = "5fe0f9105d55d249aa55a25510d3fa23e3d84148"
 
@@ -45,8 +49,8 @@ def code(text: str) -> str:
 
 
 CORE = read("src/IndividualProgression.cpp")
-HEADER = read("src/IndividualProgression.h")
-PLAYER = read("src/IndividualProgressionPlayer.cpp")
+HEADER = strip_header_pilot(read("src/IndividualProgression.h"))
+PLAYER = strip_login_pilot(read("src/IndividualProgressionPlayer.cpp"))
 EXP = read("src/IndividualProgressionExpansion.cpp")
 POLICY = read("src/IndividualProgressionExpansionPolicy.h")
 CONF = read("conf/individualProgression.conf.dist")
@@ -260,7 +264,11 @@ class AccessWiring(unittest.TestCase):
         self.assertIn("uint8 refProgress = enforceGroupRules ? GetEffectiveProgression(leader) : GetPlayerProgressionFromQuests(leader);", sync)
 
     def test_only_documented_player_cpp_changes(self):
-        removed = [l[1:] for l in git("diff", "-U0", PARENT_20, "--", "src/IndividualProgressionPlayer.cpp").splitlines()
+        # Keep the historic paid-quest diff against reviewed #34; the new
+        # F14 login insertion must subtract back to that parent exactly.
+        self.assertEqual(PLAYER, git_show(FROZEN_PARENT, "src/IndividualProgressionPlayer.cpp"))
+        self.assertEqual(HEADER, git_show(FROZEN_PARENT, "src/IndividualProgression.h"))
+        removed = [l[1:] for l in git("diff", "-U0", PARENT_20, FROZEN_PARENT, "--", "src/IndividualProgressionPlayer.cpp").splitlines()
                    if l.startswith("-") and not l.startswith("---")]
         # F19 is a separately reviewed, deliberate login-only extension.
         # Retain the exact four removed F14 lines as a fixed allowlist, then

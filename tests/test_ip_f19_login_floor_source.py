@@ -11,12 +11,16 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from f14_stage_floor_source_normalize import (
+    FROZEN_PARENT, strip_login_pilot, strip_policy_pilot,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
 PARENT_20 = "5fe0f9105d55d249aa55a25510d3fa23e3d84148"
 BASE_IP_30 = "817ec290b5a82306bec76cdfcf32fc86c58c5da2"  # reviewed paid + warning child, exact SHA
 REVIEWED_IP_32 = "6c180c0a78cdadcf6c79e8e627f2cc2e91e0fdae"  # frozen parent of paid-TBC #33
-PLAYER = (ROOT / "src/IndividualProgressionPlayer.cpp").read_text()
-POLICY = (ROOT / "src/IndividualProgressionF14LoginPolicy.h").read_text()
+PLAYER = strip_login_pilot((ROOT / "src/IndividualProgressionPlayer.cpp").read_text())
+POLICY = strip_policy_pilot((ROOT / "src/IndividualProgressionF14LoginPolicy.h").read_text())
 LOGIN_ANCHOR = "            // F14 partial safeguard, OFF by default."
 LOGIN_END = "        else // normal account"
 
@@ -48,18 +52,42 @@ class Provenance(unittest.TestCase):
         subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", REVIEWED_IP_32, "HEAD"], check=True)
         reviewed = sorted(git("diff", "--name-only", BASE_IP_30, REVIEWED_IP_32, "--", "src").split())
         self.assertEqual(reviewed, ["src/IndividualProgressionF14LoginPolicy.h", "src/IndividualProgressionPlayer.cpp"])
-        changed_since_review = sorted(git("diff", "--name-only", REVIEWED_IP_32, "HEAD", "--", "src").split())
+        # Freeze the post-F19 paid-era lineage at #34, then separately
+        # verify the exact F14 pilot subtracts back to #34 byte-for-byte.
+        changed_since_review = sorted(git("diff", "--name-only", REVIEWED_IP_32, FROZEN_PARENT, "--", "src").split())
         self.assertEqual(changed_since_review, [
             "src/IndividualProgressionExpansion.cpp",
             "src/IndividualProgressionExpansionPolicy.h",
         ])
         # The F19 login writer and pure policy must be byte-identical to the
         # frozen reviewed #32; paid-TBC changes cannot silently alter either.
-        self.assertEqual(git("diff", "--name-only", REVIEWED_IP_32, "HEAD", "--",
+        self.assertEqual(git("diff", "--name-only", REVIEWED_IP_32, FROZEN_PARENT, "--",
                              "src/IndividualProgressionF14LoginPolicy.h",
                              "src/IndividualProgressionPlayer.cpp").strip(), "")
+        self.assertEqual(PLAYER, git("show", FROZEN_PARENT + ":src/IndividualProgressionPlayer.cpp"))
+        self.assertEqual(POLICY, git("show", FROZEN_PARENT + ":src/IndividualProgressionF14LoginPolicy.h"))
         self.assertEqual(git("diff", "--name-only", BASE_IP_30, "HEAD", "--",
-                             "data", "optional", "sql", "conf").strip(), "")
+                             "data", "optional", "sql").strip(), "")
+
+
+    def test_f14_conf_addition_preserves_all_previous_settings(self):
+        # Grok Low-1: compare the entire distributed config against the
+        # reviewed #34 parent after removing ONLY the new default-OFF block.
+        # A flip to EnforceGroupRules or any other pre-existing default must
+        # fail this check, even though the F14 pilot itself is test-only.
+        path = "conf/individualProgression.conf.dist"
+        current = (ROOT / path).read_text()
+        begin = "\n# IndividualProgression.F14.EnforceVerifiedRandomBotTbcFloorOnLogin\n"
+        end = "IndividualProgression.F14.EnforceVerifiedRandomBotTbcFloorOnLogin = 0\n"
+        self.assertEqual(current.count(begin), 1)
+        self.assertEqual(current.count(end), 1)
+        before, remainder = current.split(begin, 1)
+        new_comments, after = remainder.split(end, 1)
+        # This new block is comment-only until its single expected OFF key.
+        self.assertTrue(all(not line.strip() or line.strip().startswith("#")
+                            for line in new_comments.splitlines()),
+                        "F14 pilot may contain comments only; no active conf keys")
+        self.assertEqual(before + after, git("show", FROZEN_PARENT + ":" + path))
 
 
 class Wiring(unittest.TestCase):
@@ -99,7 +127,7 @@ class Wiring(unittest.TestCase):
         self.assertNotIn("Do not call the mutable currentBots-backed predicate", PLAYER)
 
     def test_diff_vs_parent_is_only_the_documented_lines(self):
-        diff = git("diff", "-U0", BASE_IP_30, "--", "src/IndividualProgressionPlayer.cpp")
+        diff = git("diff", "-U0", BASE_IP_30, FROZEN_PARENT, "--", "src/IndividualProgressionPlayer.cpp")
         removed = [l[1:].strip() for l in diff.splitlines() if l.startswith("-") and not l.startswith("---")]
         self.assertEqual(removed, [
             "savedStage <= IndividualProgressionGroupPolicy::LastSupportedStage)",
