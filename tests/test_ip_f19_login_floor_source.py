@@ -84,7 +84,7 @@ class Provenance(unittest.TestCase):
         before, remainder = current.split(begin, 1)
         new_comments, after = remainder.split(end, 1)
         # This new block is comment-only until its single expected OFF key.
-        self.assertNotIn("\nIndividualProgression.", new_comments)
+        self.assertNotIn("\nIndividualProgression.", "\n" + new_comments)
         self.assertEqual(before + after, git("show", FROZEN_PARENT + ":" + path))
 
 
