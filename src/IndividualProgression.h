@@ -416,7 +416,7 @@ public:
     std::map<uint32, uint8> customProgressionMap;
     questXpMapType questXpMap;
     float vanillaPowerAdjustment, tbcPowerAdjustment, vanillaHealingAdjustment, tbcHealingAdjustment;
-    bool enabled, questXpFix, enforceGroupRules, f14PreserveVerifiedRandomBotStageOnLogin, EnableSetRepCommand, EnableAllSpellRanks, LimitedSetRepCommand, fishingFix, VanillaHunterPets, WarlockDemonTrainers, simpleConfigOverride, MaxMonsterSight, questMoneyAtLevelCap, repeatableVanillaQuestsXp, disableDefaultProgression, earlyDungeonSet2, earlyScourgeBosses, requireNaxxStrath, doableNaxx40Bosses_4H, doableNaxx40Bosses_Gluth, doableNaxx40Bosses_Patchwerk, doableNaxx40Bosses_Razuvious, DisableQuestMarkers, DisableRDF, VanillaPvpTitlesKeepPostVanilla, VanillaPvpTitlesEarnPostVanilla, VanillaPvpKeepAllEarnedTitles, BotAccountsEarnPvPTitles, BotOnlyAdjustments;
+    bool enabled, questXpFix, enforceGroupRules, f14PreserveVerifiedRandomBotStageOnLogin, f14ProtectVerifiedRandomBotGroupFloor = false, EnableSetRepCommand, EnableAllSpellRanks, LimitedSetRepCommand, fishingFix, VanillaHunterPets, WarlockDemonTrainers, simpleConfigOverride, MaxMonsterSight, questMoneyAtLevelCap, repeatableVanillaQuestsXp, disableDefaultProgression, earlyDungeonSet2, earlyScourgeBosses, requireNaxxStrath, doableNaxx40Bosses_4H, doableNaxx40Bosses_Gluth, doableNaxx40Bosses_Patchwerk, doableNaxx40Bosses_Razuvious, DisableQuestMarkers, DisableRDF, VanillaPvpTitlesKeepPostVanilla, VanillaPvpTitlesEarnPostVanilla, VanillaPvpKeepAllEarnedTitles, BotAccountsEarnPvPTitles, BotOnlyAdjustments;
     int progressionLimit, startingProgression, tbcRacesProgressionLevel, tbcRacesStartingProgression, deathKnightProgressionLevel, deathKnightStartingProgression, RequiredZulGurubProgression, RequiredZulAmanProgression, tbcArenaSeason, wotlkArenaSeason, BotAccountsMaxLevel;
     uint32 VanillaPvpKillRank1, VanillaPvpKillRank2, VanillaPvpKillRank3, VanillaPvpKillRank4, VanillaPvpKillRank5, VanillaPvpKillRank6, VanillaPvpKillRank7, VanillaPvpKillRank8, VanillaPvpKillRank9, VanillaPvpKillRank10, VanillaPvpKillRank11, VanillaPvpKillRank12, VanillaPvpKillRank13, VanillaPvpKillRank14;
     std::string excludedAccountsRegex, botAccountsRegex, sharedFactionIdsRegex;
@@ -445,6 +445,10 @@ public:
     bool isNormalAccount(Player* player);
     void LoadAccountRegexes();
     void SyncBotsProgressionToLeader(Group* group);
+    // F14: verified GUID is recorded only on the login thread; group workers never call Playerbots.
+    void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
+    void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
+    bool ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage);
     void checkHunterPetSpells(Player* player);
     void checkWarlockPetSpells(Player* player);
     bool isAttuned(Player* player);
@@ -511,6 +515,11 @@ private:
     // Missing or invalid RAW settings are unknown, never free purchases.
     std::unordered_map<uint32, IndividualProgressionReceiptPolicy::Ledger> _paidExpansionLedgers;
     std::shared_mutex _paidExpansionLock;
+
+    // F14 optional GroupSync containment; only positively verified headless
+    // Blood Elf / Draenei RandomBots are present, refreshed on each login.
+    std::unordered_map<uint32, bool> _f14VerifiedRandomBotGroupCache;
+    std::shared_mutex _f14GroupCacheLock;
 };
 
 #define sIndividualProgression IndividualProgression::instance()
