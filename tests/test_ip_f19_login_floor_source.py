@@ -74,11 +74,25 @@ class Provenance(unittest.TestCase):
         # until an independently reviewed Core visibility seam and new source
         # provenance contract are supplied.
         model = "IndividualProgressionF14CombatVisibilityPolicy.h"
+        # Pin the *whole* executable source tree to exact reviewed IP #46.
+        # Filename-only allowlists and include regexes alone can miss valid
+        # C++ constructs such as #include "./Policy.h", macro includes, or
+        # pasted policy bodies inside an already-allowed executable file.
+        # Any new executable source edit requires its own Core-seam review.
+        frozen_ip46 = "cbc8de8e77f07b9d982e7f4993e1a4c292f8c6bf"
+        subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor",
+                        frozen_ip46, "HEAD"], check=True)
+        self.assertEqual(
+            git("diff", "--name-only", frozen_ip46, "HEAD", "--", "src").splitlines(),
+            ["src/" + model],
+            "F14 #47 may add ONLY its unwired policy header; runtime source changed")
+        # Independent literal cross-check, including relative path, comment-
+        # separated, macro-string and line-continuation includes.
         for path in (ROOT / "src").rglob("*"):
-            if not path.is_file() or path.suffix not in {".cpp", ".h"} or path.name == model:
+            if not path.is_file() or path.suffix not in {".cpp", ".h", ".hpp"} or path.name == model:
                 continue
-            self.assertNotRegex(path.read_text(), r"#\s*include\s*[<\"]" + re.escape(model),
-                                f"Unreviewed F14 runtime includer: {path.relative_to(ROOT)}")
+            self.assertNotIn(model, path.read_text(),
+                             f"Unreviewed F14 model reference: {path.relative_to(ROOT)}")
         # The F19 login writer and pure policy must be byte-identical to the
         # frozen reviewed #32; paid-TBC changes cannot silently alter either.
         self.assertEqual(git("diff", "--name-only", REVIEWED_IP_32, REVIEWED_IP_43, "--",
