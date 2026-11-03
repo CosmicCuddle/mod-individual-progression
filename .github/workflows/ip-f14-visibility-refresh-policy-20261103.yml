@@ -1,0 +1,57 @@
+# F14 pure visibility-refresh event model; does not modify or start any server.
+name: F14 event-driven visibility refresh policy (portable only)
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-visibility-refresh-epoch-model-20261103
+    paths:
+      - "src/IndividualProgressionF14RefreshPolicy.h"
+      - "tests/f14_visibility_refresh_policy.cpp"
+      - ".github/workflows/ip-f14-visibility-refresh-policy-20261103.yml"
+  pull_request:
+    paths:
+      - "src/IndividualProgressionF14RefreshPolicy.h"
+      - "tests/f14_visibility_refresh_policy.cpp"
+      - ".github/workflows/ip-f14-visibility-refresh-policy-20261103.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  portable-refresh-policy:
+    name: F14 refresh model — ${{ matrix.compiler }} / ${{ matrix.standard }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prove code remains PURE and no new runtime wiring exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s src/IndividualProgressionF14RefreshPolicy.h
+          test -s tests/f14_visibility_refresh_policy.cpp
+          ! grep -Eq '#include[[:space:]]+["<]IndividualProgressionF14RefreshPolicy.h' src/IndividualProgression*.cpp
+          ! grep -q 'UpdateObjectVisibility(' src/IndividualProgressionF14RefreshPolicy.h
+          ! grep -q 'DestroyForNearbyPlayers(' src/IndividualProgressionF14RefreshPolicy.h
+          ! grep -q 'SetPhaseMask(' src/IndividualProgressionF14RefreshPolicy.h
+          grep -Fq 'return failures ? 1 : 0;' tests/f14_visibility_refresh_policy.cpp
+      - name: Compile and run portable F14 visibility-refresh safety tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${{ matrix.compiler }}" -std=${{ matrix.standard }} -O2 \
+            -DNDEBUG -Wall -Wextra -Werror -pedantic \
+            -I. tests/f14_visibility_refresh_policy.cpp -o /tmp/f14-refresh-test
+          /tmp/f14-refresh-test | tee /tmp/f14-refresh-test.log
+          grep -Fqx 'F14 REFRESH pure policy 56/56 PASSED; no runtime hookup.' /tmp/f14-refresh-test.log
+      - name: Provenance and test boundary
+        run: |
+          echo 'Portable C++ only; no AzerothCore, Playerbots, character DB, visibility invalidation implementation or game test.'
+          echo 'F14 observer/WHO remain separately locked OFF until a verified runtime refresh mechanism exists.'

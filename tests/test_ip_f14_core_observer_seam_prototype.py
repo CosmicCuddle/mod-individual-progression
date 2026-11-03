@@ -43,6 +43,7 @@ class PrototypeBoundary(unittest.TestCase):
                     "src", "conf", "sql", "data", "optional").splitlines()),
             {"src/IndividualProgression.cpp", "src/IndividualProgression.h",
              "src/IndividualProgressionPlayer.cpp",
+             "src/IndividualProgressionF14RefreshPolicy.h",
              "conf/individualProgression.conf.dist"})
         self.assertEqual(git("diff", "--name-only", FROZEN, "HEAD", "--",
                              "sql", "data", "optional"), "")
@@ -154,6 +155,7 @@ class PrototypeBoundary(unittest.TestCase):
                             {"src/IndividualProgression.cpp",
                              "src/IndividualProgression.h",
                              "src/IndividualProgressionPlayer.cpp",
+                             "src/IndividualProgressionF14RefreshPolicy.h",
                              "conf/individualProgression.conf.dist"}), changed)
         self.assertIn("#define COSMIC_F14_OBSERVER_HOOK_VERSION 1", PATCH)
 
