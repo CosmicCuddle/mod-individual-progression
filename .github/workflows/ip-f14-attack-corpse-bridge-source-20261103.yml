@@ -10,6 +10,8 @@ on:
       - "src/IndividualProgressionPlayer.cpp"
       - "tests/core_patches/f14_attack_corpse_event_bridge_prototype.patch"
       - "tests/test_ip_f14_attack_corpse_bridge.py"
+      - "src/IndividualProgressionF14MultiAttackerPolicy.h"
+      - "tests/f14_multi_attacker_policy.cpp"
       - "tests/test_ip_f14_core_observer_seam_prototype.py"
       - "tests/test_ip_f19_login_floor_source.py"
       - "tests/test_ip_combined_c3_f14_partial_login.py"
@@ -21,6 +23,8 @@ on:
       - "src/IndividualProgressionPlayer.cpp"
       - "tests/core_patches/f14_attack_corpse_event_bridge_prototype.patch"
       - "tests/test_ip_f14_attack_corpse_bridge.py"
+      - "src/IndividualProgressionF14MultiAttackerPolicy.h"
+      - "tests/f14_multi_attacker_policy.cpp"
       - ".github/workflows/ip-f14-attack-corpse-bridge-source-20261103.yml"
 
 permissions:
@@ -107,6 +111,28 @@ jobs:
           do
             python3 -B -m unittest discover -s ip/tests -p "$t" -v
           done
+      - name: Compile and run pure multi-attacker safety model (GCC/Clang, C++17/C++20)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s ip/src/IndividualProgressionF14MultiAttackerPolicy.h
+          test -s ip/tests/f14_multi_attacker_policy.cpp
+          ! grep -RFq --include='*.cpp' 'IndividualProgressionF14MultiAttackerPolicy.h' ip/src
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              "$compiler" -std="$standard" -O2 -DNDEBUG \
+                -Wall -Wextra -Werror -pedantic -Iip \
+                ip/tests/f14_multi_attacker_policy.cpp -o /tmp/f14-multi-attack
+              /tmp/f14-multi-attack | tee /tmp/f14-multi-result.txt
+              grep -Eq '^F14 MULTI-ATTACKER [0-9]+/[0-9]+ PASSED; pure/offline model only        if: always()
+        run: |
+          echo 'These are exact-source and runner-only Core patch checks.'
+          echo 'PASS DOES NOT prove native Worldserver link, real player combat, WHO visibility, corpse redraw, threat/loot preservation or deployability.'
+ /tmp/f14-multi-result.txt
+            done
+          done
+          echo 'Four compile/run combinations passed ONLY the pure candidate policy.'
+
       - name: Boundary statement
         if: always()
         run: |
