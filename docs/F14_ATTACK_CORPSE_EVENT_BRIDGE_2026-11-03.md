@@ -22,7 +22,7 @@
 
 ## Evidence and rollback
 
-- Source patch has been inspected against the **exact historical Core** with 8 unified hunks, matching original line contents/counts and non-overlapping locations after all earlier patches.
+- Source patch has been inspected against the **exact historical Core** with 7 unified hunks, matching original line contents/counts and non-overlapping locations after all earlier patches.
 - New source tests and new full Worldserver CI are authored; their exact-head results remain **unverified** until Actions finishes. Previously successful #50 builds do not prove this new third patch.
 - Rollback today: discard this unmerged draft branch and the disposable Core patch, no server/character data to restore. A future approved release requires owner Core fork identification, module ABI/version match, restorable backups, independent review, full Worldserver link, and multi-client positive/negative gameplay with corpse and 2-human loot rights.
 
