@@ -431,3 +431,17 @@ row migration, lost-transfer, first-time missing-row policy and owner
 B1/B2 remain blocking. No SQL or automatic migration.
 **Rollback:** drop this child DRAFT and retain IP #42; do not delete or
 rewrite existing paid rows or charge any character to test this.
+
+## IP-PAID-RECEIPT-GRANDFATHER-CACHE (3 Nov 2026) — same-session receipt preservation
+**Owner:** CosmicCuddle. **Component:** Individual Progression strict paid expansion receipts.
+**Status:** source and model tests updated on existing isolated DRAFT #43 only; paid mode OFF; NOT merged, installed, tested in game, or authorised for live use.
+
+**Intended behaviour:** SetPaidExpansionFlag mirrors every valid receipt slot into _paidExpansionLedgers while holding _paidExpansionLock, before returning for non-purchase-bit slots. Bit-mask _paidExpansionFlags remains TBC/Wrath-only. A login-time GrandfatherEvaluated slot-2 write must stay 1 during a later same-session TBC/Wrath purchase, because PurchaseExpansion writes the entire cached 8-slot ledger; otherwise it could restore zero and allow unintended future re-evaluation.
+
+**Changed files:** src/IndividualProgressionExpansion.cpp, tests/test_ip_paid_expansion_source.py, tests/paid_receipt_full_slot_model.cpp; this register.
+**Dependencies:** parent IP DRAFT #43 c0c04574; pinned Core Player settings storage and strict v1 receipt reader; Character Services vendor API. No new SQL/DBC/client patch/configuration; paid feature stays default OFF.
+
+**Regression coverage:** static contract requires the cache ledger mirror before non-purchase-bit return; whole-ledger purchase loop cannot conditionally skip slot 2, and the staged cache assignment must precede the single save. Portable Core-vector model loads empty canonical receipt, sets evaluation during login, purchases TBC during same session, and checks a canonical 8-slot, evaluated=1 paid receipt. CI status must be checked at exact branch HEAD; NOT live MySQL/gold/relog proof.
+**Known risks and release gates:** malformed/missing/legacy rows still fail closed; A1/A2 commissioning, migration, DB atomicity, crash/relog, GM bypass, quest10259, native build, owner acceptance unresolved. Preserve owner-final expansion rules.
+**Rollback:** discard/revert this DRAFT revision without touching paid data. Do not repair existing receipts without backups and owner approval.
+**Review:** https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6600242422
