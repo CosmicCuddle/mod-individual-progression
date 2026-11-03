@@ -38,14 +38,15 @@ class GuardedPrototype(unittest.TestCase):
         self.assertEqual(len(changed), 4)
         self.assertEqual(set(changed), FILES)
         self.assertEqual(PB_PATCH.count("diff --git "), 4)
-        self.assertEqual(PB_PATCH.count("@@ -"), 4)
+        self.assertEqual(PB_PATCH.count("@@ -"), 5)
         for path in FILES:
             self.assertIn(f"--- a/{path}\n+++ b/{path}", PB_PATCH)
 
     def test_only_rewarded_stage_markers_can_be_preserved(self):
         self.assertIn("entry >= 66001 && entry <= 66018", PB_PATCH)
         self.assertIn("bot->GetQuestStatus(entry) == QUEST_STATUS_REWARDED", PB_PATCH)
-        self.assertIn("sPlayerbotAIConfig.ResetQuestsPreserveQuestIds.count(entry) != 0", PB_PATCH)
+        self.assertIn("sPlayerbotAIConfig.ResetQuestsPreserveMask.load(std::memory_order_acquire)", PB_PATCH)
+        self.assertIn("(uint32(1) << (entry - 66001))", PB_PATCH)
         self.assertIn("+            continue;", PB_PATCH)
         self.assertIn(" bot->RemoveActiveQuest(entry, false);", PB_PATCH)
         self.assertIn(" bot->RemoveRewardedQuest(entry);", PB_PATCH)
@@ -54,14 +55,18 @@ class GuardedPrototype(unittest.TestCase):
 
     def test_default_off_and_initialize_reload_safe(self):
         self.assertIn('GetOption<std::string>("Playerbots.ResetQuestsPreserveQuestIds", "")', PB_PATCH)
-        self.assertIn("+    ResetQuestsPreserveQuestIds.clear();", PB_PATCH)
+        self.assertIn("+    ResetQuestsPreserveMask.store(markerMask, std::memory_order_release);", PB_PATCH)
+        self.assertIn("+    std::atomic<uint32> ResetQuestsPreserveMask{0};", PB_PATCH)
+        self.assertIn("+#include <atomic>", PB_PATCH)
         self.assertIn("+    if (!resetPreserveIds.empty())", PB_PATCH)
+        self.assertIn("+    uint32 markerMask = 0;", PB_PATCH)
+        self.assertIn("+        if (id >= 66001 && id <= 66018)", PB_PATCH)
         self.assertIn("+Playerbots.ResetQuestsPreserveQuestIds =", PB_PATCH)
         self.assertNotRegex(PB_PATCH, r"\+Playerbots\.ResetQuestsPreserveQuestIds\s*=\s*6600")
 
     def test_pure_model_denies_missing_or_active_and_nonmarker(self):
         for s in ("QuestState::None", "QuestState::Active", "QuestState::Rewarded",
-                  "std::set<std::uint32_t> const empty", "66001", "66008", "66018",
+                  "std::set<std::uint32_t> const empty", "std::atomic<std::uint32_t>", "66001", "66008", "66018",
                   "id >= FirstIPMarker && id <= LastIPMarker"):
             self.assertIn(s, MODEL)
 
@@ -84,13 +89,13 @@ class OptionalPinnedPB(unittest.TestCase):
         start = factory.index("void PlayerbotFactory::ResetQuests()")
         end = factory.index("uint32 PlayerbotFactory::InitTalentsTree", start)
         reset = factory[start:end]
-        self.assertEqual(reset.count("ResetQuestsPreserveQuestIds.count(entry)"), 1)
+        self.assertEqual(reset.count("ResetQuestsPreserveMask.load(std::memory_order_acquire)"), 1)
         self.assertLess(reset.index("if (entry >= 66001 && entry <= 66018"),
                         reset.index("bot->RemoveRewardedQuest(entry);"))
         self.assertIn("bot->GetQuestStatus(entry) == QUEST_STATUS_REWARDED", reset)
         self.assertIn("bot->RemoveActiveQuest(entry, false);", reset)
         self.assertIn('GetOption<std::string>("Playerbots.ResetQuestsPreserveQuestIds", "")', cfg)
-        self.assertIn("ResetQuestsPreserveQuestIds.clear();", cfg)
+        self.assertIn("ResetQuestsPreserveMask.store(markerMask, std::memory_order_release);", cfg)
         self.assertRegex(conf, r"(?m)^Playerbots\.ResetQuestsPreserveQuestIds =\s*$")
 
 
