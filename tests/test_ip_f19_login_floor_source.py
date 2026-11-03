@@ -67,6 +67,7 @@ class Provenance(unittest.TestCase):
             "src/IndividualProgression.h",
             "src/IndividualProgressionF14CombatVisibilityPolicy.h",  # #47 pure/unwired research header only
             "src/IndividualProgressionF14LoginPolicy.h",
+            "src/IndividualProgressionF14RefreshPolicy.h",  # #53 pure/unwired event generation model
             "src/IndividualProgressionPlayer.cpp",
         ])
         # This one additional #47 header is a pure, default-OFF model only.
@@ -93,8 +94,17 @@ class Provenance(unittest.TestCase):
         self.assertEqual(
             git("diff", "--name-only", reviewed_f14_seam, "HEAD", "--", "src").splitlines(),
             ["src/IndividualProgression.cpp", "src/IndividualProgression.h",
+             "src/IndividualProgressionF14RefreshPolicy.h",
              "src/IndividualProgressionPlayer.cpp"],
-            "Pilot may edit only three named existing IP source files")
+            "Pilot may edit only three named existing IP source files plus one separate pure refresh model")
+        # This newly introduced refresh model is a pure policy type. A separate
+        # integration review must authorise any executable translation-unit include.
+        refresh_model = "IndividualProgressionF14RefreshPolicy.h"
+        for path in (ROOT / "src").rglob("*"):
+            if not path.is_file() or path.suffix not in {".cpp", ".h", ".hpp"} or path.name == refresh_model:
+                continue
+            self.assertNotIn(refresh_model, path.read_text(),
+                             f"Unreviewed F14 refresh model reference: {path.relative_to(ROOT)}")
         # Force-include through module build scripts would bypass an src-only
         # freeze while still compiling the model into live translation units.
         self.assertEqual(git("diff", "--name-only", frozen_ip46, "HEAD", "--",
