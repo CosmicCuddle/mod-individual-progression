@@ -93,7 +93,7 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 -}
 -
 -/**
-- * @brief Force the unit to stop attacking
+- * @brief Force the unit to stop attacking. This will clear UNIT_STATE_MELEE_ATTACKING,
 +    if (meleeAttack)
 +        SendMeleeAttackStart(victim);
 +
@@ -102,7 +102,7 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 +}
 +
 +/**
-+ * @brief Force the unit to stop attacking
++ * @brief Force the unit to stop attacking. This will clear UNIT_STATE_MELEE_ATTACKING,
   * Interrupt current spell, AI assistance, and call SendMeleeAttackStop() to the client
   */
 @@ -7265,10 +7268,12 @@
