@@ -215,6 +215,20 @@ class F14TransitionBridge(unittest.TestCase):
         self.assertEqual(creature.count("sScriptMgr->OnF14CreatureRespawned(this);"), 1)
         self.assertIn("UNITHOOK_ON_F14_CREATURE_RESPAWNED", script)
         self.assertIn("void OnF14CreatureRespawned(", mgr)
+        allcreature = (root / "Scripting/ScriptDefines/AllCreatureScript.h").read_text()
+        allcreaturecpp = (root / "Scripting/ScriptDefines/AllCreatureScript.cpp").read_text()
+        self.assertIn("virtual void OnCreatureAddWorld(Creature*", allcreature)
+        self.assertIn("virtual void OnCreatureRemoveWorld(Creature*", allcreature)
+        self.assertIn("script->OnCreatureAddWorld(creature);", allcreaturecpp)
+        self.assertIn("script->OnCreatureRemoveWorld(creature);", allcreaturecpp)
+        added = method(creature, "void Creature::AddToWorld()")
+        self.assertLess(added.index("Unit::AddToWorld();"),
+                        added.index("sScriptMgr->OnCreatureAddWorld(this);"))
+        self.assertLess(added.index("AIM_Initialize();"),
+                        added.index("sScriptMgr->OnCreatureAddWorld(this);"))
+        removed = method(creature, "void Creature::RemoveFromWorld()")
+        self.assertLess(removed.index("sScriptMgr->OnCreatureRemoveWorld(this);"),
+                        removed.index("Unit::RemoveFromWorld();"))
         self.assertNotIn("COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION", script)
 
 if __name__ == "__main__":
