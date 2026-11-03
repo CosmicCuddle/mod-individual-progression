@@ -24,6 +24,7 @@
 // API at compile time and keep building against an IP without it.
 #define COSMIC_IP_PAID_EXPANSION_API_VERSION 1
 #include <atomic>
+#include <cstdint>
 #include <regex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -457,6 +458,10 @@ public:
     bool HasF14VerifiedRandomBotIdentity(Player const* player);
     // WHO cache contains a GUID/race snapshot, not a safely dereferenceable Player.
     bool HasF14VerifiedRandomBotGuid(ObjectGuid const& guid);
+    // Nonzero only for a positively verified CURRENT bot login. Monotonic
+    // per-process incarnation identity, not a reusable character GUID.
+    // The map-thread participant collector must still verify map/rights.
+    std::uint64_t GetF14VerifiedRandomBotLoginEpoch(ObjectGuid const& guid);
     bool ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage);
     void checkHunterPetSpells(Player* player);
     void checkWarlockPetSpells(Player* player);
@@ -528,6 +533,10 @@ private:
     // F14 optional GroupSync containment; only positively verified headless
     // Blood Elf / Draenei RandomBots are present, refreshed on each login.
     std::unordered_map<uint32, bool> _f14VerifiedRandomBotGroupCache;
+    // Created only on a fresh, source-verified positive login, evicted
+    // on logout/unverified login; never a DB-backed or client-visible value.
+    std::unordered_map<uint32, std::uint64_t> _f14VerifiedRandomBotLoginEpoch;
+    std::uint64_t _f14NextRandomBotLoginEpoch = 0;
     std::shared_mutex _f14GroupCacheLock;
 };
 
