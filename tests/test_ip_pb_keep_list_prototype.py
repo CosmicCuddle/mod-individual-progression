@@ -38,15 +38,15 @@ class GuardedPrototype(unittest.TestCase):
         self.assertEqual(len(changed), 4)
         self.assertEqual(set(changed), FILES)
         self.assertEqual(PB_PATCH.count("diff --git "), 4)
-        self.assertEqual(PB_PATCH.count("@@ -"), 5)
+        self.assertEqual(PB_PATCH.count("@@ -"), 6)
         for path in FILES:
             self.assertIn(f"--- a/{path}\n+++ b/{path}", PB_PATCH)
 
     def test_only_rewarded_stage_markers_can_be_preserved(self):
         self.assertIn("entry >= 66001 && entry <= 66018", PB_PATCH)
         self.assertIn("bot->GetQuestStatus(entry) == QUEST_STATUS_REWARDED", PB_PATCH)
-        self.assertIn("sPlayerbotAIConfig.ResetQuestsPreserveMask.load(std::memory_order_acquire)", PB_PATCH)
-        self.assertIn("(uint32(1) << (entry - 66001))", PB_PATCH)
+        self.assertIn("uint32 const preserveMask = sPlayerbotAIConfig.ResetQuestsPreserveMask.load(std::memory_order_acquire);", PB_PATCH)
+        self.assertIn("(preserveMask & (uint32(1) << (entry - 66001)))", PB_PATCH)
         self.assertIn("+            continue;", PB_PATCH)
         self.assertIn(" bot->RemoveActiveQuest(entry, false);", PB_PATCH)
         self.assertIn(" bot->RemoveRewardedQuest(entry);", PB_PATCH)
@@ -90,6 +90,9 @@ class OptionalPinnedPB(unittest.TestCase):
         end = factory.index("uint32 PlayerbotFactory::InitTalentsTree", start)
         reset = factory[start:end]
         self.assertEqual(reset.count("ResetQuestsPreserveMask.load(std::memory_order_acquire)"), 1)
+        self.assertLess(reset.index("uint32 const preserveMask ="), reset.index("for (uint8 slot = 0;"))
+        self.assertLess(reset.index("for (uint8 slot = 0;"), reset.index("if (entry >= 66001 && entry <= 66018"))
+        self.assertIn("(preserveMask & (uint32(1) << (entry - 66001))) != 0", reset)
         self.assertLess(reset.index("if (entry >= 66001 && entry <= 66018"),
                         reset.index("bot->RemoveRewardedQuest(entry);"))
         self.assertIn("bot->GetQuestStatus(entry) == QUEST_STATUS_REWARDED", reset)
