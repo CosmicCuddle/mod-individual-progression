@@ -108,10 +108,13 @@ class F14TransitionBridge(unittest.TestCase):
 
     def test_corpse_after_state_promotion(self):
         corpse = PATCH.split("diff --git a/src/server/game/Entities/Creature/Creature.cpp", 1)[1]
-        self.assertIn("Unit::setDeathState(DeathState::Corpse, despawn);", corpse)
-        self.assertIn("sScriptMgr->OnF14CreatureCorpseReady(this);", corpse)
-        self.assertLess(corpse.index("Unit::setDeathState(DeathState::Corpse, despawn);"),
-                        corpse.index("sScriptMgr->OnF14CreatureCorpseReady(this);"))
+        patched = "\n".join(line[1:] for line in corpse.splitlines()
+                            if line.startswith((" ", "+")) and not line.startswith("+++"))
+        self.assertIn("Unit::setDeathState(DeathState::Corpse, despawn);", patched)
+        self.assertIn("sScriptMgr->OnF14CreatureCorpseReady(this);", patched)
+        self.assertLess(patched.index("Unit::setDeathState(DeathState::Corpse, despawn);"),
+                        patched.index("sScriptMgr->OnF14CreatureCorpseReady(this);"),
+                        "Corpse-ready event must occur AFTER the corpse state is committed")
 
     def test_verified_rndbot_only_and_force_immediate(self):
         cls = P.split("class IndividualProgressionF14AttackEventScript",1)[1].split("\n#endif",1)[0]
