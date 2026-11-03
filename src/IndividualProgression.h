@@ -455,6 +455,8 @@ public:
     void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
     void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
     bool HasF14VerifiedRandomBotIdentity(Player const* player);
+    // WHO cache contains a GUID/race snapshot, not a safely dereferenceable Player.
+    bool HasF14VerifiedRandomBotGuid(ObjectGuid const& guid);
     bool ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage);
     void checkHunterPetSpells(Player* player);
     void checkWarlockPetSpells(Player* player);
