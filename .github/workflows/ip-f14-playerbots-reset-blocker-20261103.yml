@@ -1,0 +1,73 @@
+# F14 Playerbots reset BLOCKER test. This does NOT fix or launch the server.
+# PINNED HISTORICAL SOURCE ONLY: Core/PB installed on owner's host not proved.
+name: F14 Playerbots ResetQuests negative contract (BLOCKED, NO HOST)
+
+on:
+  push:
+    branches:
+      - test/cs01-f14-playerbots-reset-blocker-20261103
+  pull_request:
+    paths:
+      - "tests/f14_playerbots_reset_blocker.cpp"
+      - "tests/test_ip_f14_playerbots_reset_blocker.py"
+      - "docs/F14_PLAYERBOTS_RESET_PRESERVATION_BLOCKER_2026-11-03.md"
+      - ".github/workflows/ip-f14-playerbots-reset-blocker-20261103.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  historical-pb-reset-negative:
+    name: historical PB reset blocker — ${{ matrix.compiler }} C++${{ matrix.standard }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [17, 20]
+    steps:
+      - name: Checkout exact proposed IP test child (full provenance)
+        uses: actions/checkout@v4
+        with:
+          path: ip
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout historical Playerbots source READ ONLY
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: pinned-playerbots
+          persist-credentials: false
+      - name: Verify locked source versions and unmodified reset
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C pinned-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          test -s pinned-playerbots/src/Bot/Factory/PlayerbotFactory.cpp
+          git -C ip merge-base --is-ancestor 26d5b7a1de30ad92a595aaf251fc14754cf54f32 HEAD
+          test -z "$(git -C ip diff --name-only 26d5b7a1de30ad92a595aaf251fc14754cf54f32 HEAD -- src conf sql data optional)"
+          test -z "$(git -C pinned-playerbots status --porcelain)"
+      - name: IP negative source checks and real historical PB path
+        env:
+          COSMIC_PINNED_PB_FACTORY: ${{ github.workspace }}/pinned-playerbots/src/Bot/Factory/PlayerbotFactory.cpp
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ip
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_playerbots_reset_blocker.py' -v
+      - name: Compile and execute pure NO-REPAIR trace (no Worldserver)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ip
+          "${{ matrix.compiler }}" -std=c++${{ matrix.standard }} -Wall -Wextra -Werror -pedantic \
+            -O2 tests/f14_playerbots_reset_blocker.cpp -o /tmp/f14-pb-reset-negative
+          /tmp/f14-pb-reset-negative | tee /tmp/f14-pb-reset-negative.txt
+          grep -Eq '^F14 Playerbots ResetQuests BLOCKER model: [0-9]+/[0-9]+ checks passed; no quest restoration or gameplay effect\.$' \
+            /tmp/f14-pb-reset-negative.txt
+      - name: Release boundary — not fixed, no host
+        run: |
+          echo "PASS: current Playerbots reset can erase earned 66001..66018 progression quests."
+          echo "This negative test documents the BLOCKED_CORE_PB_HOOK release blocker."
+          echo "NO Playerbots fork/source fix, Worldserver launch, data change or in-game acceptance."
