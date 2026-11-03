@@ -97,12 +97,29 @@ int main()
     check("creature removal invalidates map candidates",
           index.RemoveCreature(1001) && !index.IsComplete());
     check("removed creature stays ineligible", !index.CanConsiderCreature(1001));
+    // Regression: a supposedly complete map snapshot must NOT resurrect the
+    // old removed creature identity or transfer its former positive proof.
+    snap[0] = make(1001, 404);
+    check("stale complete snapshot cannot resurrect removed creature",
+          !index.ReplaceFromCompleteSnapshot(snap, 3, true));
+    check("rejected corpse incarnation leaves all targets fail visible",
+          !index.CanConsiderCreature(1002));
+    check("repeated removal does not claim a live indexed creature",
+          !index.RemoveCreature(1001));
+    check("repeated valid removal keeps future rebuild possible",
+          !index.IsPoisoned());
     snap[0] = make(2001, 0); // New creature incarnation, not a reused spawn identity.
     check("verified new incarnation restores safe unrelated candidates",
           index.ReplaceFromCompleteSnapshot(snap, 3, true));
     check("new incarnation does not inherit an old attacker",
           !index.CanConsiderCreature(2001));
     check("old incarnation is absent", !index.CanConsiderCreature(1001));
+    snap[0] = make(1001, 404);
+    check("retired creature still rejected after another successful audit",
+          !index.ReplaceFromCompleteSnapshot(snap, 3, true));
+    snap[0] = make(2001, 0);
+    check("valid new incarnation can recover after rejecting stale replay",
+          index.ReplaceFromCompleteSnapshot(snap, 3, true));
 
     snap[1] = snap[0];
     check("duplicate creature incarnations cannot create a complete index",
@@ -145,6 +162,25 @@ int main()
           zero.registryPermanentlyDisabled && invalid.IsPoisoned());
     check("missing epoch cannot be repaired by a stale snapshot",
           !invalid.ReplaceFromCompleteSnapshot(snap, 3, true));
+
+    I::Index retirementBounded;
+    check("retirement ledger can start from audited empty map",
+          retirementBounded.ReplaceFromCompleteSnapshot({}, 0, true));
+    for (std::uint64_t token = 1; token <= I::MaxRetiredCreatures; ++token)
+        retirementBounded.RemoveCreature(70000 + token);
+    check("64 retired creature incarnations fit tombstones",
+          !retirementBounded.IsPoisoned());
+    retirementBounded.RemoveCreature(80000);
+    check("65th distinct creature retirement permanently fails visible",
+          retirementBounded.IsPoisoned() && !retirementBounded.IsComplete());
+    check("retirement overflow cannot be reset by a claimed full audit",
+          !retirementBounded.ReplaceFromCompleteSnapshot(snap, 3, true));
+
+    I::Index invalidRetirement;
+    check("unknown zero creature identity poisons the index",
+          !invalidRetirement.RemoveCreature(0) && invalidRetirement.IsPoisoned());
+    check("zero removal identity cannot be repaired via stale snapshot",
+          !invalidRetirement.ReplaceFromCompleteSnapshot(snap, 3, true));
 
     std::cout << "F14 ACTOR INDEX " << checks - failures << "/" << checks
               << (failures ? " FAILED" : " PASSED")
