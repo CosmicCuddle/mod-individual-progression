@@ -21,6 +21,10 @@ The new **stop-only** fallback requests `oldVictim->UpdateObjectVisibility(true)
 **Still NOT solved:** Some disconnect/teardown or other Unit/missile/minion attack paths may omit a matching `AttackStop`; the old victim may itself leave the world first; map-thread ownership of `WorldSession` final cleanup and of `UpdateObjectVisibility(true)` on an old target is **not verified**. A forced refresh of *every* player's stopping creature target can also add performance cost if eventually enabled. Therefore **F14 stays FORCED OFF**, and a map-thread actor identity-expiry, safe deferred/owning-thread refresh, full rights proof and client acceptance tests remain mandatory before activation. Do not add a direct cross-thread refresh to `OnPlayerLogout` or prematurely define the full visibility contract.
 
 
+## Positively verified per-login epoch groundwork
+
+The existing positive F14 RandomBot login cache now also supplies a **nonzero, never-wrapped per-login epoch** via `GetF14VerifiedRandomBotLoginEpoch(ObjectGuid const&)`. It is refreshed only after positively verified login, removed on negative login/logout and never resurrected from an old GUID. The group-floor bool cache is independently retained if the optional epoch source exhausts, protecting earlier gameplay rules. **No combat event script consumes this epoch yet**; the existing stop-only conservative refresh, complete actor roster, cross-thread safety, unique creature incarnation and real client create/destroy events remain incomplete. Neither this new API nor the existing attack/corpse/respawn events define `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION`.
+
 ## Critical intentionally incomplete features
 
 - The new Core macro is **`COSMIC_F14_ATTACK_EVENT_HOOK_VERSION`**, NOT `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION`. The latter remains **undefined** in all three patches. The feature option `IndividualProgression.F14.ExperimentalRndbotPlayerVisibility` is **forced OFF**, even if a configuration attempted to switch it on.
