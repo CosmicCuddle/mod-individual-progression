@@ -38,7 +38,7 @@ namespace
     constexpr uint8 PaidExpansionBitTbc = 0x1;
     constexpr uint8 PaidExpansionBitWrath = 0x2;
 
-    // Only purchase slots are mirrored in the cache.
+    // Purchase bits are TBC/Wrath only; the cached receipt mirrors all slots.
     uint8 BitForSetting(uint32 index)
     {
         switch (index)
@@ -218,13 +218,15 @@ void IndividualProgression::SetPaidExpansionFlag(Player* player, uint32 index, u
     player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);
 
     uint8 const bit = BitForSetting(index);
-    if (!bit)
-        return;
     std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
     uint32 const guid = player->GetGUID().GetCounter();
     auto const receipt = _paidExpansionLedgers.find(guid);
-    if (receipt != _paidExpansionLedgers.end())
+    // The evaluation marker (slot 2) is not a purchase bit, but MUST
+    // stay current in the ledger that PurchaseExpansion later writes whole.
+    if (receipt != _paidExpansionLedgers.end() && index < ReceiptPolicy::Slots)
         receipt->second.fields[index] = value;
+    if (!bit)
+        return;
     uint8& bits = _paidExpansionFlags[guid];
     if (value != FlagNone)
         bits |= bit;
