@@ -2,7 +2,7 @@
 
 **Owner:** CosmicCuddle  
 **Source-only test branch:** `test/cs01-f14-playerbots-reset-blocker-20261103`, stacked on Individual Progression DRAFT #46, exact source parent `26d5b7a1de30ad92a595aaf251fc14754cf54f32`.  
-**Status:** `BLOCKED_CORE_PB_HOOK`; regression/negative tests only. No hook, Playerbots edit, fork, game feature, migration, live data action or deployment. This file is **not** permission to change an installed bot.
+**Status:** `BLOCKED_CORE_PB_HOOK`; regression/negative tests only. This is not a working preservation fix. The exact pinned `PlayerbotFactory::ResetQuests` behaviour is documented below. No hook, Playerbots edit, fork, game feature, migration, live data action or deployment. This file is **not** permission to change an installed bot.
 
 ## Confirmed pinned source chain
 
