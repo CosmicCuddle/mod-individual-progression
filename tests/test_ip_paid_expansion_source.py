@@ -625,6 +625,10 @@ class StrictReceiptRuntime(unittest.TestCase):
         # CS02 X1: forbid rewriting cached slot 2 (or any cache receipt)
         # before staging; a shared_lock must never cover such a write.
         self.assertEqual(purchase.count("it->second"), 1)
+        # CS02 X1b/X1c: freeze the entire shared-lock cache read.
+        # Equivalent alias or at(guid) writes must not be introduced here.
+        self.assertIn("    {\n        std::shared_lock<std::shared_mutex> lock(_paidExpansionLock);\n        auto const it = _paidExpansionLedgers.find(player->GetGUID().GetCounter());\n        if (it == _paidExpansionLedgers.end())\n            return PurchaseResult::EntryUnavailable;\n        stagedLedger = it->second;\n    }\n", purchase)
+        self.assertEqual(purchase.count("_paidExpansionLedgers"), 3)
 
         self.assertNotIn("uint32 const moneySlot", purchase)
         self.assertNotIn("uint32 const timeSlot", purchase)
