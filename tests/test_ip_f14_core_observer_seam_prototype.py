@@ -57,8 +57,36 @@ class PrototypeBoundary(unittest.TestCase):
         self.assertIn("!script->OnWorldObjectCanBeSeenByPlayer(observer, target)", PATCH)
         self.assertIn("WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER", PATCH)
         self.assertIn("bool ScriptMgr::OnWorldObjectCanBeSeenByPlayer(", PATCH)
-        self.assertNotIn("+        return false;", PATCH)
-        self.assertNotIn("+    return false;", PATCH)
+        # An explicit veto may legitimately return false, but the new hook
+        # must default to ALLOW and must not add an unconditional denial.
+        script_section = PATCH.split(
+            "diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h", 1
+        )[1].split("diff --git a/", 1)[0]
+        self.assertIn("return true; }", script_section)
+        self.assertNotIn("+    return false;", script_section)
+        self.assertNotIn("+        return false;", script_section)
+        dispatcher_section = PATCH.split(
+            "diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp", 1
+        )[1].split("diff --git a/", 1)[0]
+        self.assertIn(
+            "!script->OnWorldObjectCanBeSeenByPlayer(observer, target)",
+            dispatcher_section,
+        )
+        self.assertNotIn("+    return false;", dispatcher_section)
+        # Both newly added denial returns are protected by the hook result;
+        # they must never be converted into a blanket visibility denial.
+        self.assertEqual(
+            PATCH.count("+        return false;"), 2,
+            "expected one guarded veto in Object.cpp and one in Player.cpp",
+        )
+        self.assertIn(
+            "!sScriptMgr->OnWorldObjectCanBeSeenByPlayer(observer, obj)",
+            PATCH,
+        )
+        self.assertIn(
+            "!sScriptMgr->OnWorldObjectCanBeSeenByPlayer(u, this)",
+            PATCH,
+        )
 
     def test_visibility_checks_before_normal_always_visible_bypass(self):
         self.assertIn("if (CanNeverSee(obj))", PATCH)
