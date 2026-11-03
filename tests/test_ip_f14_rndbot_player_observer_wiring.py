@@ -33,7 +33,7 @@ class F14RuntimePilot(unittest.TestCase):
     def test_default_off_and_missing_dependencies_force_off(self):
         self.assertEqual(len(re.findall(r"^" + re.escape(KEY) + r"\s*=\s*0\s*$",
                                         CONF, re.M)), 1)
-        self.assertIn("bool f14ExperimentalRndbotPlayerVisibility = false;", HEADER)
+        self.assertIn("std::atomic<bool> f14ExperimentalRndbotPlayerVisibility{false};", HEADER)
         self.assertIn('"' + KEY + '", false)', CORE)
         self.assertIn("#if !defined(COSMIC_F14_OBSERVER_HOOK_VERSION)", CORE)
         self.assertIn("f14ExperimentalRndbotPlayerVisibility = false;", CORE)
