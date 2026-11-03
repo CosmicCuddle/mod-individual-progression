@@ -6,6 +6,17 @@
 **Authority:** CosmicCuddle's approved gameplay rules; coordination Issues are the two-way decision log.  
 **Operating rule:** Update this register for every proposed or implemented IP customization. Review it and actual owner source before upstream integration. Keep retired entries, and distinguish requested behaviour, committed source, passing builds, owner-reported game tests, verified live binaries and merged releases.
 
+## IP-PB-RESET-PROTOTYPE-20261103 — Playerbots earned-marker keep-list candidate (NOT DEPLOYED)
+
+| Field | Record |
+| --- | --- |
+| Intent / owner | Owner CosmicCuddle; propose opt-in preservation of **already rewarded** quest marker IDs 66001–66018 from `PlayerbotFactory::ResetQuests` without granting stages, changing unrelated quests or altering normal stock behavior when unset. **Not approved for activation**; only test the candidate on disposable historical source. |
+| Component / source | Historical external Playerbots `mod-playerbots/mod-playerbots@e88cc409`, Core `Grimfeather@8daffdabe`, IP #46 `26d5b7a1`. Branch `research/cs01-pb-reset-marker-keep-list-20261103` stacked on IP #48 negative test; no PB repository/fork edits. |
+| Affected paths | Under IP dev tests ONLY: `tests/pb_patches/reset_earned_ip_markers_prototype.patch` (would touch PB `PlayerbotAIConfig.h`, `PlayerbotAIConfig.cpp`, `Bot/Factory/PlayerbotFactory.cpp`, `conf/playerbots.conf.dist` **if approved in future**); standalone policy C++/source Python tests; isolated four-compiler CI workflow; design memo. No IP `src/`, config, SQL, DBC, client or production host changes. |
+| Config / SQL / dependencies | Proposed `Playerbots.ResetQuestsPreserveQuestIds` **default empty**; not an installed key. Uses existing PB `LoadSet` parsing and a startup config member. Runtime guard additionally demands `QUEST_STATUS_REWARDED` and exact ID range. Actual owner PB/Core version and quest-template flags are unknown. |
+| Risks / cross-module | Scope may affect Altbots with already rewarded marker quests if enabled; owner has not approved that scope. Other PB quest reset paths and saved DB status remain unverified. An empty list preserves stock behavior, including existing stage-loss bug. F14 visibility owner policy (verified rndbots only) remains separate; PB/Core hook requirement still blocks F14 stage-changing rollout. |
+| Tests / status / rollback | `git apply --check` on exact four PB blobs + CI-only patch to disposable clone + source tests and pure GCC/Clang C++17/20 model, no Wordserver link or game test yet. Discard proposal branch to revert (zero host changes). Later real PB modification needs explicit owner approval, backups, build, gameplay tests and rollback. |
+
 ## IP-F14-RESET-NEGATIVE-20261103 — Playerbots progression-marker reset release blocker (DRAFT, TEST ONLY)
 
 | Field | Record |
