@@ -68,44 +68,41 @@ diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/S
 diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
 --- a/src/server/game/Entities/Unit/Unit.cpp
 +++ b/src/server/game/Entities/Unit/Unit.cpp
-@@ -7163,8 +7163,10 @@
+@@ -7163,15 +7163,22 @@
      }
  
 -    if (m_attacking)
 -        m_attacking->_removeAttacker(this);
 -
 -    m_attacking = victim;
-+    // Capture previous victim for the event after the attack target changes.
+-    m_attacking->_addAttacker(this);
+-
+-    // Set our target
+-    SetTarget(victim->GetGUID());
+-
+-    if (meleeAttack)
+-        AddUnitState(UNIT_STATE_MELEE_ATTACKING);
++    // Capture the previous victim only for this immediate, synchronous
++    // notification. Never retain this pointer beyond Unit::Attack.
 +    Unit* const f14PreviousVictim = m_attacking;
 +    if (m_attacking)
 +        m_attacking->_removeAttacker(this);
 +
 +    m_attacking = victim;
-     m_attacking->_addAttacker(this);
- 
-@@ -7227,12 +7229,13 @@
-         setAttackTimer(OFF_ATTACK, std::max(getAttackTimer(OFF_ATTACK), getAttackTimer(BASE_ATTACK) + int32(CalculatePct(GetFloatValue(UNIT_FIELD_BASEATTACKTIME), 50))));
- 
--    if (meleeAttack)
--        SendMeleeAttackStart(victim);
--
--    return true;
--}
--
--/**
-- * @brief Force the unit to stop attacking. This will clear UNIT_STATE_MELEE_ATTACKING,
++    m_attacking->_addAttacker(this);
++
++    // Set our target
++    SetTarget(victim->GetGUID());
++
 +    if (meleeAttack)
-+        SendMeleeAttackStart(victim);
++        AddUnitState(UNIT_STATE_MELEE_ATTACKING);
 +
++    // Notify immediately while both Unit targets remain valid, before AI,
++    // scripts, assistance and other combat effects can mutate them.
 +    sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);
-+    return true;
-+}
-+
-+/**
-+ * @brief Force the unit to stop attacking. This will clear UNIT_STATE_MELEE_ATTACKING,
-  * Interrupt current spell, AI assistance, and call SendMeleeAttackStop() to the client
-  */
-@@ -7265,10 +7268,12 @@
+ 
+     Unit* owner = GetCharmerOrOwner();
+@@ -7265,10 +7272,12 @@
      }
  
 -    SendMeleeAttackStop(victim);
