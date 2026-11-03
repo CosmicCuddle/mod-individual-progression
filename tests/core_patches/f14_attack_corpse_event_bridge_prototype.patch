@@ -1,0 +1,142 @@
+diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.h b/src/server/game/Scripting/ScriptDefines/UnitScript.h
+--- a/src/server/game/Scripting/ScriptDefines/UnitScript.h
++++ b/src/server/game/Scripting/ScriptDefines/UnitScript.h
+@@ -44,9 +44,15 @@
+     UNITHOOK_ON_UNIT_EXIT_COMBAT,
+     UNITHOOK_ON_UNIT_DEATH,
+-    UNITHOOK_ON_UNIT_SET_SHAPESHIFT_FORM,
+-    UNITHOOK_END
+-};
+-
+-enum ReputationRank : uint8;
++    UNITHOOK_ON_UNIT_SET_SHAPESHIFT_FORM,
++    UNITHOOK_ON_F14_ATTACK_TARGET_TRANSITION,
++    UNITHOOK_ON_F14_CREATURE_CORPSE_READY,
++    UNITHOOK_END
++};
++
++// F14 attack/death event observation ONLY, NOT a full visibility-refresh API.
++#define COSMIC_F14_ATTACK_EVENT_HOOK_VERSION 1
++
++enum ReputationRank : uint8;
++class Creature;
+ class ByteBuffer;
+ struct BuildValuesCachePosPointers;
+@@ -110,5 +116,7 @@
+     virtual void OnUnitExitCombat(Unit* /*unit*/) { }
+     virtual void OnUnitDeath(Unit* /*unit*/, Unit* /*killer*/) { }
+-    virtual void OnUnitSetShapeshiftForm(Unit* /*unit*/, uint8 /*form*/) { }
++    virtual void OnUnitSetShapeshiftForm(Unit* /*unit*/, uint8 /*form*/) { }
++    virtual void OnF14AttackTargetTransition(Unit* /*attacker*/, Unit* /*oldVictim*/, Unit* /*newVictim*/) { }
++    virtual void OnF14CreatureCorpseReady(Creature* /*creature*/) { }
+ };
+ 
+diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp b/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
+--- a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
++++ b/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
+@@ -135,5 +135,17 @@
+ }
+ 
+-void ScriptMgr::OnUnitSetShapeshiftForm(Unit* unit, uint8 form)
++void ScriptMgr::OnF14AttackTargetTransition(Unit* attacker, Unit* oldVictim, Unit* newVictim)
++{
++    CALL_ENABLED_HOOKS(UnitScript, UNITHOOK_ON_F14_ATTACK_TARGET_TRANSITION,
++        script->OnF14AttackTargetTransition(attacker, oldVictim, newVictim));
++}
++
++void ScriptMgr::OnF14CreatureCorpseReady(Creature* creature)
++{
++    CALL_ENABLED_HOOKS(UnitScript, UNITHOOK_ON_F14_CREATURE_CORPSE_READY,
++        script->OnF14CreatureCorpseReady(creature));
++}
++
++void ScriptMgr::OnUnitSetShapeshiftForm(Unit* unit, uint8 form)
+ {
+     CALL_ENABLED_HOOKS(UnitScript, UNITHOOK_ON_UNIT_SET_SHAPESHIFT_FORM, script->OnUnitSetShapeshiftForm(unit, form));
+diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
+--- a/src/server/game/Scripting/ScriptMgr.h
++++ b/src/server/game/Scripting/ScriptMgr.h
+@@ -581,5 +581,7 @@
+     void OnUnitEnterCombat(Unit* unit, Unit* victim);
+     void OnUnitExitCombat(Unit* unit);
+-    void OnUnitDeath(Unit* unit, Unit* killer);
++    void OnUnitDeath(Unit* unit, Unit* killer);
++    void OnF14AttackTargetTransition(Unit* attacker, Unit* oldVictim, Unit* newVictim);
++    void OnF14CreatureCorpseReady(Creature* creature);
+     void OnUnitSetShapeshiftForm(Unit* unit, uint8 form);
+ 
+diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
+--- a/src/server/game/Entities/Unit/Unit.cpp
++++ b/src/server/game/Entities/Unit/Unit.cpp
+@@ -7163,8 +7163,10 @@
+     }
+ 
+-    if (m_attacking)
+-        m_attacking->_removeAttacker(this);
+-
+-    m_attacking = victim;
++    // Capture previous victim for the event after the attack target changes.
++    Unit* const f14PreviousVictim = m_attacking;
++    if (m_attacking)
++        m_attacking->_removeAttacker(this);
++
++    m_attacking = victim;
+     m_attacking->_addAttacker(this);
+ 
+@@ -7227,12 +7229,13 @@
+         setAttackTimer(OFF_ATTACK, std::max(getAttackTimer(OFF_ATTACK), getAttackTimer(BASE_ATTACK) + int32(CalculatePct(GetFloatValue(UNIT_FIELD_BASEATTACKTIME), 50))));
+ 
+-    if (meleeAttack)
+-        SendMeleeAttackStart(victim);
+-
+-    return true;
+-}
+-
+-/**
+- * @brief Force the unit to stop attacking
++    if (meleeAttack)
++        SendMeleeAttackStart(victim);
++
++    sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);
++    return true;
++}
++
++/**
++ * @brief Force the unit to stop attacking
+  * Interrupt current spell, AI assistance, and call SendMeleeAttackStop() to the client
+  */
+@@ -7265,10 +7268,12 @@
+     }
+ 
+-    SendMeleeAttackStop(victim);
+-
+-    return true;
+-}
+-
+-void Unit::CombatStop(
++    SendMeleeAttackStop(victim);
++
++    // Synchronous event after unlink; consumers must not retain Unit pointers.
++    sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);
++    return true;
++}
++
++void Unit::CombatStop(
+ {
+     if (includingCast && IsNonMeleeSpellCast(false))
+diff --git a/src/server/game/Entities/Creature/Creature.cpp b/src/server/game/Entities/Creature/Creature.cpp
+--- a/src/server/game/Entities/Creature/Creature.cpp
++++ b/src/server/game/Entities/Creature/Creature.cpp
+@@ -2006,7 +2006,9 @@
+             GetMotionMaster()->MoveFall(0, true);
+ 
+-        Unit::setDeathState(DeathState::Corpse, despawn);
+-    }
+-    else if (state == DeathState::JustRespawned)
++        Unit::setDeathState(DeathState::Corpse, despawn);
++        // Corpse-ready event occurs after all transition-to-corpse updates.
++        sScriptMgr->OnF14CreatureCorpseReady(this);
++    }
++    else if (state == DeathState::JustRespawned)
+     {
+         SetFullHealth();
