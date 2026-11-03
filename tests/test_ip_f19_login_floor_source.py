@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PARENT_20 = "5fe0f9105d55d249aa55a25510d3fa23e3d84148"
 BASE_IP_30 = "817ec290b5a82306bec76cdfcf32fc86c58c5da2"  # reviewed paid + warning child, exact SHA
 REVIEWED_IP_32 = "6c180c0a78cdadcf6c79e8e627f2cc2e91e0fdae"  # frozen parent of paid-TBC #33
+REVIEWED_IP_43 = "8d78f2bda41e618ed51d2892e2588d9c891d89ac"  # original paid receipt parent before F14 group pilot
 PLAYER = (ROOT / "src/IndividualProgressionPlayer.cpp").read_text()
 POLICY = (ROOT / "src/IndividualProgressionF14LoginPolicy.h").read_text()
 LOGIN_ANCHOR = "            // F14 partial safeguard, OFF by default."
@@ -48,7 +49,7 @@ class Provenance(unittest.TestCase):
         subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", REVIEWED_IP_32, "HEAD"], check=True)
         reviewed = sorted(git("diff", "--name-only", BASE_IP_30, REVIEWED_IP_32, "--", "src").split())
         self.assertEqual(reviewed, ["src/IndividualProgressionF14LoginPolicy.h", "src/IndividualProgressionPlayer.cpp"])
-        changed_since_review = sorted(git("diff", "--name-only", REVIEWED_IP_32, "HEAD", "--", "src").split())
+        changed_since_review = sorted(git("diff", "--name-only", REVIEWED_IP_32, REVIEWED_IP_43, "--", "src").split())
         # The reviewed paid-era #32 delta remains frozen, and receipt takeover
         # deliberately adds ONLY the strict ledger header plus its owning API.
         # Do not disable this F19 provenance assertion when composing children.
@@ -58,9 +59,18 @@ class Provenance(unittest.TestCase):
             "src/IndividualProgressionExpansionPolicy.h",
             "src/IndividualProgressionReceiptPolicy.h",
         ])
+        # The new standalone F14 group-safety child may modify ONLY these
+        # four source paths; do not silently expand the paid/F19 baseline.
+        f14_delta = sorted(git("diff", "--name-only", REVIEWED_IP_43, "HEAD", "--", "src").split())
+        self.assertEqual(f14_delta, [
+            "src/IndividualProgression.cpp",
+            "src/IndividualProgression.h",
+            "src/IndividualProgressionF14LoginPolicy.h",
+            "src/IndividualProgressionPlayer.cpp",
+        ])
         # The F19 login writer and pure policy must be byte-identical to the
         # frozen reviewed #32; paid-TBC changes cannot silently alter either.
-        self.assertEqual(git("diff", "--name-only", REVIEWED_IP_32, "HEAD", "--",
+        self.assertEqual(git("diff", "--name-only", REVIEWED_IP_32, REVIEWED_IP_43, "--",
                              "src/IndividualProgressionF14LoginPolicy.h",
                              "src/IndividualProgressionPlayer.cpp").strip(), "")
         self.assertEqual(git("diff", "--name-only", BASE_IP_30, "HEAD", "--",
@@ -70,6 +80,16 @@ class Provenance(unittest.TestCase):
         # protected F19/GM setting must remain byte-identical to BASE_IP_30.
         original = git("show", BASE_IP_30 + ":conf/individualProgression.conf.dist")
         current = (ROOT / "conf/individualProgression.conf.dist").read_text()
+        # Remove ONLY the explicitly documented default-OFF F14 group pilot
+        # subsection for old #30 config provenance; separate F14 tests pin it.
+        first = "# IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor"
+        last = "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0"
+        self.assertEqual(current.count(first), 1)
+        self.assertEqual(current.count(last), 1)
+        start = current.index(first)
+        end = current.index(last, start) + len(last)
+        self.assertEqual(current[end:end + 2], "\\n\\n".replace("\\\\n", "\\n"))
+        current = current[:start] + current[end + 2:]
         old = ("#            A TBC purchase grants stage 8 (start of TBC). A Wrath purchase\n"
                "#            grants no stage; an unpaid stage 13 counts as TBC (level 70 cap,\n"
                "#            no Northrend). Applies to normal accounts only; bot and excluded")
@@ -120,7 +140,7 @@ class Wiring(unittest.TestCase):
         self.assertNotIn("Do not call the mutable currentBots-backed predicate", PLAYER)
 
     def test_diff_vs_parent_is_only_the_documented_lines(self):
-        diff = git("diff", "-U0", BASE_IP_30, "--", "src/IndividualProgressionPlayer.cpp")
+        diff = git("diff", "-U0", BASE_IP_30, REVIEWED_IP_43, "--", "src/IndividualProgressionPlayer.cpp")
         removed = [l[1:].strip() for l in diff.splitlines() if l.startswith("-") and not l.startswith("---")]
         self.assertEqual(removed, [
             "savedStage <= IndividualProgressionGroupPolicy::LastSupportedStage)",

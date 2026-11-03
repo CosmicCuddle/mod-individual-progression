@@ -49,8 +49,47 @@ def without_f19_login_floor(src: str) -> str:
     return src
 
 
-PLAYER = without_f19_login_floor((ROOT / "src/IndividualProgressionPlayer.cpp").read_text())
+# Reconstruct only the new F14 group-pilot additions so the reviewed C3
+# and F19 parent contracts remain strict over ALL pre-existing source.
+# Each unique anchor is required: drift must FAIL, never silently skip.
+def without_f14_group_floor_player(src: str) -> str:
+    def strip_to(start: str, end: str) -> None:
+        nonlocal src
+        assert src.count(start) == 1, f"F14 start not unique: {start!r}"
+        i = src.index(start)
+        assert src.find(end, i) >= 0, f"F14 endpoint missing: {end!r}"
+        src = src[:i] + src[src.index(end, i):]
+
+    strip_to("        // F14 optional group-sync containment. Refresh the GUID on every\\n".replace("\\n", "\n"),
+             "        if (!sIndividualProgression->isNormalAccount(player)) // bot or exluded account")
+    strip_to("    // Release only the F14 group identity cache; paid entitlement cache is\\n".replace("\\n", "\n"),
+             "    void OnPlayerGetTrainerSpellState(")
+    strip_to("        // F14 pilot: leave historic OFF grouping semantics unchanged while\\n".replace("\\n", "\n"),
+             "        if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState)")
+    return src
+
+
+PLAYER = without_f14_group_floor_player(without_f19_login_floor(
+    (ROOT / "src/IndividualProgressionPlayer.cpp").read_text()))
 CORE = (ROOT / "src/IndividualProgression.cpp").read_text()
+
+
+def without_f14_group_floor_core_config(src: str) -> str:
+    """Restore exactly the #13 config+missing-header block for frozen checks."""
+    additions = (
+        '        sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = sConfigMgr->GetOption<bool>(\\n'
+        '            "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor", false);\\n',
+        '        if (sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor)\\n'
+        '        {\\n'
+        '            LOG_ERROR("module", "IndividualProgression F14 verified RandomBot group floor requires Playerbots API header; forcing OFF");\\n'
+        '            sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = false;\\n'
+        '        }\\n',
+    )
+    for piece in additions:
+        piece = piece.replace("\\\\n", "\\n")
+        assert src.count(piece) == 1, "F14 config addition missing or modified"
+        src = src.replace(piece, "")
+    return src
 HEADER = (ROOT / "src/IndividualProgression.h").read_text()
 CONF = (ROOT / "conf/individualProgression.conf.dist").read_text()
 
@@ -185,7 +224,7 @@ class PortedFromSource13(unittest.TestCase):
     def test_config_read_and_header_member_from_13(self):
         src13 = git_show(SOURCE_13, "src/IndividualProgression.cpp")
         block = re.search(r'        sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = .*?#endif\n', src13, re.S).group(0)
-        self.assertEqual(CORE.count(block), 1)
+        self.assertEqual(without_f14_group_floor_core_config(CORE).count(block), 1)
         self.assertIn("enforceGroupRules, f14PreserveVerifiedRandomBotStageOnLogin, EnableSetRepCommand", HEADER)
 
     def test_conf_block_from_13(self):

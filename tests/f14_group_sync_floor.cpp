@@ -7,12 +7,14 @@ namespace Policy = IndividualProgressionF14LoginPolicy;
 static_assert(Policy::ExpansionRaceFloor(1) == 8, "new TBC-race floor");
 static_assert(Policy::ExpansionRaceFloor(60) == 8, "Vanilla-level TBC-race floor");
 static_assert(Policy::ExpansionRaceFloor(70) == 8, "TBC-level floor");
-static_assert(Policy::ExpansionRaceFloor(71) == 13, "WotLK-level floor");
+static_assert(Policy::ExpansionRaceFloor(71) == 8, "no unapproved 71+ Wrath group floor");
 static_assert(Policy::SkipVerifiedGroupDowngrade(8, 7, 60), "no Vanilla downgrade");
 static_assert(!Policy::SkipVerifiedGroupDowngrade(8, 8, 60), "same-era unchanged");
 static_assert(!Policy::SkipVerifiedGroupDowngrade(9, 8, 60), "TBC resync allowed");
 static_assert(!Policy::SkipVerifiedGroupDowngrade(0, 7, 60), "no invented rescue of reset");
-static_assert(Policy::SkipVerifiedGroupDowngrade(13, 8, 71), "71+ Wrath floor");
+static_assert(!Policy::SkipVerifiedGroupDowngrade(13, 8, 71), "Wrath-to-TBC resync still allowed");
+static_assert(Policy::SkipVerifiedGroupDowngrade(8, 0, 71), "71+ stage8 cannot lose earned TBC");
+static_assert(Policy::SkipVerifiedGroupDowngrade(12, 7, 80), "80 stage12 cannot downgrade to Vanilla");
 static_assert(!Policy::SkipVerifiedGroupDowngrade(13, 13, 71), "Wrath resync allowed");
 static_assert(!Policy::SkipVerifiedGroupDowngrade(12, 8, 71), "no bogus rescue of old stage");
 int main()
@@ -27,11 +29,10 @@ int main()
     };
     for (std::uint32_t level : {std::uint32_t{1}, std::uint32_t{60}, std::uint32_t{70}, std::uint32_t{71}, std::uint32_t{80}})
     {
-        std::uint8_t const floor = Policy::ExpansionRaceFloor(level);
         for (std::uint8_t current = 0; current <= 18; ++current)
             for (std::uint8_t target = 0; target <= 18; ++target)
                 test(Policy::SkipVerifiedGroupDowngrade(current, target, level),
-                     current >= floor && target < floor);
+                     current >= 8 && target <= 7); // independent fixed TBC boundary
     }
     std::cout << "F14 GROUP FLOOR MODEL " << (checks - failed) << "/" << checks
               << " passed (identity and game runtime not modeled)\n";

@@ -449,15 +449,15 @@ rewrite existing paid rows or charge any character to test this.
 ## F14-RNDBOT-GROUP-FLOOR (3 Nov 2026) — skip-only expansion floor at group sync
 **Owner:** CosmicCuddle. **Module:** Individual Progression (source only; depends
 on Playerbots positive identity at WorldScript login). **State:** isolated DRAFT,
-default OFF, NOT merged, compiled to an owner binary, gameplay-tested or live.
+default OFF, NOT merged, NOT compiled into an owner binary, NOT gameplay-tested and NOT live.
 
 **Intended behavior:** with the independent
 `IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 1` opt-in
 AND `EnforceGroupRules = 0`, only a positively identified HEADLESS RandomBot
 of race 10 (Blood Elf) or 11 (Draenei), on a configured bot account, with
-an **already rewarded** raw stage at least its minimum (8 through level 70,
-13 at level 71+) skips a *destructive* group-accept or post-join
-`ForceUpdateProgressionState` write whose requested stage is below that floor.
+an **already rewarded** raw stage 8+ at any level skips a *destructive*
+group-accept or post-join
+`ForceUpdateProgressionState` write whose requested stage is below stage 8.
 No new stage is given; a same-era transfer still occurs. When OFF, the
 existing group path is retained including legacy leader stage-0 handling.
 When `EnforceGroupRules = 1`, the existing per-era grouping policy applies.
@@ -479,6 +479,9 @@ DBC, other module files or client patch.
 login; this branch neither restores it nor raises it. It does not hide a bot
 from Vanilla observer visibility or /who, prevent cross-era grouping, restore
 earned stages 9–18, or prove PB identity across unusual login lifecycles.
+This pilot intentionally does not enforce a Wrath group minimum stage 13
+at level 71+; that separate policy needs owner approval. Stage 13+ may
+sync to stage 8 under current group-enforcement OFF behavior.
 Cache identity is refreshed on login and erased at logout only; any
 callback/order deviations or PB respawns require live test. With group rules
 OFF, a verified stage-8 bot may still belong to a Vanilla group even when

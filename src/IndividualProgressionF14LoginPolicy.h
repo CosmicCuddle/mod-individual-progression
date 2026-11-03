@@ -26,13 +26,14 @@ namespace IndividualProgressionF14LoginPolicy
         return 13;
     }
 
-    // F14 group-sync containment: Vanilla must never be the downgrade
-    // destination of an already-stage8+ verified TBC-race RandomBot.
-    // The level-71+ cohort keeps its existing WotLK minimum stage 13.
-    // These are pure rules, with identity checked separately at login.
-    constexpr std::uint8_t ExpansionRaceFloor(std::uint32_t level)
+    // F14 group-sync containment: a verified TBC-race RandomBot with an
+    // already earned stage 8+ must never be downgraded into Vanilla at ANY
+    // level, including immediately after 70->71. No separate Wrath-stage
+    // group floor is enforced here: that awaits an owner gameplay decision.
+    // Identity is checked separately on the login thread.
+    constexpr std::uint8_t ExpansionRaceFloor(std::uint32_t /*level*/)
     {
-        return level > 70 ? 13 : 8;
+        return 8;
     }
 
     constexpr bool SkipVerifiedGroupDowngrade(std::uint8_t currentStage,
