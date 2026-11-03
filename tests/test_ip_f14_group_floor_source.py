@@ -83,7 +83,7 @@ class NoDestructiveSync(unittest.TestCase):
         self.assertIn("if (enforceGroupRules)", sync)
         pos = sync.index("ShouldSkipF14VerifiedRandomBotGroupDowngrade(member, permittedState)")
         self.assertLess(pos, sync.index("ForceUpdateProgressionState(member,"))
-        self.assertRegex(sync[pos:], r"if \(ShouldSkipF14VerifiedRandomBotGroupDowngrade\(member, permittedState\)\)\s+continue;")
+        self.assertRegex(sync, r"if \(ShouldSkipF14VerifiedRandomBotGroupDowngrade\(member, permittedState\)\)\s+continue;")
         accepted = function(PLAYER, "bool OnPlayerCanGroupAccept(")
         self.assertIn("if (sIndividualProgression->enforceGroupRules)", accepted)
         self.assertIn("!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState &&", accepted)
