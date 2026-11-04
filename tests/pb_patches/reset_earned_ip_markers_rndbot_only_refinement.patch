@@ -12,8 +12,7 @@ diff --git a/src/Bot/Factory/PlayerbotFactory.cpp b/src/Bot/Factory/PlayerbotFac
      for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
      {
          bot->SetQuestSlot(slot, 0);
-@@ -1703,7 +1707,7 @@
- 
+@@ -1704,6 +1708,6 @@
          // Preserve only pre-existing rewarded markers explicitly selected
          // at the start of this reset. Other quests still reset normally.
 -        if (entry >= 66001 && entry <= 66018 &&
