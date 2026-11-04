@@ -223,19 +223,19 @@ jobs:
           grep -Fq 'WORLDOBJECTHOOK_ON_F14_VISIBILITY_REEVALUATION_PROCESSED' acore/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
           ! grep -Rq 'define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION' acore/src/server/game
           git -C acore diff --name-only | sort > /tmp/actual-core-pass-files
-          printf '%s\\n' \\
-            src/server/game/Scripting/ScriptMgr.h \\
-            src/server/game/Scripting/ScriptDefines/WorldObjectScript.h \\
-            src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp \\
-            src/server/game/Scripting/ScriptDefines/UnitScript.h \\
-            src/server/game/Scripting/ScriptDefines/UnitScript.cpp \\
-            src/server/game/Entities/Object/Object.cpp \\
-            src/server/game/Entities/Player/Player.cpp \\
-            src/server/game/Entities/Player/Player.h \\
-            src/server/game/Entities/Player/PlayerSettings.cpp \\
-            src/server/game/Entities/Player/PlayerUpdates.cpp \\
-            src/server/game/Entities/Unit/Unit.cpp \\
-            src/server/game/Entities/Creature/Creature.cpp \\
+          printf '%s\n' \
+            src/server/game/Scripting/ScriptMgr.h \
+            src/server/game/Scripting/ScriptDefines/WorldObjectScript.h \
+            src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp \
+            src/server/game/Scripting/ScriptDefines/UnitScript.h \
+            src/server/game/Scripting/ScriptDefines/UnitScript.cpp \
+            src/server/game/Entities/Object/Object.cpp \
+            src/server/game/Entities/Player/Player.cpp \
+            src/server/game/Entities/Player/Player.h \
+            src/server/game/Entities/Player/PlayerSettings.cpp \
+            src/server/game/Entities/Player/PlayerUpdates.cpp \
+            src/server/game/Entities/Unit/Unit.cpp \
+            src/server/game/Entities/Creature/Creature.cpp \
             src/server/game/Handlers/MiscHandler.cpp | sort > /tmp/expected-core-pass-files
           diff -u /tmp/expected-core-pass-files /tmp/actual-core-pass-files
           echo 'PASS: optional callback observes server-side reevaluation only; no client redraw ACK or F14 ON'
