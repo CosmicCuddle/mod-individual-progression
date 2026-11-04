@@ -1,0 +1,68 @@
+# F14 PROTOTYPE — apply ONLY AFTER original #56 observer + WHO + attack hooks.
+# Newer Grim Core pinned 0d754d192. No master/production Core changes.
+# No COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION: this is merely an observer
+# of server-side reevaluation passes, not an adequate concealment/refresh bridge.
+diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
+--- a/src/server/game/Scripting/ScriptMgr.h
++++ b/src/server/game/Scripting/ScriptMgr.h
+@@ -739,4 +739,6 @@
+     bool OnWorldObjectCanBeSeenByPlayer(Player const* observer, WorldObject const* target);
+     bool OnWhoListEntryCanBeSeenByPlayer(Player const* observer, ObjectGuid const& targetGuid, uint8 targetRace);
++    // Server-side reevaluation pass, not a network/client acknowledgement.
++    void OnF14VisibilityReevaluationProcessed(WorldObject const* object, bool playerFrame);
+ 
+ public: /* PetScript */
+diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+--- a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
++++ b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+@@ -32,3 +32,4 @@
+     WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER,
+     WORLDOBJECTHOOK_ON_WHO_LIST_ENTRY_CAN_BE_SEEN_BY_PLAYER,
++    WORLDOBJECTHOOK_ON_F14_VISIBILITY_REEVALUATION_PROCESSED,
+     WORLDOBJECTHOOK_END
+@@ -90,2 +90,9 @@
+     [[nodiscard]] virtual bool OnWhoListEntryCanBeSeenByPlayer(Player const* /*observer*/, ObjectGuid const& /*targetGuid*/, uint8 /*targetRace*/) { return true; }
++
++    // Called AFTER the server has reevaluated a target's visibility. The
++    // player's forced refresh is deferred until Player::Update (playerFrame=1).
++    // This does NOT confirm client packet delivery, redraw, correct observer
++    // fan-out, combat rights or a new/current F14 proof. Do not mutate the
++    // object or recursively request another visibility update here.
++    virtual void OnF14VisibilityReevaluationProcessed(WorldObject const* /*object*/, bool /*playerFrame*/) { }
+ };
+diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
+--- a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
++++ b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
+@@ -76,1 +76,8 @@
++void ScriptMgr::OnF14VisibilityReevaluationProcessed(WorldObject const* object, bool playerFrame)
++{
++    ASSERT(object);
++    CALL_ENABLED_HOOKS(WorldObjectScript, WORLDOBJECTHOOK_ON_F14_VISIBILITY_REEVALUATION_PROCESSED,
++        script->OnF14VisibilityReevaluationProcessed(object, playerFrame));
++}
++
+ WorldObjectScript::WorldObjectScript(char const* name, std::vector<uint16> enabledHooks)
+diff --git a/src/server/game/Entities/Object/Object.cpp b/src/server/game/Entities/Object/Object.cpp
+--- a/src/server/game/Entities/Object/Object.cpp
++++ b/src/server/game/Entities/Object/Object.cpp
+@@ -3077,4 +3077,9 @@
+     //updates object's visibility for nearby players
+     Acore::VisibleChangesNotifier notifier(*this);
+     Cell::VisitObjects(this, notifier, GetVisibilityRange());
++    // No "refresh completed" notice for Player here: Player's forced
++    // refresh is deferred until its own update and must report afterwards.
++    // This means one server-side visitor pass only, NOT client delivery.
++    if (!IsPlayer())
++        sScriptMgr->OnF14VisibilityReevaluationProcessed(this, false);
+ }
+diff --git a/src/server/game/Entities/Player/PlayerUpdates.cpp b/src/server/game/Entities/Player/PlayerUpdates.cpp
+--- a/src/server/game/Entities/Player/PlayerUpdates.cpp
++++ b/src/server/game/Entities/Player/PlayerUpdates.cpp
+@@ -1657,4 +1657,7 @@
+         Unit::UpdateObjectVisibility(true);
+         UpdateVisibilityForPlayer();
++        // Only after the player's server-side visibility pass has run.
++        // This is NOT a client acknowledgement and does NOT certify F14.
++        sScriptMgr->OnF14VisibilityReevaluationProcessed(this, true);
+     }
+ }
