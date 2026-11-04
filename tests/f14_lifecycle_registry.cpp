@@ -9,6 +9,7 @@
 
 namespace R = IndividualProgressionF14LifecycleRegistry;
 namespace P = IndividualProgressionF14MultiAttackerPolicy;
+namespace V = IndividualProgressionF14CombatVisibilityPolicy;
 
 static unsigned g_pass = 0;
 static unsigned g_fail = 0;
@@ -97,7 +98,7 @@ namespace
         CHECK(Begin(r, k, s, BotA) == s);
         CHECK(Active(r, s) == 1);
         // Event-built rosters never become concealment candidates.
-        CHECK(!r.IsConcealmentCandidate(s));
+        CHECK(!r.HasParticipantProof(s));
     }
 
     void TestTwoAttackersLastExit()
@@ -134,7 +135,7 @@ namespace
         // Leaving does not restore certainty.
         r.OnParticipantEnd(k, s, Human);
         CHECK(Uncertain(r, s));
-        CHECK(!r.IsConcealmentCandidate(s));
+        CHECK(!r.HasParticipantProof(s));
     }
 
     void TestCreationSnapshot()
@@ -264,7 +265,7 @@ namespace
         CHECK(r.IsPoisoned());
         CHECK(r.GetPoisonReason() == R::PoisonReason::StampKeyMismatch);
         CHECK(r.Size() == 0);
-        CHECK(!r.IsConcealmentCandidate(s));
+        CHECK(!r.HasParticipantProof(s));
         CHECK(Begin(r, Key(0, 0, 0xF130000012), 0, BotA) == 0);
         CHECK(r.ExpireActor(BotA) == 0);
         CHECK(r.GetCounters().poisonedCalls >= 2);
@@ -359,6 +360,286 @@ namespace
         CHECK(r.IsPoisoned());
     }
 
+    // ---- Stage 2: participant/rights snapshot (creature half only) ----
+
+    R::ParticipantSnapshot Snap(std::vector<std::uint64_t> attackers,
+                                std::vector<std::uint64_t> others = {},
+                                bool tapOk = true, bool plain = true, bool alive = true)
+    {
+        R::ParticipantSnapshot s;
+        s.complete = true;
+        s.plainUnscriptedNonEliteHostileNpc = plain;
+        s.alive = alive;
+        s.inCombat = true;
+        s.tapHolderNoneOrVerifiedBot = tapOk;
+        for (auto a : attackers)
+        {
+            if (s.attackerCount < s.attackers.size())
+                s.attackers[s.attackerCount++] = a;
+            if (s.participantCount < s.participants.size())
+                s.participants[s.participantCount++] = a;
+        }
+        for (auto o : others)
+            if (s.participantCount < s.participants.size())
+                s.participants[s.participantCount++] = o;
+        return s;
+    }
+
+    V::ObserverSnapshot EveryObserverFactTrueExceptRefresh(R::Registry const& r, std::uint64_t stamp)
+    {
+        V::CreatureSnapshot c;
+        r.BuildCreatureSnapshot(stamp, c);
+        V::ObserverSnapshot o;
+        o.explicitlyEnabled = true;
+        o.positivelyVerifiedNormalPlayer = true;
+        o.hasVanillaEffectiveProgression = true;
+        o.allParticipantsAlreadyHiddenFromThisObserver = true;
+        o.noOwnTargetAuraPetTotemGuardianOrSpellInFlight = true;
+        o.noObserverOrOwnedUnitThreatCombatOrPendingAssist = true;
+        o.provenOutsideCreatureAggroAssistCleaveAndAoeReach = true;
+        o.noObserverOrGroupQuestLootTapSkinOrKillCredit = true;
+        o.observerStageAndIdentityStable = true;
+        o.coreVisibilityAndThreatRefreshVerified = false; // absent bridge
+        o.targetIsAliveAtThisEvaluation = true;
+        o.eligibleHiddenAttackerStillAttackingThisTargetAtThisEvaluation = true;
+        o.checkedAgainstCreatureIdentityToken = c.creatureIdentityToken;
+        o.checkedAgainstCreatureGeneration = c.generation;
+        return o;
+    }
+
+    bool AllCreatureFacts(V::CreatureSnapshot const& c)
+    {
+        return c.complete && c.current && c.plainUnscriptedNonEliteHostileNpc && c.alive &&
+               c.inCombat && c.eligibleHiddenRandomBotCurrentlyAttackingThisCreature &&
+               c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion &&
+               c.noRealPlayerCombatThreatTapOrRights && c.noPendingThreatOrCombatantChanges;
+    }
+
+    void TestSnapshotAllVerifiedIsCreatureHalfOnly()
+    {
+        R::Registry r;
+        R::CreatureKey const k = Key(0, 0, 0xF130000100);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        CHECK(r.NeedsSnapshot(k, s));
+        // Bot B heals bot A (participant, not attacker).
+        r.ApplyParticipantSnapshot(k, s, Snap({BotA}, {BotB}));
+        CHECK(!r.NeedsSnapshot(k, s));
+        CHECK(r.HasParticipantProof(s));
+        CHECK(Active(r, s) == 1);   // roster = actual attackers only
+        CHECK(!Has(r, s, BotB));
+        V::CreatureSnapshot c;
+        CHECK(r.BuildCreatureSnapshot(s, c));
+        CHECK(AllCreatureFacts(c));
+        CHECK(c.creatureIdentityToken == s && c.generation != 0);
+        // Still impossible to conceal: observer half default, or every
+        // observer fact true except the missing Core refresh bridge.
+        CHECK(!V::ShouldConcealCreatureFromObserver(c, V::ObserverSnapshot{}));
+        CHECK(!V::ShouldConcealCreatureFromObserver(c, EveryObserverFactTrueExceptRefresh(r, s)));
+        CHECK(r.GetCounters().snapshotsVerified == 1);
+    }
+
+    void TestSnapshotUnverifiedParticipantsFailVisible()
+    {
+        // Human / Altbot / pet / minion / totem / unknown: all token 0.
+        for (int variant = 0; variant < 4; ++variant)
+        {
+            R::Registry r;
+            R::CreatureKey const k = Key(0, 0, 0xF130000110 + variant);
+            std::uint64_t s = Begin(r, k, 0, BotA);
+            R::ParticipantSnapshot snap = Snap({BotA}, {BotB});
+            if (variant == 0)
+                snap = Snap({BotA}, {Human});          // threat-only human (DoT/healer)
+            else if (variant == 1)
+                snap = Snap({BotA, Human});            // human attacker
+            else if (variant == 2)
+                snap.complete = false;                 // overflow / PvP ref / no threat list
+            else
+                snap.participantCount = R::MaxSnapshotParticipants + 1;
+            r.ApplyParticipantSnapshot(k, s, snap);
+            V::CreatureSnapshot c;
+            CHECK(r.BuildCreatureSnapshot(s, c));
+            CHECK(!c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion);
+            CHECK(!c.noRealPlayerCombatThreatTapOrRights);
+            CHECK(!c.current);
+            CHECK(!r.HasParticipantProof(s));
+            CHECK(Uncertain(r, s));
+        }
+    }
+
+    void TestSnapshotTapAndScopeFacetsIndependent()
+    {
+        R::Registry r;
+        R::CreatureKey const k1 = Key(0, 0, 0xF130000120);
+        std::uint64_t s1 = Begin(r, k1, 0, BotA);
+        r.ApplyParticipantSnapshot(k1, s1, Snap({BotA}, {}, /*tapOk*/ false));
+        V::CreatureSnapshot c;
+        r.BuildCreatureSnapshot(s1, c);
+        CHECK(c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion);
+        CHECK(!c.noRealPlayerCombatThreatTapOrRights); // human or group tap
+        CHECK(!AllCreatureFacts(c));
+
+        R::CreatureKey const k2 = Key(0, 0, 0xF130000121);
+        std::uint64_t s2 = Begin(r, k2, 0, BotA);
+        r.ApplyParticipantSnapshot(k2, s2, Snap({BotA}, {}, true, /*plain*/ false));
+        r.BuildCreatureSnapshot(s2, c);
+        CHECK(!c.plainUnscriptedNonEliteHostileNpc); // elite/boss/scripted/NPC flag
+        CHECK(!AllCreatureFacts(c));
+
+        R::CreatureKey const k3 = Key(0, 0, 0xF130000122);
+        std::uint64_t s3 = Begin(r, k3, 0, BotA);
+        r.ApplyParticipantSnapshot(k3, s3, Snap({BotA}, {}, true, true, /*alive*/ false));
+        r.BuildCreatureSnapshot(s3, c);
+        CHECK(!c.alive);
+        CHECK(!c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion);
+        CHECK(Uncertain(r, s3));
+    }
+
+    void TestNoAttackerMeansNotAttacking()
+    {
+        R::Registry r;
+        R::CreatureKey const k = Key(0, 0, 0xF130000130);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        // Bot A stopped melee but still holds threat (e.g. DoT/caster).
+        r.ApplyParticipantSnapshot(k, s, Snap({}, {BotA}));
+        V::CreatureSnapshot c;
+        r.BuildCreatureSnapshot(s, c);
+        CHECK(c.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion);
+        CHECK(!c.eligibleHiddenRandomBotCurrentlyAttackingThisCreature);
+        CHECK(!r.HasParticipantProof(s));
+        CHECK(Active(r, s) == 0);
+    }
+
+    void TestEvidenceInvalidatesAndOnlyLaterSnapshotRecovers()
+    {
+        R::Registry r;
+        R::CreatureKey const k = Key(0, 0, 0xF130000140);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        r.ApplyParticipantSnapshot(k, s, Snap({BotA}));
+        CHECK(r.HasParticipantProof(s));
+        // Rostered verified damage: no change, no snapshot needed.
+        CHECK(!r.OnParticipantEvidence(k, s, BotA));
+        CHECK(!r.NeedsSnapshot(k, s));
+        CHECK(r.HasParticipantProof(s));
+        // Unrostered verified caster (DoT/spell): uncertain until a later
+        // snapshot that lists it.
+        CHECK(r.OnParticipantEvidence(k, s, BotB));
+        CHECK(!r.HasParticipantProof(s));
+        CHECK(r.NeedsSnapshot(k, s));
+        V::CreatureSnapshot c;
+        r.BuildCreatureSnapshot(s, c);
+        CHECK(!c.current && !c.noPendingThreatOrCombatantChanges);
+        r.ApplyParticipantSnapshot(k, s, Snap({BotA}, {BotB}));
+        CHECK(r.HasParticipantProof(s));
+        // Human DoT / environment / creature source: uncertain; a later
+        // snapshot still listing the human keeps it visible.
+        CHECK(r.OnParticipantEvidence(k, s, Human));
+        CHECK(!r.HasParticipantProof(s));
+        r.ApplyParticipantSnapshot(k, s, Snap({BotA}, {BotB, Human}));
+        CHECK(!r.HasParticipantProof(s));
+        // Human gone from threat and combat (combat ended for them).
+        r.ApplyParticipantSnapshot(k, s, Snap({BotA}, {BotB}));
+        CHECK(r.HasParticipantProof(s));
+        // Evidence on an untracked creature never creates an entry.
+        CHECK(!r.OnParticipantEvidence(Key(0, 0, 0xF130000141), 0, Human));
+        r.ApplyParticipantSnapshot(Key(0, 0, 0xF130000141), 0, Snap({BotA}));
+        CHECK(r.Size() == 1);
+    }
+
+    void TestStaleGenerationAfterAnyEvent()
+    {
+        R::Registry r;
+        R::CreatureKey const k = Key(0, 0, 0xF130000150);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        r.ApplyParticipantSnapshot(k, s, Snap({BotA}));
+        V::CreatureSnapshot before;
+        r.BuildCreatureSnapshot(s, before);
+        CHECK(before.current);
+        // A second verified attacker joins: roster changes, snapshot stale.
+        Begin(r, k, s, BotB, {BotA});
+        V::CreatureSnapshot after;
+        r.BuildCreatureSnapshot(s, after);
+        CHECK(!after.current);
+        CHECK(after.generation != before.generation);
+        CHECK(!AllCreatureFacts(after));
+        // An observer pair checked against the old generation never matches.
+        V::ObserverSnapshot o = EveryObserverFactTrueExceptRefresh(r, s);
+        o.checkedAgainstCreatureGeneration = before.generation;
+        o.coreVisibilityAndThreatRefreshVerified = true; // even hypothetically
+        CHECK(!V::ShouldConcealCreatureFromObserver(after, o));
+    }
+
+    void TestAssistInvalidation()
+    {
+        R::Registry r;
+        R::CreatureKey const c1 = Key(0, 0, 0xF130000160);
+        R::CreatureKey const c2 = Key(0, 0, 0xF130000161);
+        std::uint64_t s1 = Begin(r, c1, 0, BotA);
+        std::uint64_t s2 = Begin(r, c2, 0, BotB);
+        r.ApplyParticipantSnapshot(c1, s1, Snap({BotA}));
+        r.ApplyParticipantSnapshot(c2, s2, Snap({BotB}));
+        // Self heal and rostered healer: nothing changes.
+        CHECK(r.OnAssistOfActor(BotA, BotA) == 0);
+        CHECK(r.HasParticipantProof(s1));
+        // Human heals bot A: only creatures bot A fights become uncertain.
+        CHECK(r.OnAssistOfActor(BotA, Human) == 1);
+        CHECK(!r.HasParticipantProof(s1));
+        CHECK(r.HasParticipantProof(s2));
+        // Verified bot B heals bot A on c1 (B not rostered there).
+        r.ApplyParticipantSnapshot(c1, s1, Snap({BotA}));
+        CHECK(r.OnAssistOfActor(BotA, BotB) == 1);
+        CHECK(!r.HasParticipantProof(s1));
+        CHECK(r.OnAssistOfActor(0, Human) == 0);
+        CHECK(r.GetCounters().assistInvalidations == 2);
+    }
+
+    void TestLogoutDuringSnapshotAndCombatEnd()
+    {
+        R::Registry r;
+        R::CreatureKey const k = Key(0, 0, 0xF130000170);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        r.ApplyParticipantSnapshot(k, s, Snap({BotA}));
+        CHECK(r.HasParticipantProof(s));
+        CHECK(r.ExpireActor(BotA) == 1);
+        CHECK(!r.HasParticipantProof(s));
+        V::CreatureSnapshot c;
+        r.BuildCreatureSnapshot(s, c);
+        CHECK(!c.current);
+        // A snapshot still listing the expired epoch cannot restore it:
+        // the caller re-reads identity under the lock, so it reports 0.
+        r.ApplyParticipantSnapshot(k, s, Snap({Human}));
+        CHECK(!r.HasParticipantProof(s));
+        // Combat end / evade retires; later corpse/removal are no-ops.
+        CHECK(r.OnCreatureLeftCombat(k, s));
+        CHECK(!r.OnCreatureLeftCombat(k, s));
+        r.OnCreatureCorpseOrRespawn(k, s, false);
+        r.OnCreatureRemovedFromWorld(k, s);
+        CHECK(r.Size() == 0);
+        CHECK(r.GetCounters().leftCombatRetired == 1);
+        CHECK(r.GetCounters().corpseRetired == 0);
+        CHECK(!r.BuildCreatureSnapshot(s, c));
+        CHECK(!c.current && c.creatureIdentityToken == 0);
+    }
+
+    void TestSnapshotRosterOverflowAndPoison()
+    {
+        R::Registry r;
+        R::CreatureKey const k = Key(0, 0, 0xF130000180);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        R::ParticipantSnapshot snap = Snap({BotA});
+        snap.attackerCount = P::MaxTrackedAttackers + 1;
+        r.ApplyParticipantSnapshot(k, s, snap);
+        CHECK(!r.HasParticipantProof(s));
+        CHECK(Uncertain(r, s));
+        // Mismatched key on a snapshot is an impossible state: poison.
+        r.ApplyParticipantSnapshot(Key(0, 1, 0xF130000180), s, Snap({BotA}));
+        CHECK(r.IsPoisoned());
+        V::CreatureSnapshot c;
+        CHECK(!r.BuildCreatureSnapshot(s, c));
+        CHECK(!r.NeedsSnapshot(k, s));
+        CHECK(!r.OnParticipantEvidence(k, s, Human));
+        CHECK(r.OnAssistOfActor(BotA, Human) == 0);
+    }
+
     void TestTokensMonotonicAcrossReset()
     {
         R::Registry r;
@@ -389,6 +670,15 @@ int main()
     TestVerifiedEndOfUnknownActor();
     TestTokensMonotonicAcrossReset();
     TestRemovedFromWorld();
+    TestSnapshotAllVerifiedIsCreatureHalfOnly();
+    TestSnapshotUnverifiedParticipantsFailVisible();
+    TestSnapshotTapAndScopeFacetsIndependent();
+    TestNoAttackerMeansNotAttacking();
+    TestEvidenceInvalidatesAndOnlyLaterSnapshotRecovers();
+    TestStaleGenerationAfterAnyEvent();
+    TestAssistInvalidation();
+    TestLogoutDuringSnapshotAndCombatEnd();
+    TestSnapshotRosterOverflowAndPoison();
 
     unsigned const total = g_pass + g_fail;
     std::printf("F14 LIFECYCLE REGISTRY %u/%u passed\n", g_pass, total);
