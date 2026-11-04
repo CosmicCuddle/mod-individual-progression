@@ -40,6 +40,12 @@ concurrency:
 
 jobs:
   f19-source-and-policy:
+    # Historical frozen-source and fixed-pinned-CI check: run only on
+    # the exact original PR development head. Later Grim-source integration
+    # uses the replacement 20261104 release checks and real native builds.
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'fix/ip-f19-login-preserve-level-floor-20261101') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fix/ip-f19-login-preserve-level-floor-20261101')
     name: F19, paid expansion, GM and inherited policy/source tests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -130,6 +136,12 @@ jobs:
           echo 'No owner host, game launch, SQL, character data, config enablement, payment or merge.'
 
   full-native-f19-off-by-default:
+    # Historical frozen-source and fixed-pinned-CI check: run only on
+    # the exact original PR development head. Later Grim-source integration
+    # uses the replacement 20261104 release checks and real native builds.
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'fix/ip-f19-login-preserve-level-floor-20261101') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fix/ip-f19-login-preserve-level-floor-20261101')
     name: Build and link pinned Worldserver with F19 login floor (F14 flag OFF, NO LAUNCH)
     runs-on: ubuntu-24.04
     timeout-minutes: 170

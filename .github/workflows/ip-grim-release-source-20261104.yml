@@ -1,0 +1,107 @@
+# CosmicCuddle: integration-only regressions for the two-parent Grim+custom IP source.
+# Historical PR provenance tests stay unchanged on their original branches.
+# This is disposable source/pure-model CI; NEVER launch a server or access owner data.
+name: Grim + Cosmic IP first release source policy (NO HOST, NO SQL)
+on:
+  pull_request:
+    branches:
+      - integration/cs01-grim-upstream-into-ip46-20261104
+      - master
+    paths:
+      - ".github/workflows/ip-grim-release-source-20261104.yml"
+      - ".github/workflows/ip-combined-c3-f14-partial-login-20261031.yml"
+      - ".github/workflows/ip-f19-login-floor-20261101.yml"
+      - ".github/workflows/ip-paid-expansion-entitlement-20261101.yml"
+      - "src/**"
+      - "conf/**"
+      - "tests/**"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-and-pure-model:
+    name: Custom preservation + 7 pure policies x 4 compilers (NO HOST)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - name: Checkout proposed development PR HEAD with ancestry
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require both histories and preservation-first defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor 26d5b7a1de30ad92a595aaf251fc14754cf54f32 HEAD
+          git merge-base --is-ancestor 42c9a32892740af55a40e076e6381cc879181396 HEAD
+          grep -Fqx 'IndividualProgression.AutoAttune = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.ProfessionTierCap = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0' conf/individualProgression.conf.dist
+          echo "PASS: immutable upstream+custom history, protected OFF defaults"
+      - name: Test current merged source contracts without rewriting historic PR baselines
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_grim_20261104_source_preservation.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_gm_command_null_safety.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_group_floor_source.py' -v
+          python3 -B tests/check_hunter_autocast_source.py
+          python3 -B tests/check_group_expansion_source.py
+      - name: Compile and execute seven unchanged portable C++ policy models
+        shell: bash
+        run: |
+          set -euo pipefail
+          for model in \
+            group_expansion_policy \
+            expansion_purchase_policy \
+            f14_login_preserve_policy \
+            f14_group_sync_floor \
+            ip_gm_command_access_policy \
+            receipt_ledger_policy \
+            paid_receipt_full_slot_model; do
+            test -s "tests/$model.cpp"
+            "${{ matrix.cxx }}" "-std=${{ matrix.std }}" -O2 -UNDEBUG -Wall -Wextra -Werror -pedantic \
+              "tests/$model.cpp" -o "/tmp/ip-grim-$model"
+            "/tmp/ip-grim-$model"
+          done
+          echo "PASS: seven portable policy models in ${{ matrix.cxx }} / ${{ matrix.std }}"
+      - name: Verify historical immutable CI was scoped, not erased
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          jobs = {
+            ".github/workflows/ip-combined-c3-f14-partial-login-20261031.yml": "integration/hunter-group-c3-f14-partial-login-20261031",
+            ".github/workflows/ip-f19-login-floor-20261101.yml": "fix/ip-f19-login-preserve-level-floor-20261101",
+            ".github/workflows/ip-paid-expansion-entitlement-20261101.yml": "feature/ip-paid-expansion-entitlement-20261101",
+          }
+          for path, branch in jobs.items():
+              data = Path(path).read_text()
+              assert data.count("github.head_ref == '"+branch+"'") == 2, path
+              assert data.count("github.ref == 'refs/heads/"+branch+"'") == 2, path
+              assert "original PR development head" in data, path
+              print("PASS: frozen historical jobs still present, scoped to",branch)
+          PY
+      - name: Scope and confidence
+        if: always()
+        run: |
+          echo 'These are independent C++ policy/model tests and static source checks only.'
+          echo 'The original frozen PR provenance tests have not been modified, relaxed, or claimed green.'
+          echo 'Actual Core/PB/Naxx/Services native link, newer Core, DB/SQL and gameplay remain separate gates.'
+          echo 'No server launch, deployment, production SQL, accounts, gold, characters or live host access.'
