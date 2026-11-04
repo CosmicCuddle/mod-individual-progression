@@ -1,0 +1,73 @@
+# Core routing contracts for F14 observer invalidation. READ ONLY / NO HOST.
+# Parent #67 stays a separate no-op observational patch; this PR merely guards
+# the actual pinned Core's existing per-viewer engine path against bad assumptions.
+name: F14 pinned Core viewer refresh and creature remove source contracts (NO HOST)
+
+on:
+  pull_request:
+    branches:
+      - work/cs01-f14-core-reevaluation-observer-prototype-20261104
+    paths:
+      - "tests/test_ip_f14_core_refresh_delivery_path.py"
+      - "docs/F14_CORE_VISIBILITY_PATH_2026-11-04.md"
+      - ".github/workflows/ip-f14-core-refresh-delivery-source-20261104.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-core-route-contract:
+    name: "Source only: true viewer update, deferred player pass, remove-world hook"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact submitted IP branch, no workspace credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: ip
+          persist-credentials: false
+
+      - name: Checkout exact newer Grimfeather Core (READ ONLY)
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: pinned-core
+          persist-credentials: false
+
+      - name: Exact #67 ancestry, 3 documentation-and-test-only paths, clean Core
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C ip rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git -C ip merge-base --is-ancestor 13c07373f7befca967b90885158d35d1fb57430b HEAD
+          test "$(git -C pinned-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          git -C ip diff --name-only 13c07373f7befca967b90885158d35d1fb57430b HEAD | sort > /tmp/changed
+          printf '%s\n' \
+            '.github/workflows/ip-f14-core-refresh-delivery-source-20261104.yml' \
+            'docs/F14_CORE_VISIBILITY_PATH_2026-11-04.md' \
+            'tests/test_ip_f14_core_refresh_delivery_path.py' | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/changed
+          git -C ip diff --check 13c07373f7befca967b90885158d35d1fb57430b HEAD
+          test -z "$(git -C pinned-core status --porcelain)"
+          echo 'PASS: only new docs/test/CI; no IP, Core, Playerbots, config, SQL or master change'
+
+      - name: Validate actual Core server-side visibility and removal call chains
+        shell: bash
+        env:
+          COSMIC_F14_PINNED_CORE_ROOT: ${{ github.workspace }}/pinned-core
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s ip/tests \
+            -p 'test_ip_f14_core_refresh_delivery_path.py' -v
+
+      - name: Preserve no-client-ACK and no-F14-activation confidence boundary
+        if: always()
+        shell: bash
+        run: |
+          echo 'This proves pinned Core SOURCE routing, not a server build or live client redraw.'
+          echo 'Per-viewer update packet emission is NOT receipt ACK.'
+          echo 'No F14 visibility macro is defined, no concealment flag is enabled,'
+          echo 'and no module/Core/Playerbots executable source, host, SQL or user DB was changed.'
