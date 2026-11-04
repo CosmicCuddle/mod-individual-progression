@@ -69,13 +69,19 @@ public:
 
         if (!sIndividualProgression->isNormalAccount(player)) // bot or exluded account
         {
-            sIndividualProgression->UpdateRNDbotSpells(player); // give class spells to RNDbots that have been removed from trainers by IP.
-
-            if (player->getClass() == CLASS_ROGUE)
+            // Keep bot-specific spell and inventory grants limited to bot
+            // accounts. The historical non-normal branch also includes
+            // excluded HUMAN accounts, which must not receive bot rewards.
+            if (sIndividualProgression->isBotAccount(player))
             {
-                uint32 ITEM_THIEVES_TOOLS = 5060;
-                if (!player->HasItemCount(ITEM_THIEVES_TOOLS, 1))
-                    player->AddItem(ITEM_THIEVES_TOOLS, 1);
+                sIndividualProgression->UpdateRNDbotSpells(player); // give class spells to RNDbots that have been removed from trainers by IP.
+
+                if (player->getClass() == CLASS_ROGUE)
+                {
+                    uint32 ITEM_THIEVES_TOOLS = 5060;
+                    if (!player->HasItemCount(ITEM_THIEVES_TOOLS, 1))
+                        player->AddItem(ITEM_THIEVES_TOOLS, 1);
+                }
             }
 
             // F14 partial safeguard, OFF by default. Only preserve an already
