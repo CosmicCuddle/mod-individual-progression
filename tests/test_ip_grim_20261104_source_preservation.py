@@ -47,9 +47,9 @@ SHARED = (
 CUSTOM_UNCHANGED = "src/cs_individualProgression.cpp"
 CHROMAGGUS_PROTECTED = (
     "src/vanillaScripts/boss_chromaggus.cpp",
-    "src/IndividualProgression_loader.cpp",
     "data/sql/world/base/dungeon_blackwing_lair.sql",
 )
+LOADER_ADDITION = "src/IndividualProgression_loader.cpp"
 
 
 def historical(ref, path):
@@ -105,16 +105,33 @@ class ExactProvenance(unittest.TestCase):
              "src", "conf", "data/sql", "optional/sql"],
             cwd=ROOT, text=True,
         ).splitlines())
-        self.assertEqual(changed, set(UPSTREAM_ONLY) | set(SHARED))
+        self.assertEqual(changed, set(UPSTREAM_ONLY) | set(SHARED) | {LOADER_ADDITION})
 
     def test_chromaggus_three_files_preserved(self):
         for path in CHROMAGGUS_PROTECTED:
             with self.subTest(path=path):
                 self.assertEqual(current(path), historical(BASE, path))
-        self.assertIn(
-            "AddSC_boss_chromaggus_60_2_A();",
-            current("src/IndividualProgression_loader.cpp"),
+        loader = current(LOADER_ADDITION)
+        # This loader is NOT a copy of either side: preserve every Cosmic
+        # registration and import ONLY Grim's new Borean Tundra entry.
+        original = historical(BASE, LOADER_ADDITION)
+        declaration = "void AddSC_ipp_zone_nagrand();\\n"
+        call = "    AddSC_ipp_zone_nagrand();\\n"
+        # Use actual newlines in the expected loader source.
+        declaration = declaration.replace("\\\\n", "\\n")
+        call = call.replace("\\\\n", "\\n")
+        self.assertEqual(original.count(declaration), 1)
+        self.assertEqual(original.count(call), 1)
+        expected = original.replace(
+            declaration,
+            declaration + "void AddSC_ipp_zone_borean_tundra();\\n".replace("\\\\n", "\\n"),
+        ).replace(
+            call,
+            call + "    AddSC_ipp_zone_borean_tundra();\\n".replace("\\\\n", "\\n"),
         )
+        self.assertEqual(loader, expected)
+        self.assertEqual(loader.count("AddSC_boss_chromaggus_60_2_A();"), 2)
+        self.assertEqual(loader.count("AddSC_ipp_zone_borean_tundra();"), 2)
 
 
 class PolicyPreservation(unittest.TestCase):
