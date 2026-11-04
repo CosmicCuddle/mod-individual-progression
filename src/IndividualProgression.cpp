@@ -8,6 +8,7 @@
 #include "naxxramas_40.h"
 #include "Mail.h"
 #include <mutex>
+#include <limits>
 #include "ReputationMgr.h"
 #include "WorldSession.h"
 #include "PetDefines.h"
@@ -606,16 +607,77 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
         return;
     std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
     uint32 const guid = player->GetGUID().GetCounter();
-    // Refresh even when previous login verified and the next one did not.
-    if (verified)
-        _f14VerifiedRandomBotGroupCache[guid] = true;
-    else
-        _f14VerifiedRandomBotGroupCache.erase(guid);
+    // Always evict the previous login incarnation, even if this call is
+    // an unverified login. An old GUID cannot resurrect a stale attack proof.
+    _f14VerifiedRandomBotGroupCache.erase(guid);
+    _f14VerifiedRandomBotLoginEpoch.erase(guid);
+    if (!verified)
+        return;
+
+    // Keep the historically protected group/login identity independent
+    // of the optional F14 visibility epoch. A token exhaustion must NEVER
+    // weaken established RandomBot group-progression safeguards.
+    _f14VerifiedRandomBotGroupCache[guid] = true;
+
+    // Epoch 0 is always invalid, and wrap would reuse an old token.
+    // On exhaustion, group protections survive but no new event/visibility
+    // incarnation token is issued. The missing token fails visible.
+    if (_f14NextRandomBotLoginEpoch == std::numeric_limits<std::uint64_t>::max())
+        return;
+
+    const std::uint64_t loginEpoch = ++_f14NextRandomBotLoginEpoch;
+    _f14VerifiedRandomBotLoginEpoch[guid] = loginEpoch;
 }
 
 void IndividualProgression::ForgetF14VerifiedRandomBotGroupIdentity(Player* player)
 {
     RememberF14VerifiedRandomBotGroupIdentity(player, false);
+}
+
+// Read-only, lock-protected identity: never ask mutable Playerbots state
+// from a per-viewer Core visibility worker. Absence always means visible.
+bool IndividualProgression::HasF14VerifiedRandomBotIdentity(Player const* player)
+{
+    if (!player)
+        return false;
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    uint32 const lowGuid = player->GetGUID().GetCounter();
+    auto const it = _f14VerifiedRandomBotGroupCache.find(lowGuid);
+    if (it == _f14VerifiedRandomBotGroupCache.end() || !it->second)
+        return false;
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(lowGuid);
+    return epoch != _f14VerifiedRandomBotLoginEpoch.end() && epoch->second != 0;
+}
+
+// WHO queries carry a cached GUID. Never look up a target Player or call
+// mutable RandomPlayerbotMgr on a session/WHO worker. Missing means ALLOW.
+bool IndividualProgression::HasF14VerifiedRandomBotGuid(ObjectGuid const& guid)
+{
+    if (!guid)
+        return false;
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    auto const it = _f14VerifiedRandomBotGroupCache.find(guid.GetCounter());
+    if (it == _f14VerifiedRandomBotGroupCache.end() || !it->second)
+        return false;
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(guid.GetCounter());
+    return epoch != _f14VerifiedRandomBotLoginEpoch.end() && epoch->second != 0;
+}
+
+// Read-only, incarnation-safe actor identity. Never consult mutable Playerbots
+// state on visibility/session workers. Zero means no current verified login.
+std::uint64_t IndividualProgression::GetF14VerifiedRandomBotLoginEpoch(ObjectGuid const& guid)
+{
+    if (!guid || !guid.IsPlayer())
+        return 0;
+
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    uint32 const lowGuid = guid.GetCounter();
+    auto const verified = _f14VerifiedRandomBotGroupCache.find(lowGuid);
+    if (verified == _f14VerifiedRandomBotGroupCache.end() || !verified->second)
+        return 0;
+
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(lowGuid);
+    return epoch == _f14VerifiedRandomBotLoginEpoch.end() ? 0 : epoch->second;
 }
 
 bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage)
@@ -1323,6 +1385,17 @@ private:
             "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor", false);
         sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = sConfigMgr->GetOption<bool>(
             "IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin", false);
+        // F14 observer + WHO pilot remains OFF until the separately reviewed,
+        // immediate, per-viewer Core visibility-refresh bridge is present.
+        sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ExperimentalRndbotPlayerVisibility", false);
+#if !defined(COSMIC_F14_OBSERVER_HOOK_VERSION) || !defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION) || !defined(COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION) || COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION < 1
+        if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)
+        {
+            LOG_ERROR("module", "F14 player observer pilot requires Core observer, cached WHO and immediate refresh hooks; forcing OFF");
+            sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = false;
+        }
+#endif
 #if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
         if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin)
         {
@@ -1338,6 +1411,11 @@ private:
         {
             LOG_ERROR("module", "IndividualProgression F14 verified racial RandomBot TBC stage floor requires Playerbots API header; forcing OFF");
             sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
+        }
+        if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)
+        {
+            LOG_ERROR("module", "F14 observer pilot requires positive Playerbots RandomBot identity; forcing OFF");
+            sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = false;
         }
 #endif
 #if !defined(COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION) || COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION < 1

@@ -57,7 +57,8 @@ public:
         // source-verified login thread may consult currentBots/IsRandomBot.
         sIndividualProgression->ForgetF14VerifiedRandomBotGroupIdentity(player);
 #if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
-        if (sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor &&
+        if ((sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor ||
+             sIndividualProgression->f14ExperimentalRndbotPlayerVisibility) &&
             sIndividualProgression->isBotAccount(player) &&
             (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
             player->GetSession() && player->GetSession()->IsHeadless())
@@ -1141,9 +1142,85 @@ public:
     }
 };
 
+// F14 *player-only* WorldObjectScript observer pilot. Requires the exact
+// optional Core hook and an explicit OFF-by-default IP config opt-in.
+// This is NOT creature combat concealment or immediate visibility refresh; cached WHO is filtered only when explicitly enabled.
+#if defined(COSMIC_F14_OBSERVER_HOOK_VERSION)
+class IndividualProgressionF14ObserverScript : public WorldObjectScript
+{
+public:
+    IndividualProgressionF14ObserverScript()
+#if defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)
+        : WorldObjectScript("IndividualProgression_F14Observer",
+                            {WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER,
+                             WORLDOBJECTHOOK_ON_WHO_LIST_ENTRY_CAN_BE_SEEN_BY_PLAYER}) { }
+#else
+        : WorldObjectScript("IndividualProgression_F14Observer",
+                            {WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER}) { }
+#endif
+
+    bool OnWorldObjectCanBeSeenByPlayer(Player const* observer, WorldObject const* target) override
+    {
+        // Every uncertain, unverified or disabled state is visible.
+        if (!sIndividualProgression->enabled ||
+            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+            !observer || !target || !target->IsPlayer())
+            return true;
+
+        Player const* candidate = target->ToPlayer();
+        if (!candidate || candidate == observer || !candidate->IsInWorld() ||
+            (candidate->getRace() != RACE_DRAENEI && candidate->getRace() != RACE_BLOODELF) ||
+            !candidate->GetSession() || !candidate->GetSession()->IsHeadless() ||
+            !sIndividualProgression->HasF14VerifiedRandomBotIdentity(candidate))
+            return true;
+
+        // No GM, account-excluded human, altbot or unverified observer denial.
+        // Core's own hook additionally bypasses GMs and null-session observers.
+        if (!observer->IsInWorld() || !observer->GetSession() ||
+            observer->GetSession()->IsHeadless())
+            return true;
+        Player* viewer = const_cast<Player*>(observer);
+        if (!sIndividualProgression->isNormalAccount(viewer))
+            return true;
+
+        // Effective stage respects per-character paid expansion entitlements.
+        // A normal observer at stage 8 or higher sees the verified RandomBot.
+        return sIndividualProgression->GetEffectiveProgression(viewer) >= PROGRESSION_PRE_TBC;
+    }
+
+#if defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)
+    bool OnWhoListEntryCanBeSeenByPlayer(Player const* observer, ObjectGuid const& targetGuid,
+                                          uint8 targetRace) override
+    {
+        // WHO is a cached snapshot. Do NOT fetch or dereference the target Player.
+        // Reuse only login-verified RandomBot GUID identity; default ALLOW.
+        if (!sIndividualProgression->enabled ||
+            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+            !observer || !targetGuid || observer->GetGUID() == targetGuid ||
+            (targetRace != RACE_DRAENEI && targetRace != RACE_BLOODELF) ||
+            !sIndividualProgression->HasF14VerifiedRandomBotGuid(targetGuid))
+            return true;
+
+        // Core's WHO handler also bypasses this hook for GM observers.
+        if (!observer->IsInWorld() || !observer->GetSession() ||
+            observer->GetSession()->IsHeadless())
+            return true;
+        Player* viewer = const_cast<Player*>(observer);
+        if (!sIndividualProgression->isNormalAccount(viewer))
+            return true;
+
+        return sIndividualProgression->GetEffectiveProgression(viewer) >= PROGRESSION_PRE_TBC;
+    }
+#endif
+};
+#endif
+
 void AddSC_mod_individual_progression_player()
 {
     new IndividualPlayerProgression();
     new IndividualPlayerProgression_GroupScript();
     new IndividualPlayerProgression_AccountScript();
+#if defined(COSMIC_F14_OBSERVER_HOOK_VERSION)
+    new IndividualProgressionF14ObserverScript();
+#endif
 }

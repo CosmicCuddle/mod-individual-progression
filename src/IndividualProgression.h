@@ -432,6 +432,8 @@ public:
     // F14: verified headless racial RandomBot login stage floor. Do not
     // enable until observer+combat+WHO concealment is actually wired.
     bool f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
+    // F14 world-player and cached WHO pilot, fail OFF until full Core refresh.
+    bool f14ExperimentalRndbotPlayerVisibility = false;
     // Independent F14 group-time pilot; leave OFF until owner approval.
     bool f14ProtectVerifiedRandomBotGroupFloor = false;
     std::string paidExpansionVendorName;
@@ -458,6 +460,11 @@ public:
     // F14: verified GUID is recorded only on the login thread; group workers never call Playerbots.
     void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
     void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
+    // Read-only current verified incarnation; no Playerbots access on
+    // observer/WHO threads. Missing or stale means ALLOW visibility.
+    bool HasF14VerifiedRandomBotIdentity(Player const* player);
+    bool HasF14VerifiedRandomBotGuid(ObjectGuid const& guid);
+    std::uint64_t GetF14VerifiedRandomBotLoginEpoch(ObjectGuid const& guid);
     bool ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage);
     void checkHunterPetSpells(Player* player);
     void checkWarlockPetSpells(Player* player);
@@ -535,6 +542,9 @@ private:
     // F14 optional GroupSync containment; only positively verified headless
     // Blood Elf / Draenei RandomBots are present, refreshed on each login.
     std::unordered_map<uint32, bool> _f14VerifiedRandomBotGroupCache;
+    // Do not recycle a GUID-only identity for a new login incarnation.
+    std::unordered_map<uint32, std::uint64_t> _f14VerifiedRandomBotLoginEpoch;
+    std::uint64_t _f14NextRandomBotLoginEpoch = 0;
     std::shared_mutex _f14GroupCacheLock;
 };
 

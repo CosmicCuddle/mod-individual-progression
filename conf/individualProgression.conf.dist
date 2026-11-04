@@ -62,6 +62,22 @@ IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0
 #
 IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0
 
+
+# IndividualProgression.F14.ExperimentalRndbotPlayerVisibility
+#
+#        DEVELOPMENT ONLY / OFF by default. Player-only F14 observer and
+#        cached /who test hook. Hides only positively VERIFIED current
+#        Blood Elf/Draenei RandomBots from normal Vanilla-stage observers
+#        *if* all required WorldObject/WHO/instant refresh Core hooks exist.
+#        Human, Altbot, GM, excluded-account, unverified and unknown targets
+#        remain visible. Cached WHO never dereferences the target player.
+#        This feature is FORCED OFF if the Playerbots API, Core world/WHO or
+#        versioned immediate refresh bridge is missing. The current Core
+#        prototype does NOT provide that refresh bridge, so this is INACTIVE.
+#        Never enable without owner permission and gameplay regression tests.
+#
+IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0
+
 # IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor
 #
 #        INCOMPLETE F14 / DEVELOPMENT PILOT - DEFAULT OFF.
