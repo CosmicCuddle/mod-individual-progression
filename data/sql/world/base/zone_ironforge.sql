@@ -52,21 +52,6 @@ DELETE FROM `creature_addon` WHERE `guid` = 122;
 INSERT INTO `creature_addon` (`guid`, `path_id`, `mount`, `bytes1`, `bytes2`, `emote`, `visibilityDistanceType`, `auras`) VALUES
 (122, 1220, 0, 0, 1, 0, 0, NULL);
 
--- Grand Mason Marblesten (2790) - ambient route
-UPDATE `creature` SET `MovementType` = 2 WHERE `guid` = 100 AND `id` = 2790;
-
-DELETE FROM `creature_template_addon` WHERE `entry` = 2790;
-INSERT INTO `creature_template_addon` (`entry`, `path_id`, `mount`, `bytes1`, `bytes2`, `emote`) VALUES
-(2790, 27900, 0, 0, 1, 233);
-
-DELETE FROM `waypoint_data` WHERE `id` = 27900;
-INSERT INTO `waypoint_data` (`id`, `point`, `position_x`, `position_y`, `position_z`, `orientation`, `delay`, `move_type`) VALUES
-(27900, 1, -5033.81, -1022.23, 508.876, 3.8613, 30000, 0),
-(27900, 2, -5031.04, -1019.72, 508.876, NULL, 0, 0),
-(27900, 3, -5028.21, -1020.5, 508.876, 5.8955, 30000, 0),
-(27900, 4, -5028.75, -1022.3, 508.876, 4.3993, 30000, 0),
-(27900, 5, -5031.95, -1021.62, 508.876, NULL, 0, 0);
-
 -- Bixi Wobblebonk (13084) - ambient route
 UPDATE `creature` SET `MovementType` = 2 WHERE `guid` = 89 AND `id` = 13084;
 
@@ -353,7 +338,8 @@ INSERT INTO `smart_scripts` (`entryorguid`, `source_type`, `id`, `link`,
 -- Grand Mason Marblesten (2790) quest 689 - carves the Memorial to Sully Balloo
 UPDATE `creature_template` SET `AIName` = 'SmartAI' WHERE `entry` = 2790;
 DELETE FROM `smart_scripts` WHERE `source_type` = 0 AND `entryorguid` = 2790;
-DELETE FROM `smart_scripts` WHERE `source_type` = 9 AND `entryorguid` IN (2790001, 2790002);
+DELETE FROM `smart_scripts` WHERE `source_type` = 9 AND `entryorguid` IN (279001, 279002);
+DELETE FROM `smart_scripts` WHERE `source_type` = 9 AND `entryorguid` IN (2790001, 2790002); -- 00_cleanup
 
 INSERT INTO `smart_scripts` (`entryorguid`, `source_type`, `id`, `link`,
 `event_type`, `event_phase_mask`, `event_chance`, `event_flags`, `event_param1`, `event_param2`, `event_param3`, `event_param4`, `event_param5`, `event_param6`,
@@ -365,22 +351,52 @@ INSERT INTO `smart_scripts` (`entryorguid`, `source_type`, `id`, `link`,
 (2790, 0, 2, 3, 61, 0, 100, 0, 0, 0, 0, 0, 0, 0, 48, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                         'Grand Mason Marblesten - Link - Set Active'),
 (2790, 0, 3, 4, 61, 0, 100, 0, 0, 0, 0, 0, 0, 0, 83, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                         'Grand Mason Marblesten - Link - Remove Questgiver Flag'),
 (2790, 0, 4, 5, 61, 0, 100, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                          'Grand Mason Marblesten - Link - Say Line 0 (get to work)'),
-(2790, 0, 5, 0, 61, 0, 100, 0, 0, 0, 0, 0, 0, 0, 232, 27901, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                    'Grand Mason Marblesten - Link - Start Quest Path'),
-(2790, 0, 6, 0, 108, 0, 100, 0, 6, 27901, 0, 0, 0, 0, 80, 2790001, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,              'Grand Mason Marblesten - On Reaching The Memorial - Run Script'),
-(2790, 0, 7, 0, 108, 0, 100, 0, 11, 27901, 0, 0, 0, 0, 80, 2790002, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,             'Grand Mason Marblesten - On Returning To His Post - Run Script'),
+(2790, 0, 5, 0, 61, 0, 100, 0, 0, 0, 0, 0, 0, 0, 232, 27901, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                    'Grand Mason Marblesten - Link - Start Quest Path'),
+(2790, 0, 6, 0, 108, 0, 100, 0, 6, 27901, 0, 0, 0, 0, 80, 279001, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,               'Grand Mason Marblesten - On Reaching The Memorial - Run Script'),
+(2790, 0, 7, 0, 108, 0, 100, 0, 11, 27901, 0, 0, 0, 0, 80, 279002, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,              'Grand Mason Marblesten - On Returning To His Post - Run Script'),
+(2790, 0, 8, 0, 11, 0, 100, 0, 0, 0, 0, 0, 0, 0, 232, 27900, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                    'Grand Mason Marblesten - On Respawn - Start Ambient Path (repeating)'),
 --
-(2790001, 9, 0, 0, 0, 0, 100, 0, 2000, 2000, 0, 0, 0, 0, 17, 233, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,               'Grand Mason Marblesten - Emote State Work Mining'),
-(2790001, 9, 1, 0, 0, 0, 100, 0, 5950, 5950, 0, 0, 0, 0, 17, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                 'Grand Mason Marblesten - Stop Working'),
-(2790001, 9, 2, 0, 0, 0, 100, 0, 50, 50, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 14, 821, 139852, 0, 0, 0, 0, 0,              'Grand Mason Marblesten - Reveal The Memorial'),
-(2790001, 9, 3, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                        'Grand Mason Marblesten - Say Line 1 (there you have it)'),
-(2790001, 9, 4, 0, 0, 0, 100, 0, 400, 400, 0, 0, 0, 0, 5, 25, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                   'Grand Mason Marblesten - Point At It (after the line, or the talk animation eats it)'),
-(2790001, 9, 5, 0, 0, 0, 100, 0, 5600, 5600, 0, 0, 0, 0, 66, 1, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 1.26,              'Grand Mason Marblesten - Turn Around (away from the memorial)'),
-(2790001, 9, 6, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                        'Grand Mason Marblesten - Say Line 2 (guards will be along)'),
-(2790001, 9, 7, 0, 0, 0, 100, 0, 2000, 2000, 0, 0, 0, 0, 5, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                  'Grand Mason Marblesten - Emote Bow'),
-(2790002, 9, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 17, 233, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                     'Grand Mason Marblesten - Restore His Working Animation (addon emote 233)'),
-(2790002, 9, 1, 0, 0, 0, 100, 0, 500, 500, 0, 0, 0, 0, 232, 27900, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,              'Grand Mason Marblesten - Resume His Ambient Path (repeating)'),
-(2790002, 9, 2, 0, 0, 0, 100, 0, 10, 10, 0, 0, 0, 0, 82, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                     'Grand Mason Marblesten - Add Questgiver Flag'),
-(2790002, 9, 3, 0, 0, 0, 100, 0, 5, 5, 0, 0, 0, 0, 48, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                       'Grand Mason Marblesten - Clear Active');
+(279001, 9, 0, 0, 0, 0, 100, 0, 2000, 2000, 0, 0, 0, 0, 17, 233, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                'Grand Mason Marblesten - Emote State Work Mining'),
+(279001, 9, 1, 0, 0, 0, 100, 0, 5950, 5950, 0, 0, 0, 0, 17, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                  'Grand Mason Marblesten - Stop Working'),
+(279001, 9, 2, 0, 0, 0, 100, 0, 50, 50, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 14, 821, 139852, 0, 0, 0, 0, 0,               'Grand Mason Marblesten - Reveal The Memorial'),
+(279001, 9, 3, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                         'Grand Mason Marblesten - Say Line 1 (there you have it)'),
+(279001, 9, 4, 0, 0, 0, 100, 0, 400, 400, 0, 0, 0, 0, 5, 25, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                    'Grand Mason Marblesten - Point At It (after the line, or the talk animation eats it)'),
+(279001, 9, 5, 0, 0, 0, 100, 0, 5600, 5600, 0, 0, 0, 0, 66, 1, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 1.26,               'Grand Mason Marblesten - Turn Around (away from the memorial)'),
+(279001, 9, 6, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                         'Grand Mason Marblesten - Say Line 2 (guards will be along)'),
+(279001, 9, 7, 0, 0, 0, 100, 0, 2000, 2000, 0, 0, 0, 0, 5, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                   'Grand Mason Marblesten - Emote Bow'),
+--
+(279002, 9, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 17, 233, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                      'Grand Mason Marblesten - Restore His Working Animation (addon emote 233)'),
+(279002, 9, 1, 0, 0, 0, 100, 0, 500, 500, 0, 0, 0, 0, 232, 27900, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,               'Grand Mason Marblesten - Resume His Ambient Path (repeating)'),
+(279002, 9, 2, 0, 0, 0, 100, 0, 10, 10, 0, 0, 0, 0, 82, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                      'Grand Mason Marblesten - Add Questgiver Flag'),
+(279002, 9, 3, 0, 0, 0, 100, 0, 5, 5, 0, 0, 0, 0, 48, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,                        'Grand Mason Marblesten - Clear Active');
+
+-- Grand Mason Marblesten (2790) - ambient route
+UPDATE `creature` SET `MovementType` = 0 WHERE `guid` = 100 AND `id` = 2790;
+
+DELETE FROM `creature_template_addon` WHERE `entry` = 2790;
+INSERT INTO `creature_template_addon` (`entry`, `path_id`, `mount`, `bytes1`, `bytes2`, `emote`) VALUES
+(2790, 0, 0, 0, 1, 233);
+
+DELETE FROM `waypoint_data` WHERE `id` IN (27900, 27901);
+INSERT INTO `waypoint_data` (`id`, `point`, `position_x`, `position_y`, `position_z`, `orientation`, `delay`, `move_type`) VALUES
+--
+(27900, 1, -5033.81, -1022.23, 508.876, 3.8613, 30000, 0),
+(27900, 2, -5031.04, -1019.72, 508.876, NULL, 0, 0),
+(27900, 3, -5028.21, -1020.5, 508.876, 5.8955, 30000, 0),
+(27900, 4, -5028.75, -1022.3, 508.876, 4.3993, 30000, 0),
+(27900, 5, -5031.95, -1021.62, 508.876, NULL, 0, 0),
+--
+(27901, 1, -5032.05, -1014.75, 509.042, NULL, 0, 0),
+(27901, 2, -5030.37, -1009.28, 505.265, NULL, 0, 0),
+(27901, 3, -5028.67, -1007.62, 505.264, NULL, 0, 0),
+(27901, 4, -5023.85, -1009.02, 502.209, NULL, 0, 0),
+(27901, 5, -5022.68, -1009.96, 502.209, NULL, 0, 0),
+(27901, 6, -5027.29, -1018.77, 502.209, 4.34651, 26000, 0),
+(27901, 7, -5022.68, -1009.96, 502.209, NULL, 0, 0),
+(27901, 8, -5023.85, -1009.02, 502.209, NULL, 0, 0),
+(27901, 9, -5028.67, -1007.62, 505.264, NULL, 0, 0),
+(27901, 10, -5030.37, -1009.28, 505.265, NULL, 0, 0),
+(27901, 11, -5032.05, -1014.75, 509.042, NULL, 20, 0);
 
 -- King Magni Bronzebeard 2784 (The scenes themselves are C++ in zone_ironforge.cpp)
 --   683  Sara Balloo's Plea     - delay 0,    broadcast 860,   text emote (ChatTypeID 2)
