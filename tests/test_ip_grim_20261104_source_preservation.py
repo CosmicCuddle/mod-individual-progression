@@ -45,7 +45,8 @@ SHARED = (
 )
 # The overlapping GM commands were reconciled by retaining Cosmic's exact
 # source blob; there is deliberately NO net diff in that protected path.
-CUSTOM_UNCHANGED = "src/cs_individualProgression.cpp"
+CUSTOM_SCOPED = "src/cs_individualProgression.cpp"
+GM_TELEPORT_HELPER = "src/IndividualProgressionGmTeleportPolicy.h"
 CHROMAGGUS_PROTECTED = (
     "src/vanillaScripts/boss_chromaggus.cpp",
     "data/sql/world/base/dungeon_blackwing_lair.sql",
@@ -94,7 +95,7 @@ class ExactProvenance(unittest.TestCase):
             cwd=ROOT, text=True,
         ).splitlines())
         expected = (set(UPSTREAM_ONLY) | set(SHARED)
-                    | {CUSTOM_UNCHANGED, LOADER_ADDITION}
+                    | {CUSTOM_SCOPED, LOADER_ADDITION}
                     | set(CHROMAGGUS_PROTECTED))
         self.assertEqual(len(expected), 27)
         self.assertEqual(changed, expected)
@@ -128,7 +129,7 @@ class ExactProvenance(unittest.TestCase):
              "src", "conf", "data/sql", "optional/sql"],
             cwd=ROOT, text=True,
         ).splitlines())
-        self.assertEqual(changed, set(UPSTREAM_ONLY) | set(SHARED) | {LOADER_ADDITION})
+        self.assertEqual(changed, set(UPSTREAM_ONLY) | set(SHARED) | {LOADER_ADDITION, CUSTOM_SCOPED, GM_TELEPORT_HELPER})
 
     def test_chromaggus_three_files_preserved(self):
         for path in CHROMAGGUS_PROTECTED:
@@ -181,27 +182,26 @@ class PolicyPreservation(unittest.TestCase):
             current("conf/individualProgression.conf.dist"),
         )
 
-    def test_custom_gm_command_bodies_exactly_preserved(self):
-        # The correct merge resolution is the complete custom source blob,
-        # including group raid-difficulty and GM/console protections.
-        self.assertEqual(current(CUSTOM_UNCHANGED), historical(BASE, CUSTOM_UNCHANGED))
+    def test_custom_gm_commands_preserved_except_reviewed_teleport_adaptation(self):
         before = historical(BASE, "src/cs_individualProgression.cpp")
-        after = current("src/cs_individualProgression.cpp")
-        pairs = (
-            ("HandleGetIndividualProgressionCommand", "HandleSetIndividualProgressionCommand"),
-            ("HandleSetIndividualProgressionCommand", "HandleSetBotIndividualProgressionCommand"),
-            ("HandleSetBotIndividualProgressionCommand", "HandleSetRepIndividualProgressionCommand"),
-            ("HandleSetRepIndividualProgressionCommand", "HandlePetIndividualProgressionCommand"),
-            ("HandlePetIndividualProgressionCommand", "HandleTeleIndividualProgressionCommand"),
-            ("HandleTeleIndividualProgressionCommand", "HandleAttuneIndividualProgressionCommand"),
-            ("HandleAttuneIndividualProgressionCommand", "HandlePVPIndividualProgressionCommand"),
-        )
-        for name, nxt in pairs:
-            with self.subTest(command=name):
-                self.assertEqual(
-                    command_source(after, name, nxt),
-                    command_source(before, name, nxt),
-                )
+        after = current(CUSTOM_SCOPED)
+        inc = '#include "IndividualProgressionGmTeleportPolicy.h"' + chr(10)
+        self.assertEqual(after.count(inc), 1)
+        old_tele = command_source(before, "HandleTeleIndividualProgressionCommand", "HandleAttuneIndividualProgressionCommand")
+        new_tele = command_source(after, "HandleTeleIndividualProgressionCommand", "HandleAttuneIndividualProgressionCommand")
+        # Outside this one command and one pure include, protect the full
+        # original Cosmic #46 command source byte-for-byte.
+        self.assertEqual(after.replace(inc, "").replace(new_tele, old_tele), before)
+        self.assertIn("handler->HasLowerSecurity(target)", new_tele)
+        self.assertIn("IndividualProgressionGmTeleportPolicy::CanTeleport(", new_tele)
+        self.assertIn("Group* group = target->GetGroup();", new_tele)
+        self.assertIn("group->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC)", new_tele)
+        self.assertIn("target->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC)", new_tele)
+        self.assertLess(new_tele.index("handler->HasLowerSecurity(target)"),
+                        new_tele.index("target->TeleportTo("))
+        self.assertIn("if (!target || !target->IsInWorld())", new_tele)
+        self.assertIn("if (!player)", new_tele)
+        self.assertIn("CanTeleport(", current(GM_TELEPORT_HELPER))
 
     def test_excluded_human_login_not_silently_rewritten(self):
         source = current("src/IndividualProgressionPlayer.cpp")
