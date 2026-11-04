@@ -30,16 +30,18 @@ class DefaultOff(unittest.TestCase):
         core = read("src/IndividualProgression.cpp")
         self.assertIn('"' + KEY + '", false)', core)
 
-    def test_forced_off_without_hook_playerbots_or_identity_source(self):
+    def test_forced_off_without_hook_or_playerbots_only(self):
         core = read("src/IndividualProgression.cpp")
         start = core.index('"' + KEY + '", false)')
         part = core[start:core.index("sIndividualProgression->fishingFix", start)]
         self.assertIn("!defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION) || COSMIC_F14_ATTACK_EVENT_HOOK_VERSION < 1", part)
         self.assertIn('#if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")', part)
-        self.assertIn("!sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor", part)
-        self.assertIn("!sIndividualProgression->f14ExperimentalRndbotPlayerVisibility", part)
-        self.assertEqual(part.count("f14ExperimentalAttackLifecycleRegistry = false;"), 3)
+        self.assertEqual(part.count("f14ExperimentalAttackLifecycleRegistry = false;"), 2)
         self.assertIn("sIndividualProgression->ResetF14LifecycleRegistry();", part)
+        # Independent opt-in: no coupling to unrelated group/observer features.
+        self.assertNotIn("f14ProtectVerifiedRandomBotGroupFloor", part)
+        self.assertNotIn("f14ExperimentalRndbotPlayerVisibility", part)
+        self.assertNotIn("requires ProtectVerifiedRandomBotGroupFloor", core)
         # The forcing block comes AFTER both identity flags are final.
         self.assertGreater(start, core.index('"IndividualProgression.F14.ExperimentalRndbotPlayerVisibility", false)'))
         self.assertGreater(start, core.index('"IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor", false)'))
@@ -97,7 +99,11 @@ class ConsumerIsBookkeepingOnly(unittest.TestCase):
         # The per-creature state is a value token in the creature's own CustomData.
         self.assertIn("struct F14CreatureIncarnation : public DataMap::Base", src)
         self.assertIn("std::uint64_t token = 0;", src)
-        self.assertIn("std::vector<std::uint64_t> others;", src)
+        # Bounded, allocation-free attacker snapshot under the mutex.
+        self.assertIn("std::array<std::uint64_t, Policy::MaxTrackedAttackers + 1> others{};", src)
+        self.assertIn("if (otherCount == others.size())", src)
+        for unbounded in ("std::vector", ".reserve(", "push_back(", "new std::", "malloc("):
+            self.assertNotIn(unbounded, src)
         # Pure header never names game-object types at all.
         reg = strip_comments(read(REGISTRY))
         self.assertNotRegex(reg, r"\b(Unit|Creature|Player|Map|WorldObject|ObjectGuid)\b")
@@ -122,7 +128,8 @@ class ConsumerIsBookkeepingOnly(unittest.TestCase):
                    "void IndividualProgression::ExpireF14LifecycleActor(",
                    "IndividualProgression::F14LifecycleStatus IndividualProgression::GetF14LifecycleStatus()",
                    "void OnF14AttackTargetTransition(",
-                   "static void RetireIncarnation("):
+                   "static void RetireIncarnation(",
+                   "void OnCreatureRemoveWorld(Creature* creature) override"):
             body = src.split(fn, 1)[1]
             body = body[:body.index("\n}\n") if fn.startswith(("void Ind", "Ind")) else body.index("\n    }\n")]
             self.assertIn("std::lock_guard<std::mutex> guard(LifecycleLock());", body, fn)
@@ -159,6 +166,22 @@ class LockOrderAndRegistration(unittest.TestCase):
         self.assertIn("#if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION)", tail)
         self.assertIn("new IndividualProgressionF14LifecycleScript();", tail)
 
+    def test_removal_uses_existing_core_hook_and_always_retires(self):
+        src = strip_comments(read(SCRIPT))
+        self.assertIn('#include "AllCreatureScript.h"', read(SCRIPT))
+        cls = src.split("class IndividualProgressionF14LifecycleRemovalScript : public AllCreatureScript", 1)[1]
+        body = cls.split("void OnCreatureRemoveWorld(Creature* creature) override", 1)[1]
+        body = body[:body.index("\n    }\n")]
+        self.assertIn("OnCreatureRemovedFromWorld(KeyOf(creature), stamp);", body)
+        self.assertIn("SetStamp(creature, 0);", body)
+        self.assertIn("if (!stamp)", body)
+        self.assertNotIn("f14ExperimentalAttackLifecycleRegistry", body)
+        tail = src.split("void AddSC_mod_individual_progression_f14_lifecycle()", 1)[1]
+        self.assertIn("new IndividualProgressionF14LifecycleRemovalScript();", tail)
+        guard = tail.index("#if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION)")
+        self.assertLess(guard, tail.index("new IndividualProgressionF14LifecycleRemovalScript();"))
+        self.assertLess(tail.index("new IndividualProgressionF14LifecycleRemovalScript();"), tail.index("#endif"))
+
     def test_corpse_and_respawn_always_clear_stamp(self):
         src = strip_comments(read(SCRIPT))
         body = src.split("static void RetireIncarnation(Creature* creature, bool respawn)", 1)[1]
@@ -166,6 +189,50 @@ class LockOrderAndRegistration(unittest.TestCase):
         self.assertIn("OnCreatureCorpseOrRespawn(KeyOf(creature), stamp, respawn);", body)
         self.assertIn("SetStamp(creature, 0);", body)
         self.assertNotIn("f14ExperimentalAttackLifecycleRegistry", body)
+
+
+class IndependentVerifiedLogin(unittest.TestCase):
+    def login_block(self):
+        player = read("src/IndividualProgressionPlayer.cpp")
+        login = player.split("void OnPlayerLogin(Player* player) override", 1)[1].split(
+            "void OnPlayerLogout(Player* player) override", 1)[0]
+        start = login.index("#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE")
+        return player, login[start:login.index("#endif", start)]
+
+    def test_registry_flag_alone_enables_positive_identity_capture(self):
+        player, block = self.login_block()
+        cond = block[block.index("if ((") : block.index("{")]
+        for flag in ("f14ProtectVerifiedRandomBotGroupFloor",
+                     "f14ExperimentalRndbotPlayerVisibility",
+                     "f14ExperimentalAttackLifecycleRegistry"):
+            self.assertIn("sIndividualProgression->" + flag, cond)
+        # The three reasons are OR-ed; every identity gate is still AND-ed.
+        reasons = cond[cond.index("((") + 2 : cond.index(") &&")]
+        self.assertEqual(reasons.count("||"), 2)
+        self.assertNotIn("&&", reasons)
+        for gate in ("sIndividualProgression->isBotAccount(player)",
+                     "(player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF)",
+                     "player->GetSession() && player->GetSession()->IsHeadless()"):
+            self.assertIn(gate, cond)
+        self.assertIn("RememberF14VerifiedRandomBotGroupIdentity(\n                player, sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()));", block)
+        # Humans/Altbots (non-bot accounts), GMs and non-headless sessions never
+        # reach the positive branch; the forget call runs first on every login.
+        login = player.split("void OnPlayerLogin(Player* player) override", 1)[1]
+        self.assertLess(login.index("ForgetF14VerifiedRandomBotGroupIdentity(player);"),
+                        login.index("#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE"))
+
+    def test_registry_flag_used_nowhere_else_in_player_logic(self):
+        player, _ = self.login_block()
+        self.assertEqual(player.count("f14ExperimentalAttackLifecycleRegistry"), 1)
+        for path in ("src/cs_individualProgression.cpp", "src/IndividualProgressionExpansion.cpp"):
+            self.assertNotIn("f14ExperimentalAttackLifecycleRegistry", read(path))
+        core = strip_comments(read("src/IndividualProgression.cpp"))
+        # Only the config load reads/forces it; no stage/group/visibility branch.
+        lo = core.index('"' + KEY + '", false)')
+        hi = core.index("sIndividualProgression->ResetF14LifecycleRegistry();")
+        hits = [m.start() for m in re.finditer(r"f14ExperimentalAttackLifecycleRegistry", core)]
+        self.assertEqual(len(hits), 5)
+        self.assertTrue(all(lo - 200 < h < hi for h in hits), hits)
 
 
 if __name__ == "__main__":

@@ -319,6 +319,46 @@ namespace
         CHECK(Has(r, s, BotA));
     }
 
+    void TestRemovedFromWorld()
+    {
+        R::Registry r;
+        R::CreatureKey const k = Key(229, 3, 0xF130000020);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        s = Begin(r, k, s, BotB, {BotA});
+        // Despawn/grid unload/instance unload while bots are still linked.
+        r.OnCreatureRemovedFromWorld(k, s);
+        CHECK(r.Size() == 0);
+        CHECK(r.GetCounters().removedRetired == 1);
+        R::Entry e;
+        CHECK(!r.Lookup(s, e));
+        // Core's later AttackStop/corpse/respawn on the same stamp: no-ops.
+        r.OnParticipantEnd(k, s, BotA);
+        r.OnCreatureCorpseOrRespawn(k, s, false);
+        r.OnCreatureCorpseOrRespawn(k, s, true);
+        r.OnCreatureRemovedFromWorld(k, s);
+        CHECK(r.Size() == 0);
+        CHECK(r.GetCounters().removedRetired == 1);
+        CHECK(r.GetCounters().corpseRetired == 0);
+        CHECK(r.GetCounters().respawnRetired == 0);
+        // Same map/instance/GUID reused by a new object: clean incarnation,
+        // nothing stale to replace because removal already retired it.
+        std::uint64_t const fresh = Begin(r, k, 0, BotA);
+        CHECK(fresh != 0 && fresh != s);
+        CHECK(Active(r, fresh) == 1);
+        CHECK(!Has(r, fresh, BotB));
+        CHECK(r.GetCounters().staleKeyReplaced == 0);
+        // Removal after corpse (corpse despawn) is idempotent.
+        r.OnCreatureCorpseOrRespawn(k, fresh, false);
+        r.OnCreatureRemovedFromWorld(k, fresh);
+        CHECK(r.Size() == 0);
+        CHECK(r.GetCounters().corpseRetired == 1);
+        CHECK(r.GetCounters().removedRetired == 1);
+        // A stamp/key mismatch on removal is still an impossible state.
+        std::uint64_t const t = Begin(r, k, 0, BotA);
+        r.OnCreatureRemovedFromWorld(Key(229, 4, 0xF130000020), t);
+        CHECK(r.IsPoisoned());
+    }
+
     void TestTokensMonotonicAcrossReset()
     {
         R::Registry r;
@@ -348,6 +388,7 @@ int main()
     TestInvalidKeyPoisons();
     TestVerifiedEndOfUnknownActor();
     TestTokensMonotonicAcrossReset();
+    TestRemovedFromWorld();
 
     unsigned const total = g_pass + g_fail;
     std::printf("F14 LIFECYCLE REGISTRY %u/%u passed\n", g_pass, total);
