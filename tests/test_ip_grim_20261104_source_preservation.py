@@ -182,16 +182,29 @@ class PolicyPreservation(unittest.TestCase):
             current("conf/individualProgression.conf.dist"),
         )
 
-    def test_custom_gm_commands_preserved_except_reviewed_teleport_adaptation(self):
+    def test_custom_gm_commands_preserved_except_reviewed_security_and_teleport(self):
         before = historical(BASE, "src/cs_individualProgression.cpp")
         after = current(CUSTOM_SCOPED)
         inc = '#include "IndividualProgressionGmTeleportPolicy.h"' + chr(10)
         self.assertEqual(after.count(inc), 1)
         old_tele = command_source(before, "HandleTeleIndividualProgressionCommand", "HandleAttuneIndividualProgressionCommand")
         new_tele = command_source(after, "HandleTeleIndividualProgressionCommand", "HandleAttuneIndividualProgressionCommand")
-        # Outside this one command and one pure include, protect the full
-        # original Cosmic #46 command source byte-for-byte.
-        self.assertEqual(after.replace(inc, "").replace(new_tele, old_tele), before)
+        old_set = command_source(before, "HandleSetIndividualProgressionCommand", "HandleSetBotIndividualProgressionCommand")
+        new_set = command_source(after, "HandleSetIndividualProgressionCommand", "HandleSetBotIndividualProgressionCommand")
+        guard = ("        // Match Grim upstream: reject lower-security GM actions on protected targets.\\n"
+                 "        // Enforce before any stage reads, achievement resets or paid-mode auditing.\\n"
+                 "        if (handler->HasLowerSecurity(target))\\n"
+                 "            return false;\\n\\n")
+        self.assertEqual(new_set, old_set.replace(
+            "        std::string playername = target->GetName();\\n",
+            guard + "        std::string playername = target->GetName();\\n"))
+        self.assertLess(new_set.index("if (handler->HasLowerSecurity(target))"),
+                        new_set.index("CheckProgressionAchievements(target"))
+        self.assertLess(new_set.index("if (handler->HasLowerSecurity(target))"),
+                        new_set.index("ForceUpdateProgressionState(target"))
+        # Protect the entire rest of the custom #46 file byte-for-byte,
+        # including all non-set/tele commands, parser and audit rules.
+        self.assertEqual(after.replace(inc, "").replace(new_tele, old_tele).replace(new_set, old_set), before)
         self.assertIn("handler->HasLowerSecurity(target)", new_tele)
         self.assertIn("IndividualProgressionGmTeleportPolicy::CanTeleport(", new_tele)
         self.assertIn("Group* group = target->GetGroup();", new_tele)

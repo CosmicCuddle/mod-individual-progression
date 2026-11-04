@@ -187,6 +187,11 @@ public:
             return false;
         }
 
+        // Match Grim upstream: reject lower-security GM actions on protected targets.
+        // Enforce before any stage reads, achievement resets or paid-mode auditing.
+        if (handler->HasLowerSecurity(target))
+            return false;
+
         std::string playername = target->GetName();
         uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(target);
         uint32 currentArea = target->GetAreaId();
