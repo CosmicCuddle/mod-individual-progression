@@ -9,7 +9,7 @@ diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.h b/src/server/g
 +    UNITHOOK_ON_F14_CREATURE_VISIBILITY_REFRESH_REQUEST,
      UNITHOOK_END
  };
-@@ -121,3 +122,7 @@
+@@ -121,2 +122,6 @@
      virtual void OnF14CreatureRespawned(Creature* /*creature*/) { }
 +    // Set request=true only with a complete and current conceal/reveal proof.
 +    // Called after the combat/corpse/respawn bookkeeping hook returned;
@@ -19,7 +19,7 @@ diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.h b/src/server/g
 diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp b/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
 --- a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
 +++ b/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
-@@ -156,3 +156,12 @@
+@@ -156,3 +156,11 @@
          script->OnF14CreatureRespawned(creature));
  }
 +bool ScriptMgr::ShouldF14RefreshCreatureVisibility(Creature const* creature)
@@ -30,11 +30,12 @@ diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp b/src/server
 +        script->OnF14CreatureVisibilityRefreshRequested(creature, requested));
 +    return requested;
 +}
- 
+-
++
 diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
 --- a/src/server/game/Scripting/ScriptMgr.h
 +++ b/src/server/game/Scripting/ScriptMgr.h
-@@ -588,3 +588,5 @@
+@@ -588,2 +588,4 @@
      void OnF14CreatureRespawned(Creature* creature);
 +    // Default FALSE unless a future reviewed F14 UnitScript requests a pass.
 +    bool ShouldF14RefreshCreatureVisibility(Creature const* creature);
@@ -42,7 +43,7 @@ diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/S
 diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
 --- a/src/server/game/Entities/Unit/Unit.cpp
 +++ b/src/server/game/Entities/Unit/Unit.cpp
-@@ -7085,3 +7085,24 @@
+@@ -7085,3 +7085,21 @@
      return my_faction->IsNeutralToAll();
  }
 +// Re-resolve GUIDs on the current map AFTER F14 script bookkeeping returns.
@@ -63,30 +64,42 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 +        return;
 +    target->UpdateObjectVisibility(true);
 +}
- 
-@@ -7179,3 +7200,9 @@
+-
++
+@@ -7163,1 +7184,4 @@
+     Unit* const f14PreviousVictim = m_attacking;
++    // Capture GUIDs BEFORE script calls may retire or remove their targets.
++    ObjectGuid const f14PreviousGuid = f14PreviousVictim ? f14PreviousVictim->GetGUID() : ObjectGuid::Empty;
++    ObjectGuid const f14CurrentGuid = victim->GetGUID();
+@@ -7179,2 +7200,7 @@
      sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);
 +    // The observer hook has returned; re-resolve targets from GUIDs before
 +    // requesting any viewer pass. Old target must reappear on target switch.
-+    F14MaybeRefreshCreatureVisibility(this, f14PreviousVictim ? f14PreviousVictim->GetGUID() : ObjectGuid::Empty);
-+    if (!f14PreviousVictim || f14PreviousVictim != victim)
-+        F14MaybeRefreshCreatureVisibility(this, victim->GetGUID());
- 
-@@ -7261,3 +7288,6 @@
++    F14MaybeRefreshCreatureVisibility(this, f14PreviousGuid);
++    if (f14PreviousGuid != f14CurrentGuid)
++        F14MaybeRefreshCreatureVisibility(this, f14CurrentGuid);
+-
++
+@@ -7243,1 +7275,3 @@
+     Unit* victim = m_attacking;
++    // The F14 callback may invalidate target lifetime: keep GUID only.
++    ObjectGuid const f14VictimGuid = victim->GetGUID();
+@@ -7261,2 +7288,4 @@
      sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);
 +    // Request visibility only AFTER the registry's attack-stop callback.
-+    F14MaybeRefreshCreatureVisibility(this, victim->GetGUID());
- 
++    F14MaybeRefreshCreatureVisibility(this, f14VictimGuid);
+-
++
 diff --git a/src/server/game/Entities/Creature/Creature.cpp b/src/server/game/Entities/Creature/Creature.cpp
 --- a/src/server/game/Entities/Creature/Creature.cpp
 +++ b/src/server/game/Entities/Creature/Creature.cpp
-@@ -2011,3 +2011,6 @@
+@@ -2011,2 +2011,5 @@
          sScriptMgr->OnF14CreatureCorpseReady(this);
 +        // Corpse loot/quest rights require restoring the viewer's object.
 +        if (IsInWorld() && !IsPet() && sScriptMgr->ShouldF14RefreshCreatureVisibility(this))
 +            UpdateObjectVisibility(true);
      }
-@@ -2043,3 +2046,6 @@
+@@ -2043,2 +2046,6 @@
          sScriptMgr->OnF14CreatureRespawned(this);
 +        // Respawn changes the incarnation; re-evaluate nearby viewers if
 +        // a future positively verified F14 script explicitly requests it.
