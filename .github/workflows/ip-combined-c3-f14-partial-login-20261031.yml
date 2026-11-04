@@ -30,6 +30,12 @@ concurrency:
 
 jobs:
   combined-source-and-negative-regression:
+    # Historical frozen-source and fixed-pinned-CI check: run only on
+    # the exact original PR development head. Later Grim-source integration
+    # uses the replacement 20261104 release checks and real native builds.
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'integration/hunter-group-c3-f14-partial-login-20261031') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/hunter-group-c3-f14-partial-login-20261031')
     name: Port source, default-OFF F14 guard, C3 leader guard, Hunter and grouping regressions
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -103,6 +109,12 @@ jobs:
           echo 'No owner host, game launch, SQL, character data, config enablement or merge.'
 
   full-native-off-by-default:
+    # Historical frozen-source and fixed-pinned-CI check: run only on
+    # the exact original PR development head. Later Grim-source integration
+    # uses the replacement 20261104 release checks and real native builds.
+    if: >-
+      (github.event_name == 'pull_request' && github.head_ref == 'integration/hunter-group-c3-f14-partial-login-20261031') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/hunter-group-c3-f14-partial-login-20261031')
     name: Build and link pinned Worldserver with combined C3 + partial F14 login source (NO LAUNCH)
     runs-on: ubuntu-24.04
     timeout-minutes: 170
