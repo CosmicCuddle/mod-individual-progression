@@ -1,0 +1,73 @@
+# F14 early development: owner-verified racial rndbot floor remains default-OFF.
+# No Worldserver launch, database or host writes; no visibility hook exists yet.
+name: F14 verified RandomBot TBC login floor (OFF, pure/source)
+on:
+  pull_request:
+    branches:
+      - work/cs01-grim-upstream-source-merge-20261104
+    paths:
+      - ".github/workflows/ip-f14-rndbot-stage-floor-20261104.yml"
+      - "src/**"
+      - "conf/individualProgression.conf.dist"
+      - "tests/f14_verified_rndbot_tbc_floor.cpp"
+      - "tests/test_ip_f14_verified_rndbot_tbc_floor.py"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+permissions:
+  contents: read
+
+jobs:
+  source-and-model:
+    name: OFF + positive identity model (${{ matrix.cxx }} ${{ matrix.std }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - name: Checkout exact proposed F14 child
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Audit immutable Grim and Cosmic parent + exact modified-file scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor 7562a526ff3f20a38876e0a4f916593fee773c37 HEAD
+          git merge-base --is-ancestor 42c9a32892740af55a40e076e6381cc879181396 HEAD
+          git diff --name-only 7562a526ff3f20a38876e0a4f916593fee773c37 HEAD | sort > /tmp/f14-actual
+          printf '%s\n' \
+            '.github/workflows/ip-f14-rndbot-stage-floor-20261104.yml' \
+            'conf/individualProgression.conf.dist' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'src/IndividualProgression.cpp' \
+            'src/IndividualProgression.h' \
+            'src/IndividualProgressionF14LoginPolicy.h' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'tests/f14_verified_rndbot_tbc_floor.cpp' \
+            'tests/test_ip_f14_verified_rndbot_tbc_floor.py' | sort > /tmp/f14-allowed
+          diff -u /tmp/f14-allowed /tmp/f14-actual
+          git diff --check 7562a526ff3f20a38876e0a4f916593fee773c37 HEAD
+      - name: Source guards prove OFF and positively verified RandomBots only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_verified_rndbot_tbc_floor.py' -v
+          grep -Fqx 'IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0' conf/individualProgression.conf.dist
+      - name: Compile and execute pure C++ stage floor model (NOT Worldserver)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${{ matrix.cxx }}" "-std=${{ matrix.std }}" -O2 -UNDEBUG -Wall -Wextra -Werror -pedantic \
+            tests/f14_verified_rndbot_tbc_floor.cpp -o /tmp/f14-racial-rndbot-stage-floor
+          /tmp/f14-racial-rndbot-stage-floor
+      - name: Audit limits
+        if: always()
+        run: |
+          echo 'This is model and source CI ONLY; not a native build, gameplay or visibility validation.'
+          echo 'F14 Core visibility refresh remains absent; no server startup, character writes or production change.'
+          echo 'Do NOT turn the F14 stage flag on until WHO/world/creature/loot/observer policy is integrated and owner-approved.'
