@@ -53,10 +53,6 @@ jobs:
           test -z "$(git diff --name-only 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD -- conf sql data optional)"
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_logout_mapthread_source.py' -v
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_postevent_reveal_request_source.py' -v
-          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_logout_mapthread_source.py' -v
-          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -O2 -I"$ip/src" \
-            "$ip/tests/f14_logout_refresh_queue.cpp" -o /tmp/f14-logout-native-model
-          /tmp/f14-logout-native-model
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_lifecycle_source.py' -v
           for standard in c++17 c++20; do
             g++ -std="$standard" -Wall -Wextra -Werror -pedantic -O2 -Isrc \
@@ -185,6 +181,10 @@ jobs:
           ip=acore/modules/mod-individual-progression
           python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_lifecycle_source.py' -v
           python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_postevent_reveal_request_source.py' -v
+          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_logout_mapthread_source.py' -v
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -O2 -I"$ip/src" \
+            "$ip/tests/f14_logout_refresh_queue.cpp" -o /tmp/f14-logout-native-model
+          /tmp/f14-logout-native-model
           grep -Fq 'bool OnF14ShouldRefreshCreatureVisibility(Creature const* creature) override' "$ip/src/IndividualProgressionF14LifecycleScript.cpp"
           echo 'PASS: real IP C++ source guarded; no Runtime/DB feature enabled'
 
