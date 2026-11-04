@@ -6,10 +6,10 @@
  * the pure IndividualProgressionF14LifecycleRegistry up to date.
  *
  * Stage 2: existing UnitScript damage / periodic / heal / combat / evade
- * hooks are INVALIDATION evidence only, and a bounded complete threat +
- * combat + attacker + tap snapshot fills the creature half of the pure
- * F14CombatVisibilityPolicy::CreatureSnapshot. The observer half and the
- * Core refresh bridge do not exist here, so nothing can be concealed.
+ * hooks are INVALIDATION evidence only, and a bounded threat + combat +
+ * attacker + tap snapshot is recorded as NON-AUTHORITATIVE conservative
+ * evidence. It can only add uncertainty; it never sets any participant or
+ * rights proof, and nothing consumes it for visibility.
  *
  * Bookkeeping ONLY. It hides nothing, sends no packets, requests no visibility
  * refresh, writes no stage/SQL/settings and never calls Playerbots. Actor
@@ -108,7 +108,7 @@ IndividualProgression::F14LifecycleStatus IndividualProgression::GetF14Lifecycle
                      c.leftCombatRetired + c.staleKeyReplaced;
     status.evidenceInvalidations = c.evidenceInvalidations + c.assistInvalidations;
     status.snapshotsApplied = c.snapshotsApplied;
-    status.snapshotsVerified = c.snapshotsVerified;
+    status.snapshotsOnlyVerifiedBots = c.snapshotsOnlyVerifiedBots;
     return status;
 }
 
@@ -189,11 +189,12 @@ namespace
                creature->GetNpcFlags() == UNIT_NPC_FLAG_NONE;
     }
 
-    // Complete, bounded, allocation-free participant snapshot of a tracked
-    // creature, taken on its map thread under LifecycleLock(). Every unit is
-    // reduced to a token immediately; nothing is retained. Must only be
+    // Bounded, allocation-free, NON-AUTHORITATIVE participant snapshot of a
+    // tracked creature, taken on its map thread under LifecycleLock(). Every
+    // unit is reduced to a token immediately; nothing is retained. Only
     // called from an event whose source is already rostered (see
-    // OnParticipantEvidence) so a just-added participant is never missed.
+    // OnParticipantEvidence). It is not a census of every participant or
+    // right; it can only add uncertainty in the registry.
     Registry::ParticipantSnapshot CollectSnapshot(Creature* creature)
     {
         Registry::ParticipantSnapshot snap;
@@ -208,7 +209,9 @@ namespace
             (!tapper || (tapper.IsPlayer() &&
                          sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(tapper) != 0));
 
-        bool complete = creature->GetThreatMgr().CanHaveThreatList() &&
+        // API unavailability or a creature not in its map => unknown => visible.
+        bool complete = creature->IsInWorld() && creature->FindMap() &&
+                        creature->GetThreatMgr().CanHaveThreatList() &&
                         creature->GetCombatManager().GetPvPCombatRefs().empty();
         bool unverifiedSeen = false;
         auto addParticipant = [&](Unit const* unit)

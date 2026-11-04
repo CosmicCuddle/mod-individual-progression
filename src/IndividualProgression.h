@@ -484,7 +484,7 @@ public:
         std::uint64_t retired = 0;
         std::uint64_t evidenceInvalidations = 0;
         std::uint64_t snapshotsApplied = 0;
-        std::uint64_t snapshotsVerified = 0;
+        std::uint64_t snapshotsOnlyVerifiedBots = 0;
     };
     F14LifecycleStatus GetF14LifecycleStatus();
     void ResetF14LifecycleRegistry();

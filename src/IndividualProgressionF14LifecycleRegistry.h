@@ -5,12 +5,12 @@
  * plain value tokens BEFORE calling in, and holds one mutex around every
  * call. This header never stores Unit*, Player*, Creature* or Map*, never
  * queries Playerbots, never sends packets, never writes stages, SQL or
- * settings, and NEVER authorises concealment. An event-built roster has
- * no participant proof. Only a complete, all-verified map-thread snapshot
- * (ApplyParticipantSnapshot) at the current generation sets it, and that
- * is still only the observer-agnostic CREATURE half of the pure
- * F14CombatVisibilityPolicy: the observer half and the Core refresh bridge
- * are not provided here.
+ * settings, and NEVER authorises concealment. No roster built here ever
+ * carries the pure model's participant proof: HasVerifiedAttackerCandidates()
+ * and IsConcealmentCandidate() stay false for every entry. Core threat /
+ * combat / tap snapshots are recorded only as NON-AUTHORITATIVE
+ * ConservativeEvidence: they can add uncertainty, never remove it, and are
+ * not a complete census of participants or rights (CS01 acceptance rule).
  *
  * Token rules (no recycling, so no "expired" ledgers are needed):
  *  - actor token  = the nonzero, monotonic, never-wrapping per-login epoch
@@ -102,7 +102,7 @@ namespace IndividualProgressionF14LifecycleRegistry
         std::uint64_t evidenceInvalidations = 0;
         std::uint64_t assistInvalidations = 0;
         std::uint64_t snapshotsApplied = 0;
-        std::uint64_t snapshotsVerified = 0;
+        std::uint64_t snapshotsOnlyVerifiedBots = 0;
     };
 
     // Creature-side facts sampled synchronously on the owning map thread by
@@ -134,12 +134,32 @@ namespace IndividualProgressionF14LifecycleRegistry
     {
         bool valid = false;
         std::uint32_t generation = 0;
-        bool complete = false;
+        bool enumerated = false;
         bool plainUnscriptedNonEliteHostileNpc = false;
         bool alive = false;
         bool inCombat = false;
         bool tapHolderNoneOrVerifiedBot = false;
-        bool everyParticipantVerified = false;
+        bool observedOnlyVerifiedBots = false;
+    };
+
+    // NON-AUTHORITATIVE bookkeeping evidence. It is NOT a census of every
+    // participant, NOT proof of tap/loot/quest/kill/skin rights, NOT proof
+    // that no delayed damage/heal/credit exists, and must NEVER be consumed
+    // for visibility. Every flag is false unless observed at the current
+    // generation. A future, separate complete rights audit is mandatory.
+    struct ConservativeEvidence
+    {
+        std::uint64_t creatureToken = 0;
+        std::uint32_t generation = 0;
+        bool current = false;
+        bool rosterUncertain = true;
+        unsigned verifiedAttackers = 0;
+        bool enumeratedWithinBounds = false;
+        bool plainUnscriptedNonEliteHostileNpc = false;
+        bool alive = false;
+        bool inCombat = false;
+        bool threatCombatAndAttackersObservedOnlyVerifiedBots = false;
+        bool tapHolderObservedNoneOrVerifiedBot = false;
     };
 
     struct Entry
@@ -182,11 +202,10 @@ namespace IndividualProgressionF14LifecycleRegistry
         std::size_t Capacity() const { return _maxCreatures; }
         Counters const& GetCounters() const { return _counters; }
 
-        // Read-only. True only after a complete, all-verified map-thread
-        // snapshot at the current generation (ApplyParticipantSnapshot);
-        // event-built rosters alone never qualify. This is the PARTICIPANT
-        // half of the model only: it is not a concealment decision.
-        bool HasParticipantProof(std::uint64_t stamp) const
+        // Read-only. Always false: no roster built here ever carries the
+        // pure model's participant/rights proof (event rosters and
+        // snapshots alike); false whenever poisoned or unknown.
+        bool IsConcealmentCandidate(std::uint64_t stamp) const
         {
             if (IsPoisoned() || stamp == 0)
                 return false;
@@ -433,15 +452,16 @@ namespace IndividualProgressionF14LifecycleRegistry
             if (Guard())
                 return false;
             Entry* entry = Find(stamp, key);
-            return entry && (!entry->facts.valid || entry->facts.generation != entry->state.generation ||
-                             entry->state.uncertain);
+            return entry && (!entry->facts.valid || entry->facts.generation != entry->state.generation);
         }
 
-        // Apply a complete map-thread snapshot. Only an all-verified,
-        // complete, alive snapshot may rebuild the roster from the actual
-        // attacker set (pure ReplaceWithFullyVerifiedRoster) and set the
-        // participant proof (pure ReverifyCompleteParticipantFacts). Any
-        // gap leaves or makes the entry uncertain. Never creates an entry.
+        // Record a bounded map-thread snapshot as NON-AUTHORITATIVE evidence.
+        // It can only ADD uncertainty (any unverified participant, overflow,
+        // unenumerable list or dead creature); it never clears uncertainty,
+        // never rebuilds the roster and never sets the pure participant proof
+        // (no ReplaceWithFullyVerifiedRoster / ReverifyCompleteParticipantFacts:
+        // Core threat/combat/tap APIs are not a complete census of rights).
+        // Never creates an entry.
         void ApplyParticipantSnapshot(CreatureKey const& key, std::uint64_t stamp, ParticipantSnapshot const& snap)
         {
             if (Guard())
@@ -451,67 +471,36 @@ namespace IndividualProgressionF14LifecycleRegistry
                 return;
             ++_counters.snapshotsApplied;
 
-            bool allVerified = snap.complete &&
-                               snap.attackerCount <= Policy::MaxTrackedAttackers &&
-                               snap.participantCount <= MaxSnapshotParticipants;
-            std::array<std::uint64_t, Policy::MaxTrackedAttackers> roster{};
-            std::size_t rosterCount = 0;
-            if (allVerified)
-            {
-                for (std::size_t i = 0; i < snap.participantCount; ++i)
-                    if (snap.participants[i] == 0)
-                        allVerified = false;
-                for (std::size_t i = 0; i < snap.attackerCount && allVerified; ++i)
-                {
-                    std::uint64_t const actor = snap.attackers[i];
-                    if (actor == 0)
-                    {
-                        allVerified = false;
-                        break;
-                    }
-                    bool duplicate = false;
-                    for (std::size_t j = 0; j < rosterCount; ++j)
-                        if (roster[j] == actor)
-                            duplicate = true;
-                    if (!duplicate)
-                        roster[rosterCount++] = actor;
-                }
-            }
+            bool const enumerated = snap.complete &&
+                                    snap.attackerCount <= Policy::MaxTrackedAttackers &&
+                                    snap.participantCount <= MaxSnapshotParticipants;
+            bool onlyVerified = enumerated;
+            for (std::size_t i = 0; onlyVerified && i < snap.participantCount; ++i)
+                if (snap.participants[i] == 0)
+                    onlyVerified = false;
+            for (std::size_t i = 0; onlyVerified && i < snap.attackerCount; ++i)
+                if (snap.attackers[i] == 0)
+                    onlyVerified = false;
 
-            if (allVerified && snap.alive && entry->state.alive)
-            {
-                Policy::Transition const replaced = Policy::ReplaceWithFullyVerifiedRoster(
-                    entry->state, entry->token, entry->state.generation, roster, rosterCount, true);
-                entry->state = replaced.state;
-                if (!entry->state.uncertain)
-                    entry->state = Policy::ReverifyCompleteParticipantFacts(
-                        entry->state, entry->token, entry->state.generation, true);
-            }
-            else
-            {
-                allVerified = false;
+            if (!onlyVerified || !snap.alive)
                 Apply(*entry, Policy::Event::UnverifiedOrHumanParticipant, 0);
-            }
 
             SnapshotFacts& facts = entry->facts;
             facts = {};
             facts.valid = true;
             facts.generation = entry->state.generation;
-            facts.complete = snap.complete;
+            facts.enumerated = enumerated;
             facts.plainUnscriptedNonEliteHostileNpc = snap.plainUnscriptedNonEliteHostileNpc;
             facts.alive = snap.alive;
             facts.inCombat = snap.inCombat;
             facts.tapHolderNoneOrVerifiedBot = snap.tapHolderNoneOrVerifiedBot;
-            facts.everyParticipantVerified = allVerified && !entry->state.uncertain;
-            if (facts.everyParticipantVerified)
-                ++_counters.snapshotsVerified;
+            facts.observedOnlyVerifiedBots = onlyVerified && snap.alive;
+            if (facts.observedOnlyVerifiedBots)
+                ++_counters.snapshotsOnlyVerifiedBots;
         }
 
-        // Observer-agnostic creature half of the pure visibility model.
-        // Fields are true only for a current snapshot at the CURRENT
-        // generation. The observer half (and the Core refresh bridge) is
-        // NOT provided here, so this alone can never conceal anything.
-        bool BuildCreatureSnapshot(std::uint64_t stamp, Visibility::CreatureSnapshot& out) const
+        // Non-authoritative evidence for diagnostics/tests only.
+        bool GetConservativeEvidence(std::uint64_t stamp, ConservativeEvidence& out) const
         {
             out = {};
             if (IsPoisoned() || stamp == 0)
@@ -521,21 +510,43 @@ namespace IndividualProgressionF14LifecycleRegistry
                 return false;
             Entry const& e = it->second;
             SnapshotFacts const& f = e.facts;
-            bool const current = f.valid && f.generation != 0 && f.generation == e.state.generation &&
-                                 !e.state.uncertain;
-            out.creatureIdentityToken = e.token;
+            bool const current = f.valid && f.generation != 0 && f.generation == e.state.generation;
+            out.creatureToken = e.token;
             out.generation = e.state.generation;
             out.current = current;
-            out.complete = current && f.complete;
+            out.rosterUncertain = e.state.uncertain;
+            out.verifiedAttackers = Policy::ActiveAttackers(e.state);
+            out.enumeratedWithinBounds = current && f.enumerated;
             out.plainUnscriptedNonEliteHostileNpc = current && f.plainUnscriptedNonEliteHostileNpc;
             out.alive = current && f.alive && e.state.alive;
             out.inCombat = current && f.inCombat;
-            out.eligibleHiddenRandomBotCurrentlyAttackingThisCreature =
-                current && Policy::HasVerifiedAttackerCandidates(e.state);
-            out.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion = current && f.everyParticipantVerified;
-            out.noRealPlayerCombatThreatTapOrRights =
-                current && f.everyParticipantVerified && f.tapHolderNoneOrVerifiedBot;
-            out.noPendingThreatOrCombatantChanges = current;
+            out.threatCombatAndAttackersObservedOnlyVerifiedBots = current && f.observedOnlyVerifiedBots;
+            out.tapHolderObservedNoneOrVerifiedBot = current && f.tapHolderNoneOrVerifiedBot;
+            return true;
+        }
+
+        // The pure visibility model's creature half. Only identity, revision
+        // and plain observations are filled; EVERY authoritative proof field
+        // (complete, eligible attacker, every participant verified, no real
+        // player rights, nothing pending) stays FALSE, because this stage
+        // has no complete participant/rights census. It can never conceal.
+        bool BuildCreatureSnapshot(std::uint64_t stamp, Visibility::CreatureSnapshot& out) const
+        {
+            out = {};
+            ConservativeEvidence ev;
+            if (!GetConservativeEvidence(stamp, ev))
+                return false;
+            out.creatureIdentityToken = ev.creatureToken;
+            out.generation = ev.generation;
+            out.current = ev.current;
+            out.plainUnscriptedNonEliteHostileNpc = ev.plainUnscriptedNonEliteHostileNpc;
+            out.alive = ev.alive;
+            out.inCombat = ev.inCombat;
+            out.complete = false;
+            out.eligibleHiddenRandomBotCurrentlyAttackingThisCreature = false;
+            out.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion = false;
+            out.noRealPlayerCombatThreatTapOrRights = false;
+            out.noPendingThreatOrCombatantChanges = false;
             return true;
         }
 
