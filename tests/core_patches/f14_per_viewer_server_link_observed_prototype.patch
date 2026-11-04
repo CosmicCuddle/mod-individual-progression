@@ -1,0 +1,93 @@
+# F14 CI-only prototype; apply AFTER original Core #56 + Core after-pass #67.
+# Observer of per-viewer server-side link transitions; NOT packet/client ACK.
+# Never define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION here.
+diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
+--- a/src/server/game/Scripting/ScriptMgr.h
++++ b/src/server/game/Scripting/ScriptMgr.h
+@@ -741,3 +741,6 @@
+     void OnF14VisibilityReevaluationProcessed(WorldObject const* object, bool playerFrame);
+-
++
++    // Viewer/target link transition only; not client delivery proof.
++    void OnF14ViewerTargetLinkChanged(Player const* observer, WorldObject const* target, bool nowLinked, bool batched);
++
+ public: /* PetScript */
+diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+--- a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
++++ b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+@@ -33,3 +33,4 @@
+     WORLDOBJECTHOOK_ON_F14_VISIBILITY_REEVALUATION_PROCESSED,
++    WORLDOBJECTHOOK_ON_F14_VIEWER_TARGET_LINK_CHANGED,
+     WORLDOBJECTHOOK_END
+ };
+@@ -101,4 +102,10 @@
+     virtual void OnF14VisibilityReevaluationProcessed(WorldObject const* /*object*/, bool /*playerFrame*/) { }
++
++    // Called after server-side per-viewer object link changes.
++    // batched=true: only queued UpdateData (not yet packet delivery).
++    // Never mutate a target or recurse into visibility here.
++    virtual void OnF14ViewerTargetLinkChanged(Player const* /*observer*/, WorldObject const* /*target*/,
++                                             bool /*nowLinked*/, bool /*batched*/) { }
+ };
+-
++
+ #endif
+diff --git a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
+--- a/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
++++ b/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
+@@ -83,4 +83,11 @@
+         script->OnF14VisibilityReevaluationProcessed(object, playerFrame));
+ }
+-
++
++void ScriptMgr::OnF14ViewerTargetLinkChanged(Player const* observer, WorldObject const* target, bool nowLinked, bool batched)
++{
++    ASSERT(observer && target);
++    CALL_ENABLED_HOOKS(WorldObjectScript, WORLDOBJECTHOOK_ON_F14_VIEWER_TARGET_LINK_CHANGED,
++        script->OnF14ViewerTargetLinkChanged(observer, target, nowLinked, batched));
++}
++
+ WorldObjectScript::WorldObjectScript(char const* name, std::vector<uint16> enabledHooks)
+diff --git a/src/server/game/Entities/Player/PlayerUpdates.cpp b/src/server/game/Entities/Player/PlayerUpdates.cpp
+--- a/src/server/game/Entities/Player/PlayerUpdates.cpp
++++ b/src/server/game/Entities/Player/PlayerUpdates.cpp
+@@ -1702,4 +1702,8 @@
+ void Player::UpdateVisibilityOf(T* target, UpdateData& data,
+                                 std::vector<Unit*>& visibleNow)
+ {
++    // Report only non-pet Creature/Player transitions; do not retain pointers.
++    bool const f14Reportable = target->IsPlayer() ||
++        (target->IsCreature() && !target->ToCreature()->IsPet());
++    bool const f14WasLinked = f14Reportable && HaveAtClient(target);
+     GetMap()->AddObjectToPendingUpdateList(target);
+@@ -1722,6 +1726,9 @@
+             UpdateVisibilityOf_helper(this, target, visibleNow);
+         }
+     }
++    // Batched visibility link bookkeeping precedes actual packet building.
++    if (f14Reportable && f14WasLinked != HaveAtClient(target))
++        sScriptMgr->OnF14ViewerTargetLinkChanged(this, target, HaveAtClient(target), true);
+ }
+-
++
+ void Player::GetInitialVisiblePackets(Unit* target)
+@@ -1738,4 +1745,7 @@
+ void Player::UpdateVisibilityOf(WorldObject* target)
+ {
++    bool const f14Reportable = target->IsPlayer() ||
++        (target->IsCreature() && !target->ToCreature()->IsPet());
++    bool const f14WasLinked = f14Reportable && HaveAtClient(target);
+     if (HaveAtClient(target))
+     {
+@@ -1762,6 +1772,10 @@
+                 GetInitialVisiblePackets((Unit*) target);
+         }
+     }
++    // Direct target update already executed the server-side create/destroy.
++    // This is not proof a WoW 3.3.5a client rendered the packet.
++    if (f14Reportable && f14WasLinked != HaveAtClient(target))
++        sScriptMgr->OnF14ViewerTargetLinkChanged(this, target, HaveAtClient(target), false);
+ }
+-
++
+ void Player::UpdateTriggerVisibility()
