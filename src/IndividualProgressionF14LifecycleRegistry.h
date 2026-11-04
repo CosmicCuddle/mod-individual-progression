@@ -50,6 +50,10 @@ namespace IndividualProgressionF14LifecycleRegistry
     constexpr std::size_t DefaultMaxCreatures = 4096;
     // Distinct participants a complete snapshot may list. More => incomplete.
     constexpr std::size_t MaxSnapshotParticipants = 32;
+    // Total entries a snapshot may VISIT across the threat list, PvE combat
+    // refs and attacker set, duplicates included. This bounds the time the
+    // global lifecycle mutex is held, independent of unique-token count.
+    constexpr std::size_t MaxSnapshotVisits = 64;
 
     // Identity of the live creature object as seen by the map thread.
     struct CreatureKey
@@ -114,7 +118,7 @@ namespace IndividualProgressionF14LifecycleRegistry
         // Every list below was enumerated in full, within its bound, and no
         // unsupported reference kind (e.g. PvP combat refs) was present.
         bool complete = false;
-        bool plainUnscriptedNonEliteHostileNpc = false;
+        bool plainUnscriptedNonEliteNpcScope = false;
         bool alive = false;
         bool inCombat = false;
         // Loot recipient is nobody or a verified bot, and no loot group.
@@ -128,6 +132,86 @@ namespace IndividualProgressionF14LifecycleRegistry
         std::size_t participantCount = 0;
     };
 
+    // Pure, bounded snapshot builder. The runtime feeds it one token per
+    // visited entry and MUST `break` its loop as soon as a call returns
+    // false. It stops (and marks the snapshot incomplete) on: the total
+    // visit budget, an unverified/unknown participant, participant or
+    // attacker overflow, or an explicit Fail() (API unavailable, PvP ref).
+    // An incomplete snapshot always fails visible in the registry.
+    class SnapshotCollector
+    {
+    public:
+        SnapshotCollector() { _snap.complete = true; }
+
+        void Fail()
+        {
+            _snap.complete = false;
+            _stopped = true;
+        }
+
+        bool Stopped() const { return _stopped; }
+        std::size_t Visits() const { return _visits; }
+
+        // A threat-list victim or PvE combat ref (0 = unverified/unknown).
+        bool AddParticipant(std::uint64_t token)
+        {
+            if (_stopped)
+                return false;
+            if (++_visits > MaxSnapshotVisits)
+            {
+                Fail();
+                return false;
+            }
+            if (token == 0)
+            {
+                Append(_snap.participants, _snap.participantCount, 0);
+                Fail();
+                return false;
+            }
+            for (std::size_t i = 0; i < _snap.participantCount; ++i)
+                if (_snap.participants[i] == token)
+                    return true; // duplicate: counted as a visit only
+            if (!Append(_snap.participants, _snap.participantCount, token))
+            {
+                Fail();
+                return false;
+            }
+            return true;
+        }
+
+        // A unit currently attacking the creature: participant AND attacker.
+        bool AddAttacker(std::uint64_t token)
+        {
+            if (!AddParticipant(token))
+                return false;
+            if (!Append(_snap.attackers, _snap.attackerCount, token))
+            {
+                Fail();
+                return false;
+            }
+            return true;
+        }
+
+        // Copies the enumerated lists out; scalar facts are set by the caller.
+        ParticipantSnapshot Take() const { return _snap; }
+
+    private:
+        template <std::size_t N>
+        static bool Append(std::array<std::uint64_t, N>& arr, std::size_t& count, std::uint64_t token)
+        {
+            // Keep the final slot free so `count` can never exceed the bound
+            // silently; a full array means overflow.
+            if (count + 1 >= N)
+                return false;
+            arr[count++] = token;
+            return true;
+        }
+
+        ParticipantSnapshot _snap{};
+        std::size_t _visits = 0;
+        bool _stopped = false;
+    };
+
     // Last snapshot result stored per entry. Valid only for the policy
     // generation it was taken at; any later event makes it stale.
     struct SnapshotFacts
@@ -135,7 +219,7 @@ namespace IndividualProgressionF14LifecycleRegistry
         bool valid = false;
         std::uint32_t generation = 0;
         bool enumerated = false;
-        bool plainUnscriptedNonEliteHostileNpc = false;
+        bool plainUnscriptedNonEliteNpcScope = false;
         bool alive = false;
         bool inCombat = false;
         bool tapHolderNoneOrVerifiedBot = false;
@@ -155,7 +239,7 @@ namespace IndividualProgressionF14LifecycleRegistry
         bool rosterUncertain = true;
         unsigned verifiedAttackers = 0;
         bool enumeratedWithinBounds = false;
-        bool plainUnscriptedNonEliteHostileNpc = false;
+        bool plainUnscriptedNonEliteNpcScope = false;
         bool alive = false;
         bool inCombat = false;
         bool threatCombatAndAttackersObservedOnlyVerifiedBots = false;
@@ -474,7 +558,9 @@ namespace IndividualProgressionF14LifecycleRegistry
             bool const enumerated = snap.complete &&
                                     snap.attackerCount <= Policy::MaxTrackedAttackers &&
                                     snap.participantCount <= MaxSnapshotParticipants;
-            bool onlyVerified = enumerated;
+            // Zero observed participants for a tracked creature is not
+            // evidence of anything: treat it as unknown (fail visible).
+            bool onlyVerified = enumerated && snap.participantCount > 0;
             for (std::size_t i = 0; onlyVerified && i < snap.participantCount; ++i)
                 if (snap.participants[i] == 0)
                     onlyVerified = false;
@@ -490,7 +576,7 @@ namespace IndividualProgressionF14LifecycleRegistry
             facts.valid = true;
             facts.generation = entry->state.generation;
             facts.enumerated = enumerated;
-            facts.plainUnscriptedNonEliteHostileNpc = snap.plainUnscriptedNonEliteHostileNpc;
+            facts.plainUnscriptedNonEliteNpcScope = snap.plainUnscriptedNonEliteNpcScope;
             facts.alive = snap.alive;
             facts.inCombat = snap.inCombat;
             facts.tapHolderNoneOrVerifiedBot = snap.tapHolderNoneOrVerifiedBot;
@@ -517,7 +603,7 @@ namespace IndividualProgressionF14LifecycleRegistry
             out.rosterUncertain = e.state.uncertain;
             out.verifiedAttackers = Policy::ActiveAttackers(e.state);
             out.enumeratedWithinBounds = current && f.enumerated;
-            out.plainUnscriptedNonEliteHostileNpc = current && f.plainUnscriptedNonEliteHostileNpc;
+            out.plainUnscriptedNonEliteNpcScope = current && f.plainUnscriptedNonEliteNpcScope;
             out.alive = current && f.alive && e.state.alive;
             out.inCombat = current && f.inCombat;
             out.threatCombatAndAttackersObservedOnlyVerifiedBots = current && f.observedOnlyVerifiedBots;
@@ -539,7 +625,10 @@ namespace IndividualProgressionF14LifecycleRegistry
             out.creatureIdentityToken = ev.creatureToken;
             out.generation = ev.generation;
             out.current = ev.current;
-            out.plainUnscriptedNonEliteHostileNpc = ev.plainUnscriptedNonEliteHostileNpc;
+            // Hostility is NOT verified by this stage: the pure model's
+            // "...HostileNpc" fact stays false. Only the type-scope exclusion
+            // (no elite/boss/script/NPC flag/...) is kept, as evidence.
+            out.plainUnscriptedNonEliteHostileNpc = false;
             out.alive = ev.alive;
             out.inCombat = ev.inCombat;
             out.complete = false;

@@ -173,7 +173,8 @@ namespace
         return sIndividualProgression->enabled && sIndividualProgression->f14ExperimentalAttackLifecycleRegistry;
     }
 
-    // Conservative first-pilot creature scope. Anything rare, elite, boss,
+    // Conservative first-pilot creature TYPE scope (hostility is NOT checked
+    // here and never claimed). Anything rare, elite, boss,
     // scripted (ScriptName or AIName such as SmartAI/escort), summoned,
     // vehicle, charmed, pet/guardian/totem, trigger, guard, civilian or
     // carrying any NPC flag (quest giver, vendor, ...) fails visible.
@@ -197,67 +198,49 @@ namespace
     // right; it can only add uncertainty in the registry.
     Registry::ParticipantSnapshot CollectSnapshot(Creature* creature)
     {
-        Registry::ParticipantSnapshot snap;
-        snap.alive = creature->IsAlive();
-        snap.inCombat = creature->IsInCombat();
-        snap.plainUnscriptedNonEliteHostileNpc = IsPlainUnscriptedNonEliteNpc(creature);
+        bool const alive = creature->IsAlive();
+        bool const inCombat = creature->IsInCombat();
+        // Type-scope exclusion only; hostility is NOT verified here.
+        bool const plainScope = IsPlainUnscriptedNonEliteNpc(creature);
 
         // Tap: nobody, or one verified bot. Any loot group fails visible
         // (group membership is not proven here).
         ObjectGuid const tapper = creature->GetLootRecipientGUID();
-        snap.tapHolderNoneOrVerifiedBot = creature->GetLootRecipientGroupGUID() == 0 &&
+        bool const tapOk = creature->GetLootRecipientGroupGUID() == 0 &&
             (!tapper || (tapper.IsPlayer() &&
                          sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(tapper) != 0));
 
+        // Enumerate with a fixed TOTAL visit budget (duplicates included)
+        // and break each loop immediately when the collector says stop, so
+        // the global LifecycleLock is never held for an unbounded scan.
+        Registry::SnapshotCollector collector;
         // API unavailability or a creature not in its map => unknown => visible.
-        bool complete = creature->IsInWorld() && creature->FindMap() &&
-                        creature->GetThreatMgr().CanHaveThreatList() &&
-                        creature->GetCombatManager().GetPvPCombatRefs().empty();
-        bool unverifiedSeen = false;
-        auto addParticipant = [&](Unit const* unit)
-        {
-            if (!complete)
-                return;
-            std::uint64_t const token = ActorTokenOf(unit);
-            if (token == 0)
-            {
-                if (unverifiedSeen)
-                    return;
-                unverifiedSeen = true;
-            }
-            else
-            {
-                for (std::size_t i = 0; i < snap.participantCount; ++i)
-                    if (snap.participants[i] == token)
-                        return;
-            }
-            if (snap.participantCount == snap.participants.size())
-            {
-                complete = false; // more than MaxSnapshotParticipants
-                return;
-            }
-            snap.participants[snap.participantCount++] = token;
-        };
+        if (!creature->IsInWorld() || !creature->FindMap() ||
+            !creature->GetThreatMgr().CanHaveThreatList() ||
+            !creature->GetCombatManager().GetPvPCombatRefs().empty())
+            collector.Fail();
 
         // Every threat-list victim, offline references included.
-        for (ThreatReference const* ref : creature->GetThreatMgr().GetUnsortedThreatList())
-            addParticipant(ref ? ref->GetVictim() : nullptr);
+        if (!collector.Stopped())
+            for (ThreatReference const* ref : creature->GetThreatMgr().GetUnsortedThreatList())
+                if (!collector.AddParticipant(ref ? ActorTokenOf(ref->GetVictim()) : 0))
+                    break;
         // Every PvE combat reference (threat implies combat, not vice versa).
-        for (auto const& pair : creature->GetCombatManager().GetPvECombatRefs())
-            addParticipant(pair.second ? pair.second->GetOther(creature) : nullptr);
-        // Current attackers: participants AND the roster source.
-        for (Unit* attacker : creature->getAttackers())
-        {
-            addParticipant(attacker);
-            if (snap.attackerCount == snap.attackers.size())
-            {
-                complete = false;
-                break;
-            }
-            snap.attackers[snap.attackerCount++] = ActorTokenOf(attacker);
-        }
+        if (!collector.Stopped())
+            for (auto const& pair : creature->GetCombatManager().GetPvECombatRefs())
+                if (!collector.AddParticipant(pair.second ? ActorTokenOf(pair.second->GetOther(creature)) : 0))
+                    break;
+        // Current attackers: participants AND attacker set.
+        if (!collector.Stopped())
+            for (Unit* attacker : creature->getAttackers())
+                if (!collector.AddAttacker(ActorTokenOf(attacker)))
+                    break;
 
-        snap.complete = complete;
+        Registry::ParticipantSnapshot snap = collector.Take();
+        snap.alive = alive;
+        snap.inCombat = inCombat;
+        snap.plainUnscriptedNonEliteNpcScope = plainScope;
+        snap.tapHolderNoneOrVerifiedBot = tapOk;
         return snap;
     }
 
