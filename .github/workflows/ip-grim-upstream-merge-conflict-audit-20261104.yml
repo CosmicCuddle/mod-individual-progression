@@ -1,0 +1,68 @@
+# CosmicCuddle: exact upstream-to-custom conflict audit. CI ONLY, NO MERGE/PUSH/HOST.
+# This workflow must NOT modify fork master, gameplay source, SQL or running servers.
+name: IP Grim 20261104 upstream merge conflict audit (NO HOST)
+on:
+  push:
+    branches:
+      - integration/cs01-grim-upstream-into-ip46-20261104
+    paths:
+      - ".github/workflows/ip-grim-upstream-merge-conflict-audit-20261104.yml"
+  pull_request:
+    branches:
+      - integration/cs01-grim-upstream-into-ip46-20261104
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report-merge-conflicts:
+    name: Exact custom IP46 vs Grim 42c9 merge-tree (read-only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out isolated custom integration workspace, not the PR head
+        uses: actions/checkout@v4
+        with:
+          ref: integration/cs01-grim-upstream-into-ip46-20261104
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Confirm protected candidate ancestry and unchanged gameplay source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 26d5b7a1de30ad92a595aaf251fc14754cf54f32 HEAD
+          git diff --name-only 26d5b7a1de30ad92a595aaf251fc14754cf54f32 HEAD -- src conf sql data optional | tee /tmp/changed-runtime.txt
+          test ! -s /tmp/changed-runtime.txt
+          test "$(git rev-parse 26d5b7a1de30ad92a595aaf251fc14754cf54f32)" = 26d5b7a1de30ad92a595aaf251fc14754cf54f32
+
+      - name: Fetch exact, immutable Grimfeather upstream target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin 42c9a32892740af55a40e076e6381cc879181396
+          test "$(git rev-parse FETCH_HEAD)" = 42c9a32892740af55a40e076e6381cc879181396
+          git merge-base --is-ancestor dd96f2b77e3ebfa2a4726bf785525ba133f1ab61 HEAD
+          git merge-base --is-ancestor dd96f2b77e3ebfa2a4726bf785525ba133f1ab61 FETCH_HEAD
+
+      - name: Identify exact Git merge conflicts without updating a branch
+        shell: bash
+        run: |
+          set -uo pipefail
+          # git merge-tree is a dry-run merge in the object database. No checkout
+          # modifications, merge commits, pushes, server operations, or DB writes.
+          if git merge-tree --write-tree --messages HEAD 42c9a32892740af55a40e076e6381cc879181396 > /tmp/grim-merge-tree.txt 2>&1; then
+            echo "Clean Git merge-tree result (not a reviewed or tested merged build)."
+            echo "### Clean source-level merge; still requires reviews and native tests" >> "$GITHUB_STEP_SUMMARY"
+          else
+            result=$?
+            echo "Git merge-tree returned status $result; no merge was committed."
+            echo "### BLOCKED: upstream/current-custom conflicts require review" >> "$GITHUB_STEP_SUMMARY"
+            echo "Exact merge conflict summary:" 
+            grep -E '^CONFLICT|^Auto-merging' /tmp/grim-merge-tree.txt | head -100 || true
+            echo "A clean result is required before declaring the upstream merge resolved."
+            # Prevent misleading green CI when actual conflicts still exist.
+            exit 1
+          fi
+          echo "No deployment, host access, SQL, generated binary or feature activation."
