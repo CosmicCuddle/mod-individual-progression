@@ -77,10 +77,11 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 +        F14MaybeRefreshCreatureVisibility(this, f14CurrentGuid);
 @F14_BLANK_CONTEXT@
      Unit* owner = GetCharmerOrOwner();
-@@ -7255,2 +7281,4 @@
+@@ -7255,3 +7281,5 @@
      Unit* victim = m_attacking;
 +    // The F14 callback may invalidate target lifetime: keep GUID only.
 +    ObjectGuid const f14VictimGuid = victim->GetGUID();
+@F14_BLANK_CONTEXT@
      m_attacking->_removeAttacker(this);
 @@ -7266,3 +7294,5 @@
      sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);
