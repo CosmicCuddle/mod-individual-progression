@@ -48,8 +48,25 @@ jobs:
             f14_attack_corpse_event_bridge_prototype.patch; do
             source="original-f14/tests/core_patches/$patch"
             test -s "$source"
-            git -C core apply --check "../$source"
-            git -C core apply "../$source"
+            to_apply="../$source"
+            if [[ "${{ matrix.core_name }}" == newer-0d754d && "$patch" == f14_attack_corpse_event_bridge_prototype.patch ]]; then
+              # Newer Grim Core adds a third defaulted CombatStop argument for
+              # PvP death cleanup. Adjust the obsolete ONE-LINE patch context
+              # in a disposable copy, never mutate original F14 #56 source.
+              grep -Fq 'void Unit::CombatStop(bool includingCast, bool mutualPvP, bool keepPvPForOthers)' core/src/server/game/Entities/Unit/Unit.cpp
+              to_apply="$RUNNER_TEMP/f14-newer-grim-combat-context.patch"
+              python3 - "$source" "$to_apply" <<'PY'
+          import sys
+          from pathlib import Path
+          source=Path(sys.argv[1]).read_text()
+          old=" void Unit::CombatStop(bool includingCast, bool mutualPvP)\n"
+          new=" void Unit::CombatStop(bool includingCast, bool mutualPvP, bool keepPvPForOthers)\n"
+          assert source.count(old)==1 and new not in source, "unexpected F14 Unit.cpp patch"
+          Path(sys.argv[2]).write_text(source.replace(old,new))
+          PY
+            fi
+            git -C core apply --check "$to_apply"
+            git -C core apply "$to_apply"
             echo "PASS: $patch applies to ${{ matrix.core_name }}"
           done
           git -C core diff --check
