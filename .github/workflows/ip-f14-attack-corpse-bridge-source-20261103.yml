@@ -26,6 +26,7 @@ on:
     branches:
       - research/cs01-f14-visibility-refresh-epoch-model-20261103
       - research/cs01-f14-attack-corpse-event-bridge-20261103
+      - research/cs01-f14-actor-expiry-fail-visible-20261103
     paths:
       - "src/IndividualProgression.cpp"
       - "src/IndividualProgression.h"
