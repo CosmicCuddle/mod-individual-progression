@@ -17,6 +17,10 @@ DELETE FROM `creature_formations` WHERE `leaderGUID` IN
  @CGUID+851, @CGUID+853, @CGUID+855, @CGUID+857, @CGUID+859, @CGUID+861, @CGUID+863, @CGUID+864, @CGUID+865, @CGUID+866, @CGUID+867, @CGUID+868,
  @CGUID+870, @CGUID+872, @CGUID+874, @CGUID+876, @CGUID+878, @CGUID+880, @CGUID+882, @CGUID+895, @CGUID+898);
 
+-- clean up AV entries for people that upgrade an exisiting acore_world database
+DELETE FROM `creature_formations` WHERE `leaderGUID` BETWEEN @CGUID+640 AND @CGUID+700;
+DELETE FROM `creature_formations` WHERE `leaderGUID` BETWEEN @CGUID+733 AND @CGUID+744;
+
 INSERT INTO `creature_formations` (`leaderGUID`, `memberGUID`, `dist`, `angle`, `groupAI`, `point_1`, `point_2`) VALUES
 --
 (@CGUID+610, @CGUID+610, 0, 0, 515, 0, 0), -- alliance

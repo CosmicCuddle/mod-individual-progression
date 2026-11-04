@@ -69,9 +69,21 @@ public:
 
         if (!sIndividualProgression->isNormalAccount(player)) // bot or exluded account
         {
+            // Keep bot-specific spell and inventory grants limited to bot
+            // accounts. The historical non-normal branch also includes
+            // excluded HUMAN accounts, which must not receive bot rewards.
             if (sIndividualProgression->isBotAccount(player))
+            {
                 sIndividualProgression->UpdateRNDbotSpells(player); // give class spells to RNDbots that have been removed from trainers by IP.
-            
+
+                if (player->getClass() == CLASS_ROGUE)
+                {
+                    uint32 ITEM_THIEVES_TOOLS = 5060;
+                    if (!player->HasItemCount(ITEM_THIEVES_TOOLS, 1))
+                        player->AddItem(ITEM_THIEVES_TOOLS, 1);
+                }
+            }
+
             // F14 partial safeguard, OFF by default. Only preserve an already
             // recorded TBC/WotLK stage for a positively selected headless RNDbot.
             // This does not initialize stage 8, grant TBC, alter normal players,
@@ -116,22 +128,27 @@ public:
             if ((player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) && sIndividualProgression->tbcRacesStartingProgression && !sIndividualProgression->hasPassedProgression(player, static_cast<ProgressionState>(sIndividualProgression->tbcRacesStartingProgression)))
             {
                 sIndividualProgression->UpdateProgressionState(player, static_cast<ProgressionState>(sIndividualProgression->tbcRacesStartingProgression));
+                sIndividualProgression->GrantAttunements(player, static_cast<ProgressionState>(sIndividualProgression->tbcRacesStartingProgression));
             }
 
             if (player->getClass() == CLASS_DEATH_KNIGHT && sIndividualProgression->deathKnightStartingProgression && !sIndividualProgression->hasPassedProgression(player, static_cast<ProgressionState>(sIndividualProgression->deathKnightStartingProgression)))
             {
                 sIndividualProgression->UpdateProgressionState(player, static_cast<ProgressionState>(sIndividualProgression->deathKnightStartingProgression));
+                sIndividualProgression->GrantAttunements(player, static_cast<ProgressionState>(sIndividualProgression->deathKnightStartingProgression));
             }
 
             if (sIndividualProgression->startingProgression && !sIndividualProgression->hasPassedProgression(player, static_cast<ProgressionState>(sIndividualProgression->startingProgression)))
             {
                 sIndividualProgression->UpdateProgressionState(player, static_cast<ProgressionState>(sIndividualProgression->startingProgression));
+                sIndividualProgression->GrantAttunements(player, static_cast<ProgressionState>(sIndividualProgression->startingProgression));
             }
 
             sIndividualProgression->checkIPProgression(player);
         }
 
         sIndividualProgression->CheckAdjustments(player);
+        sIndividualProgression->CapProfessionSkills(player);
+        sIndividualProgression->CapProfessionAchievements(player);
 
         if (sIndividualProgression->enabled)
         {
@@ -155,6 +172,37 @@ public:
             return;
 
         sIndividualProgression->TrainerRNDbotSpellsUnlock(player, spellId, state);
+
+        // The trainer takes the money before the spell is learned, so a rank above the cap must be
+        // refused here and not only in OnPlayerCanLearnSpell. hasPassedProgression only reads quest status.
+        if (state == Trainer::SpellState::Available && sIndividualProgression->IsProfessionRankAboveCap(const_cast<Player*>(player), spellId))
+            state = Trainer::SpellState::Unavailable;
+    }
+
+    bool OnPlayerCanLearnSpell(Player* player, uint32 spellId) override
+    {
+        return !sIndividualProgression->IsProfessionRankAboveCap(player, spellId);
+    }
+
+    // A book casts the rank, and that steps the skill without learnSpell, so it is refused before the cast.
+    bool OnPlayerCanUseItem(Player* player, ItemTemplate const* proto, InventoryResult& result) override
+    {
+        // This hook runs for ordinary items too; disabled tier caps should
+        // not scan every item spell or dereference a missing ItemTemplate.
+        if (!player || !proto || !sIndividualProgression->enabled ||
+            !sIndividualProgression->ProfessionTierCap)
+            return true;
+
+        for (auto const& spell : proto->Spells)
+        {
+            if (spell.SpellId > 0 && sIndividualProgression->IsProfessionRankAboveCap(player, spell.SpellId))
+            {
+                result = EQUIP_ERR_CANT_EQUIP_SKILL;
+                return false;
+            }
+        }
+
+        return true;
     }
 
     void OnPlayerEquip(Player* player, Item* /*it*/, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
@@ -258,7 +306,7 @@ public:
 
         if (!sIndividualProgression->enabled || player->IsGameMaster() || !sIndividualProgression->isNormalAccount(player))
             return true;
-
+       
         if (mapid == MAP_BLACKWING_LAIR && !sIndividualProgression->hasPassedProgression(player, PROGRESSION_ONYXIA))
         {
             ChatHandler(player->GetSession()).PSendSysMessage("Progression Level Required = |cff00ffff{}|r", PROGRESSION_ONYXIA);
@@ -266,19 +314,40 @@ public:
         }
         if (mapid == MAP_ONYXIAS_LAIR)
         {
-            if (player->GetLevel() <= 70) // vanilla version
+            if (player->GetLevel() <= 70)
             {
-                if (player->GetLevel() < 50)
-                    return false;
-                if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5)) // death knights
-                    return false;
                 if (!player->HasItemCount(ITEM_DRAKEFIRE_AMULET))
                     return false;
-            }
- 			else // WotLK
-            {
-                if (player->GetLevel() != 80)
+
+                if (player->GetLevel() < 50)
                     return false;
+
+                if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_WOTLK_TIER_5))
+                    return true;
+                else if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5)) // Death Knights
+                    return false;
+            }
+            else // WotLK, level 71+
+            {
+                if (player->GetLevel() < 80) // level 71-79
+                    return false;
+
+                if (player->GetLevel() == 80)
+                {
+                    if (!sIndividualProgression->AllowVanillaRaidAccess)
+                    {
+                        if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_WOTLK_TIER_5))
+                            return false;
+
+                        if (player->GetDifficulty(true) == RAID_DIFFICULTY_10MAN_HEROIC)
+                            return false;
+                    }
+                    else
+                    {
+                        if (player->GetDifficulty(true) == RAID_DIFFICULTY_10MAN_HEROIC && !player->HasItemCount(ITEM_DRAKEFIRE_AMULET))
+                            return false;
+                    }
+                }
             }
         }
         if (mapid == MAP_ZUL_GURUB)
@@ -479,8 +548,41 @@ public:
             if (instanceTemplate->Parent == MAP_NORTHREND && mapid != MAP_NAXXRAMAS && !sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5))
                 return false;
 
-            if (instanceTemplate->Parent == MAP_NORTHREND && mapid == MAP_NAXXRAMAS && player->GetLevel() <= 70 && (!sIndividualProgression->isAttuned(player) ||  sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5) ))
-                return false;
+            if (instanceTemplate->Parent == MAP_NORTHREND && mapid == MAP_NAXXRAMAS)
+            {
+                if (player->GetLevel() <= 70)
+                {
+                    if (!sIndividualProgression->isAttuned(player))
+                        return false;
+
+                    if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_WOTLK_TIER_5))
+                        return true;
+                    else if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5)) // Death Knights
+                        return false;
+                }
+                else // WotLK, level 71+
+                {
+                    if (player->GetLevel() < 80) // level 71-79
+                        return false;
+
+                    if (player->GetLevel() == 80)
+                    {
+                        if (!sIndividualProgression->AllowVanillaRaidAccess)
+                        {
+                            if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_WOTLK_TIER_5))
+                                return false;
+
+                            if (player->GetDifficulty(true) == RAID_DIFFICULTY_10MAN_HEROIC)
+                                return false;
+                        }
+                        else
+                        {
+                            if (player->GetDifficulty(true) == RAID_DIFFICULTY_10MAN_HEROIC && !sIndividualProgression->isAttuned(player))
+                                return false;
+                        }
+                    }
+                }
+            }
         }
 
         return true;
@@ -884,10 +986,19 @@ public:
         sIndividualProgression->checkIPPhasing(player, newArea);
     }
 
-    bool OnPlayerCanEquipItem(Player* player, uint8 /*slot*/, uint16& /*dest*/, Item* pItem, bool /*swap*/, bool /*not_loading*/) override
+    bool OnPlayerCanEquipItem(Player* player, uint8 /*slot*/, uint16& /*dest*/, Item* pItem, bool /*swap*/, bool not_loading) override
     {
         if (!player || !pItem)
             return false;
+
+        // At login the core mails everything that fails here, so only new gear is stopped.
+        if (not_loading && sIndividualProgression->isLockedExpansionGear(player, pItem->GetTemplate()))
+        {
+            if (!sIndividualProgression->isBotAccount(player))
+                ChatHandler(player->GetSession()).SendSysMessage("You have not reached the expansion this item is from.");
+
+            return false;
+        }
 
         if (pItem->GetTemplate()->RequiredHonorRank == 0)
             return true;

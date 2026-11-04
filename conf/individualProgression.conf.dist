@@ -235,6 +235,28 @@ IndividualProgression.SerpentshrineCavern.RequireAllBosses = 1
 #
 IndividualProgression.TheEye.RequireAllBosses = 1
 
+# IndividualProgression.AutoAttune
+#
+#        Description: Attunements are not progression, so by default a character at a high progression stage still has to earn them.
+#                     If enabled, a character that is bumped to a stage also gets the raid attunements for the stages it has reached.
+#                     A bump is .ip set, a starting progression option, or an excluded account set to 18 at login.
+#                     Killing bosses, and progression caught up from the achievements of another character, grant nothing.
+#                     Stages above ProgressionLimit are not granted. Bot accounts get nothing.
+#                     Nothing is taken back when progression is lowered, and what the character already has (the bank counts)
+#                     is not given twice. An item goes to the bags, or to the mailbox if they are full. Mail that is not collected
+#                     is deleted when it expires. A quest is marked as done without its own rewards (no XP, gold, reputation, title or items).
+#                     Characters already at a stage when this is switched on get nothing until they are bumped again (.ip set).
+#
+#                     Stage 1  (Molten Core)   Drakefire Amulet (Onyxia's Lair 40, which has no stage of its own; Onyxia is the next raid after Molten Core)
+#                     Stage 6  (AQ)            The Dread Citadel - Naxxramas (Naxxramas 40)
+#                     Stage 9  (TBC Tier 1)    Tempest Key and Trial of the Naaru: Magtheridon (The Eye), The Cudgel of Kar'desh (Serpentshrine Cavern)
+#                     Stage 10 (TBC Tier 2)    The Vials of Eternity (Hyjal Summit), Medallion of Karabor (Black Temple)
+#
+#        Default:     0 - Disabled (attunements are earned in game)
+#                     1 - Enabled
+#
+IndividualProgression.AutoAttune = 0
+
 # IndividualProgression.FishingFix
 #
 #        Description: Before patch 3.1, fishing skill had progression and had to be leveled in low level zones before high level areas could add skill
@@ -347,6 +369,48 @@ IndividualProgression.MaxMonsterSight = 1
 #                     0 - Disabled
 #
 IndividualProgression.QuestMoneyAtLevelCap = 1
+
+# IndividualProgression.ProfessionTierCap
+#
+#        Description: Caps professions, First Aid, Cooking and Fishing at the rank of the character's tier:
+#                     Artisan (300) before progression 8, Master (375) before progression 13, otherwise
+#                     Grand Master (450), as on 1.12, 2.4.3 and 3.3.5a. Trainers show the higher ranks as
+#                     unavailable, which also stops bot maintenance, books that teach them cannot be used,
+#                     and .learn refuses them.
+#                     A character above its cap is taken down at login: the ranks above it are unlearned,
+#                     and its skill is kept up to the cap. Achievements that need a rank above the cap are
+#                     taken back at login as well, also from a character that never had the rank; with
+#                     mod-account-achievements, put them in Account.Achievements.Excluded or they come back.
+#                     Skill above the cap, those achievements and the titles Salty and Chef are lost for good.
+#                     Applies to players and bots alike. Accounts of GM level 2 or higher, with their altbots,
+#                     and excluded accounts have no cap; a changed GM level counts after .reload config.
+#
+#        Default:     0 - Disabled (Cosmic preservation baseline)
+#                     1 - Enabled (requires separate owner approval)
+#
+#        SAFETY: Enabling can permanently remove above-tier profession ranks,
+#        skill progress, achievements and titles during login. Verify backups,
+#        gameplay rules and a disposable-character test before opting in.
+#
+IndividualProgression.ProfessionTierCap = 0
+
+# IndividualProgression.LockLaterExpansionGear
+#
+#        Description: Characters cannot equip weapons and armor from an expansion they have not
+#                     reached. Before progression 8: item id 23728 or higher that requires level
+#                     57 or has item level above 92, except the vanilla rank gear 29594-29617.
+#                     Before progression 13: item id 35570 or higher that requires level 67 or has
+#                     item level above 164, except the TBC gear with those ids.
+#                     Bot accounts use BotAccountsMaxLevel in place of progression, locked as above
+#                     at 60 or lower and at 70 or lower, so the default of 80 does not lock them.
+#                     Not locked: characters above their limit, excluded accounts, and heirlooms and
+#                     other gear below both the level and the item level above. Gear worn at login
+#                     stays on, but it cannot go back on once it is taken off.
+#
+#        Default:     0 - Disabled
+#                     1 - Enabled
+#
+IndividualProgression.LockLaterExpansionGear = 0
 
 # IndividualProgression.RepeatableVanillaQuestsXP
 #
@@ -489,6 +553,16 @@ IndividualProgression.AllowEarlyDungeonSet2 = 0
 #                     1 - Enabled
 #
 IndividualProgression.AllowEarlyScourgeBosses = 0
+
+# IndividualProgression.AllowVanillaRaidAccess
+#
+#        Description: When enabled, this allows players, at level 80, to enter the vanilla version of Onyxia and Naxxramas.
+#                     Excluded accounts already get access to these raids at level 80.
+#
+#        Default:     0 - Disabled
+#                     1 - Enabled
+#
+IndividualProgression.AllowVanillaRaidAccess = 0
 
 # IndividualProgression.TBC.ArenaSeason
 #

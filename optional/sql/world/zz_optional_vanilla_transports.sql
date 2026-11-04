@@ -27,6 +27,21 @@ DELETE FROM `creature` WHERE `guid` IN (203462, 203463, 203464, 203465); -- remo
 
 UPDATE `gameobject_template` SET `name` = "Boat to Menethil Harbor" WHERE `entry` = 176364; -- sign
 
+-- Replace Ludin Farrow with Don Pompa, Menethil Harbor <Dockmaster>
+DELETE FROM `creature` WHERE `guid` = 1550 AND `ID` IN (12657, 26546);
+INSERT INTO `creature` (`guid`, `id`, `map`, `zoneId`, `areaId`, `spawnMask`, `phaseMask`, `equipment_id`, `position_x`, `position_y`, `position_z`, `orientation`, `spawntimesecs`,
+`wander_distance`, `currentwaypoint`, `curhealth`, `curmana`, `MovementType`, `npcflag`, `unit_flags`, `dynamicflags`, `ScriptName`, `VerifiedBuild`, `CreateObject`, `Comment`) VALUES
+(1550, 12657, 0, 0, 0, 1, 1, 1, -3720.61, -596.261, 6.6216, 4.36332, 300, 0, 0, 1, 0, 0, 0, 0, 0, '', NULL, 1, NULL);
+
+UPDATE `creature_template` SET `npcflag` = 1, `gossip_menu_id` = 66001 WHERE `entry` = 12657;
+
+DELETE FROM `gossip_menu` WHERE `MenuID` = 66001;
+INSERT INTO `gossip_menu` (`MenuID`, `TextID`) VALUES (66001, 66001);
+
+DELETE FROM `npc_text` WHERE `ID` = 66001;
+INSERT INTO `npc_text` (`ID`, `text0_0`) VALUES
+(66001, 'The dock here? Well you can catch the ship that goes to that Night Elf place. What\'s it\'s name? Uhh Auberdine I think. I don\'t really know for sure, I just load and unload stuff.');
+
 -- add new taxi path nodes to 1981, 300 to 196
 DELETE FROM `taxipath_dbc` WHERE `ID` = 1981;
 INSERT INTO `taxipath_dbc` (`ID`, `FromTaxiNode`, `ToTaxiNode`, `Cost`) VALUES (1981, 300, 196, 0);
