@@ -32,12 +32,12 @@ class CoreF14ReevaluationPrototype(unittest.TestCase):
     def test_unified_diff_has_context_and_exact_line_counts(self):
         # A zero-context or unterminated patch can pass simple string tests
         # yet be rejected by git apply before any source can compile.
-        self.assertTrue(self.patch.endswith("\\n"))
+        self.assertTrue(self.patch.endswith("\n"))
         rows = self.patch.splitlines()
         hunks = 0
         i = 0
         while i < len(rows):
-            match = re.fullmatch(r"@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@", rows[i])
+            match = re.fullmatch(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@", rows[i])
             if not match:
                 i += 1
                 continue
