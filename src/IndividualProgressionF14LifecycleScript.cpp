@@ -11,8 +11,10 @@
  * evidence. It can only add uncertainty; it never sets any participant or
  * rights proof, and nothing consumes it for visibility.
  *
- * Bookkeeping ONLY. It hides nothing, sends no packets, requests no visibility
- * refresh, writes no stage/SQL/settings and never calls Playerbots. Actor
+ * Bookkeeping ONLY by default. A separately compiled, experimental Core
+ * post-event request bridge can request a bounded visibility PASS when a
+ * previously tracked creature changes state. It NEVER denies visibility,
+ * sends packets directly, writes stage/SQL/settings or calls Playerbots. Actor
  * identity comes from the login-thread cache (GetF14VerifiedRandomBotLoginEpoch),
  * read under this file's registry mutex, so a logout racing an attack can
  * never resurrect an expired epoch.
@@ -121,6 +123,11 @@ namespace
     struct F14CreatureIncarnation : public DataMap::Base
     {
         std::uint64_t token = 0;
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        // The one-shot request survives token=0 after corpse/last attack.
+        bool everTracked = false;
+        bool refreshPending = false;
+#endif
     };
 
     // A non-pet, non-player-controlled creature in the world. Pets, guardians,
@@ -156,8 +163,28 @@ namespace
     {
         if (token == StampOf(creature))
             return;
-        creature->CustomData.GetDefault<F14CreatureIncarnation>(StampKey)->token = token;
+        F14CreatureIncarnation* state = creature->CustomData.GetDefault<F14CreatureIncarnation>(StampKey);
+        state->token = token;
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        if (token)
+        {
+            state->everTracked = true;
+            state->refreshPending = true;
+        }
+#endif
     }
+
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    // Caller holds LifecycleLock(); no allocation for an unknown creature.
+    void MarkPendingRefresh(Creature* creature)
+    {
+        if (!creature)
+            return;
+        if (F14CreatureIncarnation* state = creature->CustomData.Get<F14CreatureIncarnation>(StampKey))
+            if (state->everTracked)
+                state->refreshPending = true;
+    }
+#endif
 
     // Verified current RandomBot login epoch, or 0. Players only: a pet,
     // minion or charmed unit is NEVER a first-party bot token (see
@@ -340,6 +367,9 @@ namespace
         std::uint64_t const stamp = StampOf(creature);
         if (!stamp)
             return;
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        MarkPendingRefresh(creature);
+#endif
         LifecycleRegistry().OnCreatureLeftCombat(KeyOf(creature), stamp);
         SetStamp(creature, 0);
         LogPoisonOnce();
@@ -354,6 +384,9 @@ public:
                      {UNITHOOK_ON_F14_ATTACK_TARGET_TRANSITION,
                       UNITHOOK_ON_F14_CREATURE_CORPSE_READY,
                       UNITHOOK_ON_F14_CREATURE_RESPAWNED,
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                      UNITHOOK_ON_F14_CREATURE_VISIBILITY_REFRESH_REQUEST,
+#endif
                       UNITHOOK_ON_DAMAGE,
                       UNITHOOK_MODIFY_PERIODIC_DAMAGE_AURAS_TICK,
                       UNITHOOK_ON_HEAL,
@@ -426,6 +459,9 @@ public:
             std::uint64_t const stamp = StampOf(selfCreature);
             if (stamp)
             {
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                MarkPendingRefresh(selfCreature);
+#endif
                 if (!newVictim)
                 {
                     if (registry.OnCreatureStoppedAttacking(KeyOf(selfCreature), stamp))
@@ -443,7 +479,12 @@ public:
         if (oldCreature)
         {
             if (std::uint64_t const stamp = StampOf(oldCreature))
+            {
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                MarkPendingRefresh(oldCreature);
+#endif
                 registry.OnParticipantEnd(KeyOf(oldCreature), stamp, actor);
+            }
         }
 
         if (newCreature)
@@ -451,6 +492,9 @@ public:
             std::uint64_t const stamp = StampOf(newCreature);
             if (actor || stamp)
             {
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                MarkPendingRefresh(newCreature);
+#endif
                 // Complete current attacker set of the creature (Core already
                 // linked this attacker before the hook fired). Fixed-size and
                 // allocation-free under the mutex: one slot beyond the policy
@@ -469,6 +513,9 @@ public:
                 Registry::BeginResult const result = registry.OnParticipantBegin(
                     KeyOf(newCreature), stamp, actor, others.data(), otherCount);
                 SetStamp(newCreature, result.stamp);
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                MarkPendingRefresh(newCreature);
+#endif
                 if (result.created)
                     LOG_DEBUG("module", "IndividualProgression F14 lifecycle: tracking creature {} (incarnation {})",
                         newCreature->GetGUID().ToString(), result.stamp);
@@ -488,6 +535,23 @@ public:
         RetireIncarnation(creature, true);
     }
 
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    // Called after lifecycle bookkeeping; only requests a Core visibility
+    // PASS, never denial. The request stays valid after stamp retirement.
+    bool OnF14ShouldRefreshCreatureVisibility(Creature const* creature) override
+    {
+        if (!creature || !creature->IsInWorld() || creature->IsPet())
+            return false;
+        // Release the mutex BEFORE Core performs UpdateObjectVisibility.
+        std::lock_guard<std::mutex> guard(LifecycleLock());
+        F14CreatureIncarnation* state = creature->CustomData.Get<F14CreatureIncarnation>(StampKey);
+        if (!state || !state->everTracked || !state->refreshPending)
+            return false;
+        state->refreshPending = false;
+        return true;
+    }
+#endif
+
 private:
     static void RetireIncarnation(Creature* creature, bool respawn)
     {
@@ -496,6 +560,11 @@ private:
         if (!creature)
             return;
         std::lock_guard<std::mutex> guard(LifecycleLock());
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        // Respawn may follow a corpse callback which retired token=0.
+        // Remember prior tracking independently of CURRENT hide eligibility.
+        MarkPendingRefresh(creature);
+#endif
         std::uint64_t const stamp = StampOf(creature);
         if (!stamp)
             return;
