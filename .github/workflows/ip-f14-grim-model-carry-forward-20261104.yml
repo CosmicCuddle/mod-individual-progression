@@ -47,6 +47,7 @@ jobs:
           git diff --name-only a24fd911648816757ee8ddfb9787173bc6883878 HEAD | sort > /tmp/actual
           printf '%s\n' \
             '.github/workflows/ip-f14-grim-model-carry-forward-20261104.yml' \
+            '.github/workflows/ip-f14-grim-core-seam-apply-preflight-20261104.yml' \
             'src/IndividualProgressionF14ActorCreatureIndex.h' \
             'src/IndividualProgressionF14MultiAttackerPolicy.h' \
             'src/IndividualProgressionF14CombatVisibilityPolicy.h' \
