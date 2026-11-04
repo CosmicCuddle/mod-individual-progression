@@ -43,6 +43,25 @@ IndividualProgression.EnforceGroupRules = 0
 #
 IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0
 
+# IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin
+#
+#        DEVELOPMENT ONLY / NOT AN ACTIVE OR COMPLETE F14 VISIBILITY FEATURE.
+#        When the complete map/WHO/combat visibility bridge is present and
+#        explicitly approved, positively verified headless Blood Elf/Draenei
+#        RandomBots on matching bot accounts may start at raw TBC stage 8,
+#        or stage 13 for level 71+, without reducing any higher earned stage.
+#        Real human characters and unverified/Altbot characters are excluded.
+#        A nonzero ProgressionLimit below the required stage blocks the grant.
+#        No expansion purchase is made. This does NOT itself hide a bot!
+#        Without the required Playerbots API and Core visibility-refresh
+#        build-time marker the option is FORCED OFF even if set to 1.
+#        Group sync and visibility still need separate verified integration.
+#        NEVER ENABLE on live server merely because it compiled.
+#
+#        Default:     0 - Disabled / current owner behavior unchanged
+#
+IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0
+
 # IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor
 #
 #        INCOMPLETE F14 / DEVELOPMENT PILOT - DEFAULT OFF.

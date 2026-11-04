@@ -429,6 +429,9 @@ public:
     // the expansion vendor opens the next era.
     bool paidExpansionEnabled = false;
     bool paidExpansionGrandfatherStage13 = false;
+    // F14: verified headless racial RandomBot login stage floor. Do not
+    // enable until observer+combat+WHO concealment is actually wired.
+    bool f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
     // Independent F14 group-time pilot; leave OFF until owner approval.
     bool f14ProtectVerifiedRandomBotGroupFloor = false;
     std::string paidExpansionVendorName;

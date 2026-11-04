@@ -26,6 +26,32 @@ namespace IndividualProgressionF14LoginPolicy
         return 13;
     }
 
+    // F14 verified RandomBot TBC stage floor, independently OFF in runtime.
+    // This is a PURE calculation only. A caller MUST separately prove:
+    // - account is a bot; positive selected RandomBot identity (not Altbot)
+    // - headless session and Blood Elf/Draenei race
+    // - full observer/WHO/combat visibility refresh bridge is installed
+    // The stage write itself remains behind a default-OFF config and Core
+    // build-time bridge check. A higher saved stage is never lowered.
+    constexpr std::uint8_t DesiredVerifiedTbcRaceStage(std::uint8_t savedStage, std::uint32_t level)
+    {
+        std::uint8_t const levelStage = LevelStage(level);
+        std::uint8_t const required = levelStage >= 8 ? levelStage : 8;
+        return savedStage >= required ? savedStage : required;
+    }
+
+    constexpr bool CanSetVerifiedTbcRaceStage(std::uint8_t savedStage,
+                                              std::uint32_t level,
+                                              std::int32_t progressionLimit)
+    {
+        // Do not accept corrupt/unsupported stages or bypass a configured
+        // limit. Limit=0 means IP has no stage cap; not a level-cap decision.
+        if (savedStage > 18)
+            return false;
+        return progressionLimit <= 0 ||
+            DesiredVerifiedTbcRaceStage(savedStage, level) <= progressionLimit;
+    }
+
     // F14 group-sync containment: a verified TBC-race RandomBot with an
     // already earned stage 8+ must never be downgraded into Vanilla at ANY
     // level, including immediately after 70->71. No separate Wrath-stage
