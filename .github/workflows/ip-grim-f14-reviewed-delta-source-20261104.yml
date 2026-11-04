@@ -2,6 +2,7 @@
 # upstream provenance test: that original test correctly detects added F14 code.
 # This second gate approves only the EXACT reviewed F14 child delta of #69,
 # while keeping all upstream Grim/Cosmic CI and runtime custom code intact.
+# Second CI-only addition checks opt-in PB quest-marker reset on a disposable runner.
 name: Grim DEV plus F14 exact approved source delta (NO HOST)
 
 on:
@@ -21,7 +22,7 @@ permissions:
 
 jobs:
   reviewed-f14-integration:
-    name: Frozen Grim history + explicit F14 31-path allowlist / OFF / source
+    name: Frozen Grim history + explicit F14 32-path allowlist / OFF / source
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -45,7 +46,11 @@ jobs:
           git merge-base --is-ancestor "$merge" HEAD
           test "$(git rev-list --parents -n1 "$merge")" = "$merge $f14 $dev"
           # EXACT one CI-only extension beyond the reviewed two-parent merge.
-          test "$(git diff --name-only "$merge" HEAD)" = ".github/workflows/ip-grim-f14-reviewed-delta-source-20261104.yml"
+          git diff --name-only "$merge" HEAD | sort > /tmp/source-gates
+          printf '%s\\n' \\
+            '.github/workflows/ip-grim-f14-reviewed-delta-source-20261104.yml' \\
+            '.github/workflows/ip-pb-earned-marker-reset-newer-grim-source-20261104.yml' | sort > /tmp/source-gates-allowed
+          diff -u /tmp/source-gates-allowed /tmp/source-gates
           git diff --check "$merge" HEAD
           # Important: future source changes cannot piggyback on old approval.
           git diff --name-only "$dev" HEAD | sort > /tmp/actual
@@ -58,6 +63,7 @@ jobs:
           .github/workflows/ip-f14-grim-who-observer-pilot-source-20261104.yml
           .github/workflows/ip-f14-rndbot-stage-floor-20261104.yml
           .github/workflows/ip-grim-f14-reviewed-delta-source-20261104.yml
+          .github/workflows/ip-pb-earned-marker-reset-newer-grim-source-20261104.yml
           conf/individualProgression.conf.dist
           docs/CUSTOM_MODIFICATIONS_REGISTER.md
           docs/F14_COMBAT_VISIBILITY_SAFETY_2026-11-03.md
