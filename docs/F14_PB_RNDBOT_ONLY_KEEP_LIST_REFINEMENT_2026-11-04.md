@@ -1,8 +1,8 @@
 # F14 Playerbots earned-marker reset — selected RandomBots only
 
-**Owner:** CosmicCuddle. **Maintenance branch:** `research/cs01-pb-reset-rndbot-only-20261104`.  
-**Status:** DRAFT / DISABLED / **NO HOST** / **NO LIVE APPLICATION**.  
-**Prerequisite:** [Original tested optional reset keep-list #49](https://github.com/CosmicCuddle/mod-individual-progression/pull/49), exact head `e9252a4f37248d8727cb96004006a741a6c6c263`.  
+**Owner:** CosmicCuddle. **Maintenance branch:** `research/cs01-pb-reset-rndbot-only-20261104`.
+**Status:** DRAFT / DISABLED / **NO HOST** / **NO LIVE APPLICATION**.
+**Prerequisite:** [Original tested optional reset keep-list #49](https://github.com/CosmicCuddle/mod-individual-progression/pull/49), exact head `e9252a4f37248d8727cb96004006a741a6c6c263`.
 **Playerbots source pin:** `mod-playerbots/mod-playerbots@e88cc4099e69f35126b28942a412ca702d20453b`.
 
 ## Problem
