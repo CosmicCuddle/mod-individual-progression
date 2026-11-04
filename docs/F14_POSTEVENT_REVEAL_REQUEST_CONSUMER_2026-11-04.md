@@ -1,9 +1,9 @@
 # F14 post-event visibility refresh requester — experimental source implementation
 
-**Owner:** CosmicCuddle. **Maintainer:** Server-Side-Maintenance (CS01).  
-**Status:** Isolated DRAFT source, not merged or deployed; no gameplay or packet proof.  
-**Base:** IP stage-3 source [#78](https://github.com/CosmicCuddle/mod-individual-progression/pull/78) at `4bb8a8e32b20947d298ed0fb7974453b07829cc1`.  
-**Core dependency:** Separate default-false post-event hook [#77](https://github.com/CosmicCuddle/mod-individual-progression/pull/77) at `6182893d18e0ab2bb1d581900910346c1c0819b2` applied to a disposable newest Grim Core; not installed.  
+**Owner:** CosmicCuddle. **Maintainer:** Server-Side-Maintenance (CS01).
+**Status:** Isolated DRAFT source, not merged or deployed; no gameplay or packet proof.
+**Base:** IP stage-3 source [#78](https://github.com/CosmicCuddle/mod-individual-progression/pull/78) at `4bb8a8e32b20947d298ed0fb7974453b07829cc1`.
+**Core dependency:** Separate default-false post-event hook [#77](https://github.com/CosmicCuddle/mod-individual-progression/pull/77) at `6182893d18e0ab2bb1d581900910346c1c0819b2` applied to a disposable newest Grim Core; not installed.
 **Playerbots:** unchanged pinned `e88cc4099e69f35126b28942a412ca702d20453b`. Naxx #292 and Services #16 unchanged.
 
 ## Problem this implementation addresses
@@ -30,8 +30,8 @@ Actor logout without Core `AttackStop` is still a blocker: identity expiry inval
 
 ## Safety, tests, integration and rollback
 
-New source: `src/IndividualProgressionF14LifecycleScript.cpp` (guarded C++ only).  
-Source contracts: `tests/test_ip_f14_postevent_reveal_request_source.py` (five negative/safety checks).  
+New source: `src/IndividualProgressionF14LifecycleScript.cpp` (guarded C++ only).
+Source contracts: `tests/test_ip_f14_postevent_reveal_request_source.py` (five negative/safety checks).
 Native tests: an isolated workflow must compile/link against the exact Core #77 stack with `-DCOSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT=1`; run only on disposable GitHub runner, no Worldserver launch. Any live config, SQL/DBC, binary, client or account/character data remains untouched.
 
 **Deployment status:** NOT DEPLOYED. **Decision:** preserve default OFF and keep source as DRAFT pending exact native build + review. **Rollback:** close the DRAFT; no host rollback needed. Production installation later requires backed-up installed-source inventory, dependency check and CosmicCuddle's approval.
