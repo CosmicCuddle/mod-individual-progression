@@ -47,9 +47,7 @@ jobs:
           test "$(git rev-list --parents -n1 "$merge")" = "$merge $f14 $dev"
           # EXACT one CI-only extension beyond the reviewed two-parent merge.
           git diff --name-only "$merge" HEAD | sort > /tmp/source-gates
-          printf '%s\\n' \\
-            '.github/workflows/ip-grim-f14-reviewed-delta-source-20261104.yml' \\
-            '.github/workflows/ip-pb-earned-marker-reset-newer-grim-source-20261104.yml' | sort > /tmp/source-gates-allowed
+          printf '%s\n' '.github/workflows/ip-grim-f14-reviewed-delta-source-20261104.yml' '.github/workflows/ip-pb-earned-marker-reset-newer-grim-source-20261104.yml' | sort > /tmp/source-gates-allowed
           diff -u /tmp/source-gates-allowed /tmp/source-gates
           git diff --check "$merge" HEAD
           # Important: future source changes cannot piggyback on old approval.
