@@ -26,15 +26,5 @@ UPDATE `quest_template` SET `AllowableRaces` = 1101 WHERE `ID` = 2880 AND (`Allo
 -- Westfall: 'A Swift Message' should be for humans only. 1791 = the ten stock playable races; bits other modules added stay.
 UPDATE `quest_template` SET `AllowableRaces` = 1 | (`AllowableRaces` & ~1791) WHERE `ID` IN (6181, 6261, 6281, 6285);
 
--- Blood Knight quests
-SET @BK_RACES_9681 := (SELECT `AllowableRaces` FROM `quest_template` WHERE `ID` = 9681);
-SET @BK_RACES_9684 := (SELECT `AllowableRaces` FROM `quest_template` WHERE `ID` = 9684);
-
-DELETE FROM `quest_template` WHERE `ID` IN (9681, 9684, 109681, 109684);
-INSERT INTO `quest_template` (`ID`, `QuestType`, `QuestLevel`, `MinLevel`, `QuestSortID`, `RewardNextQuest`, `RewardXPDifficulty`, `StartItem`, `Flags`, `AllowableRaces`,
-`LogTitle`, `QuestCompletionLog`, `RequiredItemId1`, `RequiredItemCount1`, `VerifiedBuild`) VALUES
---
-(9681,   2, -1, 12, -141, 9684, 3, 0, 136, IFNULL(@BK_RACES_9681, 512), 'A Study in Power', NULL, 0, 0, 12340),
-(9684,   2, -1, 12, -141, 9685, 3, 24157, 128, IFNULL(@BK_RACES_9684, 512), 'Claiming the Light', 'Return to Knight-Lord Bloodvalor in Eversong Woods.', 24156, 1, 12340),
-(109681, 2, -1, 12, -141, 9684, 3, 0, 136, IFNULL(@BK_RACES_9681, 512), 'A Study in Power', NULL, 0, 0, 12340),
-(109684, 2, -1, 12, -141, 9685, 3, 24157, 128, IFNULL(@BK_RACES_9684, 512), 'Claiming the Light', 'Return to Knight-Lord Bloodvalor in Eversong Woods.', 24156, 1, 12340);
+-- Blood Knight quests: the pre-2.4 copies take the races of the originals
+UPDATE `quest_template` q JOIN `quest_template` p ON p.`ID` = q.`ID` - 100000 SET q.`AllowableRaces` = p.`AllowableRaces` WHERE q.`ID` IN (109681, 109684);
