@@ -271,18 +271,43 @@ class Stage2ParticipantSnapshot(unittest.TestCase):
         # Untracked creatures return before any lock is taken.
         self.assertLess(body.index("if (!StampOf(tracked))"), body.index("LifecycleLock()"))
 
-    def test_snapshot_reads_full_threat_combat_attackers_and_tap(self):
+    def test_snapshot_reads_threat_combat_attackers_and_tap_with_bounded_loops(self):
         body = self.fn(self.script(), "Registry::ParticipantSnapshot CollectSnapshot(Creature* creature)", "\n    }\n\n")
         for token in ("GetThreatMgr().GetUnsortedThreatList()", "ref->GetVictim()",
                       "GetCombatManager().GetPvECombatRefs()", "GetOther(creature)",
                       "GetCombatManager().GetPvPCombatRefs().empty()",
                       "GetThreatMgr().CanHaveThreatList()", "creature->getAttackers()",
                       "GetLootRecipientGroupGUID() == 0", "GetLootRecipientGUID()",
-                      "snap.participants.size()", "snap.attackers.size()", "complete = false;"):
+                      "Registry::SnapshotCollector collector;", "collector.Fail();",
+                      "collector.Take();"):
             self.assertIn(token, body)
-        # Offline threat references are NOT filtered out.
-        for forbidden in ("IsOffline()", "IsOnline()", "IsAvailable()", "std::vector", "new "):
+        # Every one of the three range loops is guarded by the collector and
+        # breaks IMMEDIATELY when it says stop (CS01 bounded-lock rule).
+        loops = re.findall(r"if \(!collector\.Stopped\(\)\)\n\s+for \(([^\n]+)\)\n\s+if \(!collector\.(AddParticipant|AddAttacker)\(([^\n]+)\)\)\n\s+break;", body)
+        self.assertEqual(len(loops), 3, loops)
+        self.assertEqual([l[1] for l in loops], ["AddParticipant", "AddParticipant", "AddAttacker"])
+        self.assertEqual(len(re.findall(r"\bfor \(", body)), 3)
+        # Offline threat references are NOT filtered out; no allocation.
+        for forbidden in ("IsOffline()", "IsOnline()", "IsAvailable()", "std::vector", "new ",
+                          "continue;", "addParticipant"):
             self.assertNotIn(forbidden, body)
+
+    def test_collector_has_total_visit_budget(self):
+        reg = strip_comments(read(REGISTRY))
+        self.assertIn("constexpr std::size_t MaxSnapshotVisits = 64;", reg)
+        add = reg.split("bool AddParticipant(std::uint64_t token)", 1)[1].split("\n        }\n", 1)[0]
+        # The visit counter is incremented BEFORE the duplicate check, so
+        # duplicate flooding consumes the budget.
+        self.assertLess(add.index("++_visits > MaxSnapshotVisits"), add.index("return true; "))
+        self.assertIn("if (_stopped)", add)
+        attacker = reg.split("bool AddAttacker(std::uint64_t token)", 1)[1].split("\n        }\n", 1)[0]
+        self.assertIn("if (!AddParticipant(token))", attacker)
+
+    def test_hostility_never_claimed(self):
+        reg = strip_comments(read(REGISTRY))
+        self.assertIn("out.plainUnscriptedNonEliteHostileNpc = false;", reg)
+        self.assertEqual(reg.count("plainUnscriptedNonEliteHostileNpc"), 1)
+        self.assertNotIn("HostileNpc", self.script())
 
     def test_plain_creature_scope_is_conservative(self):
         body = self.fn(self.script(), "bool IsPlainUnscriptedNonEliteNpc(Creature const* creature)")

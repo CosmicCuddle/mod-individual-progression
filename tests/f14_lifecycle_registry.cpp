@@ -368,7 +368,7 @@ namespace
     {
         R::ParticipantSnapshot s;
         s.complete = true;
-        s.plainUnscriptedNonEliteHostileNpc = plain;
+        s.plainUnscriptedNonEliteNpcScope = plain;
         s.alive = alive;
         s.inCombat = true;
         s.tapHolderNoneOrVerifiedBot = tapOk;
@@ -448,7 +448,10 @@ namespace
         V::CreatureSnapshot c;
         CHECK(r.BuildCreatureSnapshot(s, c));
         CHECK(NoAuthoritativeProof(c));
-        CHECK(c.creatureIdentityToken == s && c.current && c.alive && c.plainUnscriptedNonEliteHostileNpc);
+        CHECK(c.creatureIdentityToken == s && c.current && c.alive);
+        // Hostility is never verified here: the pure "...HostileNpc" stays false.
+        CHECK(!c.plainUnscriptedNonEliteHostileNpc);
+        CHECK(e.plainUnscriptedNonEliteNpcScope);
         CHECK(!V::ShouldConcealCreatureFromObserver(c, V::ObserverSnapshot{}));
         CHECK(!V::ShouldConcealCreatureFromObserver(c, EveryObserverFactTrue(c)));
         // Snapshot never rebuilt the roster from participants.
@@ -523,7 +526,7 @@ namespace
         R::CreatureKey const k1 = Key(0, 0, 0xF130000120);
         std::uint64_t s1 = Begin(r, k1, 0, BotA);
         r.ApplyParticipantSnapshot(k1, s1, Snap({BotA}, {}, true, /*plain*/ false));
-        CHECK(!Ev(r, s1).plainUnscriptedNonEliteHostileNpc); // elite/boss/scripted/NPC flag
+        CHECK(!Ev(r, s1).plainUnscriptedNonEliteNpcScope); // elite/boss/scripted/NPC flag
 
         R::CreatureKey const k2 = Key(0, 0, 0xF130000121);
         std::uint64_t s2 = Begin(r, k2, 0, BotA);
@@ -651,6 +654,117 @@ namespace
         CHECK(r.OnAssistOfActor(BotA, Human) == 0);
     }
 
+    // ---- Bounded enumeration (CS01: total visit budget under global lock) ----
+
+    void TestCollectorDuplicateFloodStopsAtBudget()
+    {
+        R::SnapshotCollector c;
+        std::size_t iterations = 0;
+        for (int i = 0; i < 100000; ++i)
+        {
+            ++iterations;
+            if (!c.AddParticipant(BotA))  // same token over and over
+                break;
+        }
+        CHECK(iterations == R::MaxSnapshotVisits + 1);
+        CHECK(c.Stopped());
+        CHECK(c.Visits() == R::MaxSnapshotVisits + 1);
+        R::ParticipantSnapshot snap = c.Take();
+        CHECK(!snap.complete);
+        CHECK(snap.participantCount == 1);
+        CHECK(!c.AddParticipant(BotB));     // stays stopped
+        CHECK(!c.AddAttacker(BotB));
+        // Fails visible in the registry.
+        R::Registry r;
+        R::CreatureKey const k = Key(0, 0, 0xF130000300);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        r.ApplyParticipantSnapshot(k, s, snap);
+        CHECK(Uncertain(r, s));
+        CHECK(!Ev(r, s).enumeratedWithinBounds);
+    }
+
+    void TestCollectorBudgetAcrossThreeRanges()
+    {
+        // Mixed duplicates across "threat", "combat" and "attackers" share
+        // ONE budget: 30 + 30 + 10 visits > 64.
+        R::SnapshotCollector c;
+        bool ok = true;
+        for (int i = 0; ok && i < 30; ++i) ok = c.AddParticipant(BotA);
+        CHECK(ok);
+        for (int i = 0; ok && i < 30; ++i) ok = c.AddParticipant(BotB);
+        CHECK(ok);
+        std::size_t attackerCalls = 0;
+        for (int i = 0; ok && i < 10; ++i) { ++attackerCalls; ok = c.AddAttacker(BotA); }
+        CHECK(!ok);
+        CHECK(attackerCalls == R::MaxSnapshotVisits - 60 + 1);
+        CHECK(!c.Take().complete);
+    }
+
+    void TestCollectorStopsOnUnknownAndOverflow()
+    {
+        R::SnapshotCollector u;
+        CHECK(u.AddParticipant(BotA));
+        CHECK(!u.AddParticipant(Human));     // unknown: stop immediately
+        CHECK(!u.AddParticipant(BotB));
+        CHECK(u.Visits() == 2);
+        CHECK(!u.Take().complete);
+
+        R::SnapshotCollector p;              // > MaxSnapshotParticipants distinct
+        std::size_t calls = 0;
+        for (std::uint64_t t = 1; t < 1000; ++t) { ++calls; if (!p.AddParticipant(5000 + t)) break; }
+        CHECK(calls == R::MaxSnapshotParticipants + 1);
+        CHECK(p.Take().participantCount == R::MaxSnapshotParticipants);
+        CHECK(!p.Take().complete);
+
+        R::SnapshotCollector a;              // > MaxTrackedAttackers distinct
+        calls = 0;
+        for (std::uint64_t t = 1; t < 1000; ++t) { ++calls; if (!a.AddAttacker(7000 + t)) break; }
+        CHECK(calls == P::MaxTrackedAttackers + 1);
+        CHECK(a.Take().attackerCount == P::MaxTrackedAttackers);
+        CHECK(!a.Take().complete);
+
+        R::SnapshotCollector f;              // API unavailable / PvP ref
+        f.Fail();
+        CHECK(f.Stopped());
+        CHECK(!f.AddParticipant(BotA));
+        CHECK(f.Visits() == 0);
+        CHECK(!f.Take().complete);
+    }
+
+    void TestCollectorZeroAndNormal()
+    {
+        // Zero participants for a tracked creature is unknown => visible.
+        R::Registry r;
+        R::CreatureKey const k0 = Key(0, 0, 0xF130000310);
+        std::uint64_t s0 = Begin(r, k0, 0, BotA);
+        R::SnapshotCollector empty;
+        R::ParticipantSnapshot z = empty.Take();
+        z.alive = true;
+        z.inCombat = true;
+        z.tapHolderNoneOrVerifiedBot = true;
+        CHECK(z.complete && z.participantCount == 0);
+        r.ApplyParticipantSnapshot(k0, s0, z);
+        CHECK(Uncertain(r, s0));
+        CHECK(!Ev(r, s0).threatCombatAndAttackersObservedOnlyVerifiedBots);
+
+        // Ordinary bounded case: evidence recorded, still never proof.
+        R::CreatureKey const k1 = Key(0, 0, 0xF130000311);
+        std::uint64_t s1 = Begin(r, k1, 0, BotA);
+        R::SnapshotCollector c;
+        CHECK(c.AddParticipant(BotB));
+        CHECK(c.AddParticipant(BotA));
+        CHECK(c.AddAttacker(BotA));
+        R::ParticipantSnapshot n = c.Take();
+        n.alive = true;
+        n.inCombat = true;
+        n.tapHolderNoneOrVerifiedBot = true;
+        CHECK(n.complete && n.participantCount == 2 && n.attackerCount == 1);
+        r.ApplyParticipantSnapshot(k1, s1, n);
+        CHECK(Ev(r, s1).threatCombatAndAttackersObservedOnlyVerifiedBots);
+        CHECK(!r.IsConcealmentCandidate(s1));
+        CHECK(!Uncertain(r, s1));
+    }
+
     void TestTokensMonotonicAcrossReset()
     {
         R::Registry r;
@@ -690,6 +804,10 @@ int main()
     TestAssistInvalidation();
     TestLogoutRaceAndCombatEnd();
     TestSnapshotOverflowAndPoison();
+    TestCollectorDuplicateFloodStopsAtBudget();
+    TestCollectorBudgetAcrossThreeRanges();
+    TestCollectorStopsOnUnknownAndOverflow();
+    TestCollectorZeroAndNormal();
 
     unsigned const total = g_pass + g_fail;
     std::printf("F14 LIFECYCLE REGISTRY %u/%u passed\n", g_pass, total);
