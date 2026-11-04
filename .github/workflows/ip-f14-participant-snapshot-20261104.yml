@@ -67,7 +67,7 @@ jobs:
           printf '%s\n' \
             '+        std::uint64_t evidenceInvalidations = 0;' \
             '+        std::uint64_t snapshotsApplied = 0;' \
-            '+        std::uint64_t snapshotsVerified = 0;' > /tmp/h-expected
+            '+        std::uint64_t snapshotsOnlyVerifiedBots = 0;' > /tmp/h-expected
           diff -u /tmp/h-expected /tmp/h-diff
           for key in F14.ExperimentalAttackLifecycleRegistry F14.ExperimentalRndbotPlayerVisibility \
                      F14.ProtectVerifiedRandomBotGroupFloor PaidExpansion.Enable; do

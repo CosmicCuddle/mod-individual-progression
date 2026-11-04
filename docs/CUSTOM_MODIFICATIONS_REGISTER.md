@@ -619,35 +619,41 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 
 **Rollback:** close the draft or discard the child branch. Nothing on any host, database, config, client or Core fork was changed. A future host deployment needs backups, rollback and explicit CosmicCuddle approval.
 
-## 4 November 2026 — F14 stage 2: participant/rights snapshot collector (creature half only, separate review-only child)
+## 4 November 2026 — F14 stage 2: non-authoritative participant evidence collector (separate review-only child)
 
-**Intent:** fill the observer-agnostic **creature half** of the existing pure `F14CombatVisibilityPolicy::CreatureSnapshot` from real map-thread evidence, so a later stage can reason about it. This is **bookkeeping only**. It hides nothing, sends no packets, requests no visibility refresh, writes no stage, quest, loot or tap data, and never calls Playerbots. Parent is draft #69 (`1ca9823`), which inherits #64, #63, #62 and #59.
+**Intent:** record conservative, map-thread **evidence** about who is involved with a creature that verified bots fight, so a later, separate complete rights audit can build on it. This is **bookkeeping only**. It hides nothing, sends no packets, requests no visibility refresh, writes no stage, quest, loot or tap data, and never calls Playerbots. Parent is draft #69 (`1ca9823`).
+
+**CS01 acceptance rule (applied):** Core threat, combat and tap snapshots are **not a complete census** of participants or rights. So this stage **never** sets the pure model's participant proof. It never calls `ReverifyCompleteParticipantFacts` or `ReplaceWithFullyVerifiedRoster`. `IsConcealmentCandidate()` and `HasVerifiedAttackerCandidates()` stay false for every entry. Snapshots can only **add** uncertainty, never remove it.
 
 **Source and exact changes:**
-- **`src/IndividualProgressionF14LifecycleRegistry.h`:** a bounded `ParticipantSnapshot` of value tokens, plus per-entry `SnapshotFacts` that are valid only for the policy generation they were taken at.
-  - **Proof:** only a complete, all-verified, alive snapshot can rebuild the roster from the creature's actual attacker set and set the participant proof. It uses the unchanged pure `ReplaceWithFullyVerifiedRoster` and `ReverifyCompleteParticipantFacts`. Any gap makes the entry uncertain.
+- **`src/IndividualProgressionF14LifecycleRegistry.h`:**
+  - **`ParticipantSnapshot`:** a bounded set of value tokens. **`SnapshotFacts`** holds the per-entry result, valid only at the policy generation it was taken at.
+  - **`ApplyParticipantSnapshot`:** any token-0 participant, overflow, an unenumerable list or a dead creature marks the entry uncertain. Otherwise it only records evidence.
+  - **Read-only outputs:** `GetConservativeEvidence` is explicitly non-authoritative and never consumed. `BuildCreatureSnapshot` fills only identity, revision and plain observations; every authoritative proof field stays **false**.
   - **Invalidation:** `OnParticipantEvidence` handles damage, periodic and heal sources; `OnAssistOfActor` handles heals on rostered bots; `OnCreatureLeftCombat` handles combat end and evade.
-  - **Output:** `BuildCreatureSnapshot` fills only the creature fields, each true only at the current generation. `IsConcealmentCandidate` is renamed `HasParticipantProof`, because it is the participant half only.
-  - **Observer side:** the registry never fills any observer field.
-- **`src/IndividualProgressionF14LifecycleScript.cpp`:** existing `UnitScript` hooks `OnDamage`, `ModifyPeriodicDamageAurasTick` (DoT and HoT), `OnHeal`, `OnUnitEnterCombat`, `OnUnitExitCombat` and `OnUnitEnterEvadeMode`. These are **invalidation evidence only**, and amounts are never modified.
-  - **No snapshot in the same event:** an unverified or unrostered source only marks the creature uncertain, because its threat or combat reference may not exist yet. A snapshot is taken only on a later event from an already-rostered verified bot.
-  - **Snapshot contents:** the full unsorted threat list (offline entries included), PvE combat refs, the attacker set and the loot recipient. A PvP combat ref, a missing threat list, overflow, any token-0 participant, or any loot group fails visible.
-  - **Creature scope:** plain unscripted non-elite only. Rare, elite or boss creatures, any ScriptName or AIName, summons, vehicles, charmed units, pets, guardians and totems, triggers, guards, civilians and any NPC flag all fail visible.
+- **`src/IndividualProgressionF14LifecycleScript.cpp`:** existing `UnitScript` hooks `OnDamage`, `ModifyPeriodicDamageAurasTick` (DoT and HoT), `OnHeal`, `OnUnitEnterCombat`, `OnUnitExitCombat` and `OnUnitEnterEvadeMode`. These are invalidation evidence only, and amounts are never modified.
+  - **No snapshot in the same event:** an unverified or unrostered source only adds uncertainty. A snapshot is taken only on a later event from an already-rostered verified bot.
+  - **Snapshot contents:** the full unsorted threat list (offline entries included), PvE combat refs, the attacker set and the loot recipient.
+  - **Unknown means visible:** a PvP ref, a missing threat list, a creature not in its map, overflow, any loot group, or any human, Altbot, GM, pet, minion, totem, creature or unknown participant.
+  - **Creature scope:** plain unscripted non-elite only. Rare, elite or boss creatures, ScriptName or AIName, summons, vehicles, charmed units, pets, guardians, totems, triggers, guards, civilians and any NPC flag are excluded.
   - **Untracked creatures:** they return before any lock is taken.
-  - **Retirement cleanup:** retirement on corpse, respawn, removal and combat end now runs whenever a stamp exists, even if IP itself is disabled (CS01 cleanup edge).
+  - **Retirement cleanup:** retirement on corpse, respawn, removal and combat end runs whenever a stamp exists, even if IP itself is disabled (CS01 cleanup edge).
 - **`src/IndividualProgression.h`:** three read-only status counters.
 
 **Unchanged:** the config (still `ExperimentalAttackLifecycleRegistry = 0`), `IndividualProgression.cpp`, `IndividualProgressionPlayer.cpp`, the loader, all four pure policy headers, Core, Playerbots and SQL.
 
-**Not proven, and stated as open needs:**
-- **Minion ownership:** pets and minions fail visible.
-- **Group membership for tap.**
-- **Quest, skin and kill credit:** this is observer-side.
-- **The observer half and the Core per-viewer refresh bridge** (CS01's lane).
-- **Threat that arrives with no creature-side event:** the next rostered event re-snapshots it. Heals on rostered bots invalidate immediately.
+**Open needs (stated, not invented):** each of these is required before any hiding can be approved.
+- **Complete participant census:** delayed damage, heals and zero-threat effects.
+- **Minion and pet ownership.**
+- **Loot-group membership** across maps and offline.
+- **Quest, skin and kill credit.**
+- **The observer half.**
+- **The Core per-viewer refresh bridge.**
+- **Thread ownership:** there is no Core thread-ownership API. The hooks fire from map updates by construction.
+- **An in-game rights audit.**
 
 **Tests:**
-- **Native registry tests:** 204 checks on GCC and Clang, C++17 and C++20, with and without NDEBUG. They include proof that the creature half alone, and even every observer fact except the missing refresh bridge, never conceals.
+- **Native registry tests:** 191 checks on GCC and Clang, C++17 and C++20, with and without NDEBUG. They include CS01's named cases: zero-threat, DoT-only, no attack target, caster damage, cross-map/offline loot group, unknown pet owner, enemy creature links, API unavailability, overflow and the logout race. They also show that the pure model never conceals from this stage, even with every observer fact true.
 - **Source contracts:** 21, with deliberate breakages verified.
 - **CI:** an exact 7-path scope against `1ca9823`, and a full native Worldserver link on #69's pins with an `nm` check of all ten hook overrides.
 - **No in-game test was done.**
