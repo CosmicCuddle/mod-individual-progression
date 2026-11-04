@@ -385,10 +385,14 @@ IndividualProgression.QuestMoneyAtLevelCap = 1
 #                     Applies to players and bots alike. Accounts of GM level 2 or higher, with their altbots,
 #                     and excluded accounts have no cap; a changed GM level counts after .reload config.
 #
-#        Default:     1 - Enabled
-#                     0 - Disabled
+#        Default:     0 - Disabled (Cosmic preservation baseline)
+#                     1 - Enabled (requires separate owner approval)
 #
-IndividualProgression.ProfessionTierCap = 1
+#        SAFETY: Enabling can permanently remove above-tier profession ranks,
+#        skill progress, achievements and titles during login. Verify backups,
+#        gameplay rules and a disposable-character test before opting in.
+#
+IndividualProgression.ProfessionTierCap = 0
 
 # IndividualProgression.LockLaterExpansionGear
 #

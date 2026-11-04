@@ -201,6 +201,26 @@ class PolicyPreservation(unittest.TestCase):
             guard.index("ITEM_THIEVES_TOOLS = 5060"),
         )
 
+    def test_profession_cleanup_is_explicit_opt_in_only(self):
+        config = options(current("conf/individualProgression.conf.dist"))
+        header = current("src/IndividualProgression.h")
+        core = current("src/IndividualProgression.cpp")
+        spells = current("src/IndividualProgressionSpells.cpp")
+        player_script = current("src/IndividualProgressionPlayer.cpp")
+        self.assertEqual(config.get("IndividualProgression.ProfessionTierCap"), "0")
+        self.assertIn("bool ProfessionTierCap = false;", header)
+        self.assertIn(
+            'GetOption<bool>("IndividualProgression.ProfessionTierCap", false)', core
+        )
+        self.assertIn(
+            "if (!enabled || !ProfessionTierCap || !player || !player->IsInWorld()", spells
+        )
+        self.assertIn("void IndividualProgression::CapProfessionSkills(Player* player)", spells)
+        self.assertIn("void IndividualProgression::CapProfessionAchievements(Player* player)", spells)
+        self.assertIn("    if (!cap)\n        return;", spells)
+        self.assertIn("sIndividualProgression->CapProfessionSkills(player);", player_script)
+        self.assertIn("sIndividualProgression->CapProfessionAchievements(player);", player_script)
+
     def test_custom_hunter_and_paid_guards_still_present(self):
         spells = current("src/IndividualProgressionSpells.cpp")
         cs = current("src/cs_individualProgression.cpp")
