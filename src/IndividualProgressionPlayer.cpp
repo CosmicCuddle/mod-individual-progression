@@ -58,7 +58,8 @@ public:
         sIndividualProgression->ForgetF14VerifiedRandomBotGroupIdentity(player);
 #if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
         if ((sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor ||
-             sIndividualProgression->f14ExperimentalRndbotPlayerVisibility) &&
+             sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+             sIndividualProgression->f14ExperimentalAttackLifecycleRegistry) &&
             sIndividualProgression->isBotAccount(player) &&
             (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
             player->GetSession() && player->GetSession()->IsHeadless())

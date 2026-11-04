@@ -605,28 +605,39 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
 {
     if (!player)
         return;
-    std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
-    uint32 const guid = player->GetGUID().GetCounter();
-    // Always evict the previous login incarnation, even if this call is
-    // an unverified login. An old GUID cannot resurrect a stale attack proof.
-    _f14VerifiedRandomBotGroupCache.erase(guid);
-    _f14VerifiedRandomBotLoginEpoch.erase(guid);
-    if (!verified)
-        return;
+    // The previous login epoch (if any) is expired from the F14 lifecycle
+    // registry AFTER the identity lock is released (lock order: registry
+    // mutex -> identity lock). Logout/relogin never relies on AttackStop.
+    std::uint64_t expiredLoginEpoch = 0;
+    [&]()
+    {
+        std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+        uint32 const guid = player->GetGUID().GetCounter();
+        auto const previousEpoch = _f14VerifiedRandomBotLoginEpoch.find(guid);
+        if (previousEpoch != _f14VerifiedRandomBotLoginEpoch.end())
+            expiredLoginEpoch = previousEpoch->second;
+        // Always evict the previous login incarnation, even if this call is
+        // an unverified login. An old GUID cannot resurrect a stale attack proof.
+        _f14VerifiedRandomBotGroupCache.erase(guid);
+        _f14VerifiedRandomBotLoginEpoch.erase(guid);
+        if (!verified)
+            return;
 
-    // Keep the historically protected group/login identity independent
-    // of the optional F14 visibility epoch. A token exhaustion must NEVER
-    // weaken established RandomBot group-progression safeguards.
-    _f14VerifiedRandomBotGroupCache[guid] = true;
+        // Keep the historically protected group/login identity independent
+        // of the optional F14 visibility epoch. A token exhaustion must NEVER
+        // weaken established RandomBot group-progression safeguards.
+        _f14VerifiedRandomBotGroupCache[guid] = true;
 
-    // Epoch 0 is always invalid, and wrap would reuse an old token.
-    // On exhaustion, group protections survive but no new event/visibility
-    // incarnation token is issued. The missing token fails visible.
-    if (_f14NextRandomBotLoginEpoch == std::numeric_limits<std::uint64_t>::max())
-        return;
+        // Epoch 0 is always invalid, and wrap would reuse an old token.
+        // On exhaustion, group protections survive but no new event/visibility
+        // incarnation token is issued. The missing token fails visible.
+        if (_f14NextRandomBotLoginEpoch == std::numeric_limits<std::uint64_t>::max())
+            return;
 
-    const std::uint64_t loginEpoch = ++_f14NextRandomBotLoginEpoch;
-    _f14VerifiedRandomBotLoginEpoch[guid] = loginEpoch;
+        const std::uint64_t loginEpoch = ++_f14NextRandomBotLoginEpoch;
+        _f14VerifiedRandomBotLoginEpoch[guid] = loginEpoch;
+    }();
+    ExpireF14LifecycleActor(expiredLoginEpoch);
 }
 
 void IndividualProgression::ForgetF14VerifiedRandomBotGroupIdentity(Player* player)
@@ -1427,6 +1438,28 @@ private:
             sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
         }
 #endif
+        // F14 attack/corpse lifecycle registry: bookkeeping only (never hides,
+        // never refreshes, never writes stages). Every (re)load starts empty.
+        sIndividualProgression->f14ExperimentalAttackLifecycleRegistry = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ExperimentalAttackLifecycleRegistry", false);
+#if !defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION) || COSMIC_F14_ATTACK_EVENT_HOOK_VERSION < 1
+        if (sIndividualProgression->f14ExperimentalAttackLifecycleRegistry)
+        {
+            LOG_ERROR("module", "F14 attack lifecycle registry requires the Core attack/corpse event hooks; forcing OFF");
+            sIndividualProgression->f14ExperimentalAttackLifecycleRegistry = false;
+        }
+#endif
+#if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
+        if (sIndividualProgression->f14ExperimentalAttackLifecycleRegistry)
+        {
+            LOG_ERROR("module", "F14 attack lifecycle registry requires positive Playerbots RandomBot identity; forcing OFF");
+            sIndividualProgression->f14ExperimentalAttackLifecycleRegistry = false;
+        }
+#endif
+        // The registry is its own verified-identity source: when ON (and not
+        // forced OFF above), OnPlayerLogin records positive headless BE/Draenei
+        // RandomBot login epochs without enabling any other F14 feature.
+        sIndividualProgression->ResetF14LifecycleRegistry();
         sIndividualProgression->fishingFix = sConfigMgr->GetOption<bool>("IndividualProgression.FishingFix", true);
         sIndividualProgression->VanillaHunterPets = sConfigMgr->GetOption<bool>("IndividualProgression.VanillaHunterPets", true);
         sIndividualProgression->WarlockDemonTrainers = sConfigMgr->GetOption<bool>("IndividualProgression.WarlockDemonTrainers", true);
@@ -1605,8 +1638,13 @@ public:
 void AddSC_ip_paid_expansion();
 
 // Add all scripts in one
+// F14 lifecycle consumer lives in IndividualProgressionF14LifecycleScript.cpp;
+// registered here so the upstream Grim loader stays byte-identical.
+void AddSC_mod_individual_progression_f14_lifecycle();
+
 void AddSC_mod_individual_progression()
 {
     new IndividualPlayerProgression_WorldScript();
     AddSC_ip_paid_expansion();
+    AddSC_mod_individual_progression_f14_lifecycle();
 }
