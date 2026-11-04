@@ -77,9 +77,9 @@ class ConsumerIsBookkeepingOnly(unittest.TestCase):
                           "ForceUpdateProgressionState", "UpdateProgressionState",
                           "SetPlayerSetting", "CharacterDatabase", "WorldDatabase",
                           "LoginDatabase", "RewardQuest", "ModifyMoney", "SaveToDB",
-                          "HasParticipantProof(", "BuildCreatureSnapshot(", "ShouldConcealCreatureFromObserver", "Kill(", "DespawnOrUnsummon",
+                          "IsConcealmentCandidate(", "BuildCreatureSnapshot(", "GetConservativeEvidence(", "ShouldConcealCreatureFromObserver", "Kill(", "DespawnOrUnsummon",
                           "CombatStop(", "AttackStop(", "Attack("):
-            if forbidden in ("HasParticipantProof(", "BuildCreatureSnapshot(", "ShouldConcealCreatureFromObserver"):
+            if forbidden in ("IsConcealmentCandidate(", "BuildCreatureSnapshot(", "GetConservativeEvidence(", "ShouldConcealCreatureFromObserver"):
                 # Pure-header API only; never CALLED by the runtime consumer.
                 self.assertNotIn(forbidden, strip_comments(read(SCRIPT)))
                 continue
@@ -307,20 +307,32 @@ class Stage2ParticipantSnapshot(unittest.TestCase):
         self.assertIn("RetireOnCombatEnd(unit);", exit_)
         self.assertIn("RetireOnCombatEnd(unit);", evade)
 
-    def test_registry_creature_half_never_claims_observer_or_refresh(self):
+    def test_registry_never_sets_participant_or_rights_proof(self):
         reg = strip_comments(read(REGISTRY))
+        # CS01 acceptance rule: Core threat/combat/tap snapshots are not a
+        # complete census. The registry never calls the proof/rebuild APIs.
+        self.assertNotIn("ReverifyCompleteParticipantFacts", reg)
+        self.assertNotIn("ReplaceWithFullyVerifiedRoster", reg)
+        self.assertNotIn("completeCurrentParticipantProof", reg)
         body = reg.split("bool BuildCreatureSnapshot(", 1)[1].split("\n        }\n", 1)[0]
-        for field in ("everyParticipantVerifiedTbcRaceRandomBotOrItsMinion", "noRealPlayerCombatThreatTapOrRights",
-                      "noPendingThreatOrCombatantChanges", "eligibleHiddenRandomBotCurrentlyAttackingThisCreature"):
-            self.assertIn("out." + field + " =", body)
+        for field in ("complete", "eligibleHiddenRandomBotCurrentlyAttackingThisCreature",
+                      "everyParticipantVerifiedTbcRaceRandomBotOrItsMinion",
+                      "noRealPlayerCombatThreatTapOrRights", "noPendingThreatOrCombatantChanges"):
+            self.assertIn("out." + field + " = false;", body)
+            self.assertEqual(body.count("out." + field + " ="), 1, field)
+        cand = reg.split("bool IsConcealmentCandidate(", 1)[1].split("\n        }\n", 1)[0]
+        self.assertIn("Policy::HasVerifiedAttackerCandidates(", cand)
+        # Snapshots may only ADD uncertainty and never create entries.
+        apply_ = reg.split("void ApplyParticipantSnapshot(", 1)[1].split("bool GetConservativeEvidence(", 1)[0]
+        self.assertIn("Apply(*entry, Policy::Event::UnverifiedOrHumanParticipant, 0);", apply_)
+        self.assertNotIn("uncertain = false", apply_)
+        self.assertNotIn("Create(", apply_)
+        self.assertNotIn("state =", apply_.replace("entry->state.generation", ""))
         # The registry never fills any observer-side fact.
         for observer_only in ("ObserverSnapshot", "coreVisibilityAndThreatRefreshVerified",
                               "explicitlyEnabled", "ShouldConcealCreatureFromObserver"):
             self.assertNotIn(observer_only, reg)
-        apply_ = reg.split("void ApplyParticipantSnapshot(", 1)[1].split("bool BuildCreatureSnapshot(", 1)[0]
-        self.assertIn("Policy::ReplaceWithFullyVerifiedRoster(", apply_)
-        self.assertIn("Policy::ReverifyCompleteParticipantFacts(", apply_)
-        self.assertNotIn("Create(", apply_)
+        self.assertIn("struct ConservativeEvidence", reg)
 
 
 if __name__ == "__main__":
