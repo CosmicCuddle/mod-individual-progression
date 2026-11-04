@@ -1,0 +1,125 @@
+# DEV-only verification: two layered patches applied only on disposable CI PB.
+# Do not change the live PB code/config, or install after this source-model PASS.
+name: Playerbots earned IP reset markers selected RNDBOT only (NO HOST)
+
+on:
+  push:
+    branches:
+      - research/cs01-pb-reset-rndbot-only-20261104
+    paths:
+      - ".github/workflows/ip-pb-rndbot-only-refinement-20261104.yml"
+      - "tests/pb_patches/reset_earned_ip_markers_rndbot_only_refinement.patch"
+      - "tests/pb_rndbot_only_marker_preserve.cpp"
+      - "tests/test_ip_pb_rndbot_only_keep_list.py"
+      - "docs/F14_PB_RNDBOT_ONLY_KEEP_LIST_REFINEMENT_2026-11-04.md"
+  pull_request:
+    branches:
+      - research/cs01-pb-reset-marker-keep-list-20261103
+    paths:
+      - ".github/workflows/ip-pb-rndbot-only-refinement-20261104.yml"
+      - "tests/pb_patches/reset_earned_ip_markers_rndbot_only_refinement.patch"
+      - "tests/pb_rndbot_only_marker_preserve.cpp"
+      - "tests/test_ip_pb_rndbot_only_keep_list.py"
+      - "docs/F14_PB_RNDBOT_ONLY_KEEP_LIST_REFINEMENT_2026-11-04.md"
+
+permissions:
+  contents: read
+
+jobs:
+  selected-rndbot-only:
+    name: Selected RandomBot earned marker policy (${{ matrix.compiler }}, C++${{ matrix.standard }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: ['17', '20']
+    steps:
+      - name: Checkout exact reviewed child (NO HOST)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          path: ip
+          persist-credentials: false
+
+      - name: Checkout exact historical Playerbots with no modules changed
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: pb
+          persist-credentials: false
+
+      - name: Guard immutable #49 parent and child file allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C ip rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          git -C ip merge-base --is-ancestor e9252a4f37248d8727cb96004006a741a6c6c263 HEAD
+          test "$(git -C ip rev-parse HEAD:tests/pb_patches/reset_earned_ip_markers_prototype.patch)" = baa179588397461ff8838371b6fdebd874940132
+          test "$(git -C pb rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          git -C ip diff --check e9252a4f37248d8727cb96004006a741a6c6c263 HEAD
+          git -C ip diff --name-only e9252a4f37248d8727cb96004006a741a6c6c263 HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            '.github/workflows/ip-pb-rndbot-only-refinement-20261104.yml' \
+            'docs/F14_PB_RNDBOT_ONLY_KEEP_LIST_REFINEMENT_2026-11-04.md' \
+            'tests/pb_patches/reset_earned_ip_markers_rndbot_only_refinement.patch' \
+            'tests/pb_rndbot_only_marker_preserve.cpp' \
+            'tests/test_ip_pb_rndbot_only_keep_list.py' | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          test -z "$(git -C ip diff --name-only e9252a4f37248d8727cb96004006a741a6c6c263 HEAD -- src conf sql data optional)"
+          echo 'PASS: immutable #49 prototype plus only five review/test additions'
+
+      - name: Apply original #49 patch and run its unchanged pre-refinement tests
+        shell: bash
+        env:
+          COSMIC_PB_PATCHED_ROOT: ${{ github.workspace }}/pb
+        run: |
+          set -euo pipefail
+          git -C pb apply --check ../ip/tests/pb_patches/reset_earned_ip_markers_prototype.patch
+          git -C pb apply ../ip/tests/pb_patches/reset_earned_ip_markers_prototype.patch
+          git -C pb diff --check
+          (cd ip && python3 -B -m unittest discover -s tests -p 'test_ip_pb_keep_list_prototype.py' -v)
+          grep -Fqx 'Playerbots.ResetQuestsPreserveQuestIds =' pb/conf/playerbots.conf.dist
+          echo 'PASS: exact original #49 patch applied before second-layer refinement'
+
+      - name: Apply one-file selected-RNDBOT-only refinement and check source
+        shell: bash
+        env:
+          COSMIC_PB_RNDBOT_ONLY_ROOT: ${{ github.workspace }}/pb
+        run: |
+          set -euo pipefail
+          git -C pb apply --check ../ip/tests/pb_patches/reset_earned_ip_markers_rndbot_only_refinement.patch
+          git -C pb apply ../ip/tests/pb_patches/reset_earned_ip_markers_rndbot_only_refinement.patch
+          git -C pb diff --check
+          git -C pb diff --name-only | sort > /tmp/pb-actual
+          printf '%s\n' \
+            conf/playerbots.conf.dist \
+            src/Bot/Factory/PlayerbotFactory.cpp \
+            src/PlayerbotAIConfig.cpp \
+            src/PlayerbotAIConfig.h | sort > /tmp/pb-expected
+          diff -u /tmp/pb-expected /tmp/pb-actual
+          (cd ip && python3 -B -m unittest discover -s tests -p 'test_ip_pb_rndbot_only_keep_list.py' -v)
+          test -z "$(git -C ip status --porcelain)"
+          grep -Fqx 'Playerbots.ResetQuestsPreserveQuestIds =' pb/conf/playerbots.conf.dist
+          echo 'PASS: selected RandomBot only, Altbot/human fail normal reset, no config/SQL changes'
+
+      - name: Compile and exercise 676-case pure policy model (NO SERVER)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${{ matrix.compiler }}" -std=c++${{ matrix.standard }} -O2 -Wall -Wextra -Werror -pedantic \
+            ip/tests/pb_rndbot_only_marker_preserve.cpp -o /tmp/pb-rndbot-keep-model
+          /tmp/pb-rndbot-keep-model | tee /tmp/pb-rndbot-keep-model.out
+          grep -Fq 'F14 selected RandomBot-only marker keep-list pure model: 676/676 checks passed; NO GAMEPLAY.' /tmp/pb-rndbot-keep-model.out
+
+      - name: Safety boundary (NO HOST)
+        if: always()
+        shell: bash
+        run: |
+          echo 'No executable, database, account, character, Core/IP/PB fork or host was changed.'
+          echo 'Original #49 distributed PB option is EMPTY: stock quest reset remains the default.'
+          echo 'Selection is verified via original PB IsRandomBot(bot), not race/account alone.'
+          echo 'Factory call ordering and actual rerandomize, Altbot and client behavior remain in-game gates.'
