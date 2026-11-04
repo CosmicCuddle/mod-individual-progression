@@ -190,7 +190,12 @@ class F14TransitionBridge(unittest.TestCase):
         stop_index = attack.index("if (!newVictim)")
         checks_index = attack.index("HasF14VerifiedRandomBotIdentity(candidate)")
         self.assertLess(stop_index, checks_index)
-        stop_block = attack[stop_index:checks_index]
+        # Bound this proof to the actual STOP branch, not later START/SWITCH
+        # identity gates. The old slice included allowed new-victim session
+        # checks and produced a false failure even though STOP returns first.
+        stop_end = attack.index("return;", stop_index) + len("return;")
+        self.assertLess(stop_end, checks_index)
+        stop_block = attack[stop_index:stop_end]
         self.assertIn("oldVictim->IsCreature()", stop_block)
         self.assertIn("oldVictim->IsInWorld()", stop_block)
         self.assertIn("oldVictim->UpdateObjectVisibility(true);", stop_block)
