@@ -29,6 +29,10 @@
  */
 #include "IndividualProgression.h"
 #include "IndividualProgressionF14LifecycleRegistry.h"
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+#include "IndividualProgressionF14LogoutRefreshQueue.h"
+#include <atomic>
+#endif
 #include "AllCreatureScript.h"
 #include "Creature.h"
 #include "DataMap.h"
@@ -62,6 +66,31 @@ namespace
         return logged;
     }
 
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    using LogoutQueue = IndividualProgressionF14LogoutRefreshQueue::Queue<>;
+
+    // Both queue operations and registry writes use LifecycleLock().
+    // Atomic flag makes the extra Unit::Update callback negligible unless a
+    // verified owner actually loses its login epoch.
+    LogoutQueue& PendingLogoutRefresh()
+    {
+        static LogoutQueue pending;
+        return pending;
+    }
+
+    std::atomic<bool>& HasPendingLogoutRefresh()
+    {
+        static std::atomic<bool> pending{false};
+        return pending;
+    }
+
+    bool& LogoutRefreshOverflowLogged()
+    {
+        static bool logged = false;
+        return logged;
+    }
+#endif
+
     // Must be called with LifecycleLock() held.
     void LogPoisonOnce()
     {
@@ -79,6 +108,11 @@ void IndividualProgression::ResetF14LifecycleRegistry()
     std::lock_guard<std::mutex> guard(LifecycleLock());
     LifecycleRegistry().Reset();
     PoisonLogged() = false;
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    PendingLogoutRefresh().Reset();
+    HasPendingLogoutRefresh().store(false, std::memory_order_release);
+    LogoutRefreshOverflowLogged() = false;
+#endif
 }
 
 void IndividualProgression::ExpireF14LifecycleActor(std::uint64_t loginEpoch)
@@ -88,7 +122,25 @@ void IndividualProgression::ExpireF14LifecycleActor(std::uint64_t loginEpoch)
     if (!loginEpoch)
         return;
     std::lock_guard<std::mutex> guard(LifecycleLock());
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    // Logout can run independently of Core AttackStop. Queue ONLY copied
+    // creature keys and stamp values, never Creature*/Map*/Player*. The
+    // target itself consumes the request on its next owning-map update.
+    auto& pending = PendingLogoutRefresh();
+    std::size_t const affected = LifecycleRegistry().ExpireActor(
+        loginEpoch, [&pending](Registry::CreatureKey const& key, std::uint64_t stamp)
+        {
+            pending.Remember(key, stamp);
+        });
+    HasPendingLogoutRefresh().store(pending.HasPending(), std::memory_order_release);
+    if (pending.IsPoisoned() && !LogoutRefreshOverflowLogged())
+    {
+        LogoutRefreshOverflowLogged() = true;
+        LOG_ERROR("module", "IndividualProgression F14 experimental logout refresh queue exhausted; no further requests accepted, concealment must remain disabled");
+    }
+#else
     std::size_t const affected = LifecycleRegistry().ExpireActor(loginEpoch);
+#endif
     if (affected)
         LOG_DEBUG("module", "IndividualProgression F14 lifecycle: login epoch {} expired from {} creature roster(s)", loginEpoch, affected);
 }
@@ -386,6 +438,7 @@ public:
                       UNITHOOK_ON_F14_CREATURE_RESPAWNED,
 #if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
                       UNITHOOK_ON_F14_CREATURE_VISIBILITY_REFRESH_REQUEST,
+                      UNITHOOK_ON_UNIT_UPDATE,
 #endif
                       UNITHOOK_ON_DAMAGE,
                       UNITHOOK_MODIFY_PERIODIC_DAMAGE_AURAS_TICK,
@@ -393,6 +446,33 @@ public:
                       UNITHOOK_ON_UNIT_ENTER_COMBAT,
                       UNITHOOK_ON_UNIT_EXIT_COMBAT,
                       UNITHOOK_ON_UNIT_ENTER_EVADE_MODE}) { }
+
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    // Map-thread handoff of logged-out owner evidence. The queue stores no
+    // pointers; a different object with a recycled creature GUID cannot
+    // consume an expired incarnation stamp. Always drop the lock BEFORE
+    // asking Core to refresh links or walking any nearby viewers.
+    void OnUnitUpdate(Unit* unit, uint32 /*diff*/) override
+    {
+        if (!HasPendingLogoutRefresh().load(std::memory_order_acquire))
+            return;
+        Creature* creature = AsWorldCreature(unit);
+        if (!creature)
+            return;
+        bool matched = false;
+        {
+            std::lock_guard<std::mutex> guard(LifecycleLock());
+            LogoutQueue& pending = PendingLogoutRefresh();
+            matched = pending.Take(KeyOf(creature), StampOf(creature));
+            HasPendingLogoutRefresh().store(pending.HasPending(), std::memory_order_release);
+            if (matched)
+                MarkPendingRefresh(creature);
+        }
+        if (matched && creature->IsInWorld() &&
+            sScriptMgr->ShouldF14RefreshCreatureVisibility(creature))
+            creature->UpdateObjectVisibility(true);
+    }
+#endif
 
     // Invalidation evidence only. Values are never modified, and no single
     // hook is ever treated as proof of a complete participant roster.
@@ -591,6 +671,13 @@ public:
         if (!creature)
             return;
         std::lock_guard<std::mutex> guard(LifecycleLock());
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        // Map removal cannot deliver a WorldObject visibility pass.
+        // Retire the copied value-only request without keeping any pointers.
+        PendingLogoutRefresh().Discard(KeyOf(creature));
+        HasPendingLogoutRefresh().store(
+            PendingLogoutRefresh().HasPending(), std::memory_order_release);
+#endif
         std::uint64_t const stamp = StampOf(creature);
         if (!stamp)
             return;
