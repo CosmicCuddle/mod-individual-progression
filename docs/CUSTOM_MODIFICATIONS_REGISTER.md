@@ -618,3 +618,46 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 - No in-game combat, corpse, logout, visibility or client test was done. Production install or enable is forbidden.
 
 **Rollback:** close the draft or discard the child branch. Nothing on any host, database, config, client or Core fork was changed. A future host deployment needs backups, rollback and explicit CosmicCuddle approval.
+
+## 4 November 2026 — F14 stage 2: non-authoritative participant evidence collector (separate review-only child)
+
+**Intent:** record conservative, map-thread **evidence** about who is involved with a creature that verified bots fight, so a later, separate complete rights audit can build on it. This is **bookkeeping only**. It hides nothing, sends no packets, requests no visibility refresh, writes no stage, quest, loot or tap data, and never calls Playerbots. Parent is draft #69 (`1ca9823`).
+
+**CS01 acceptance rule (applied):** Core threat, combat and tap snapshots are **not a complete census** of participants or rights. So this stage **never** sets the pure model's participant proof. It never calls `ReverifyCompleteParticipantFacts` or `ReplaceWithFullyVerifiedRoster`. `IsConcealmentCandidate()` and `HasVerifiedAttackerCandidates()` stay false for every entry. Snapshots can only **add** uncertainty, never remove it.
+
+**Source and exact changes:**
+- **`src/IndividualProgressionF14LifecycleRegistry.h`:**
+  - **`ParticipantSnapshot`:** a bounded set of value tokens. **`SnapshotFacts`** holds the per-entry result, valid only at the policy generation it was taken at.
+  - **`SnapshotCollector`:** a pure, bounded builder with one **total visit budget** (`MaxSnapshotVisits = 64`) shared by the threat list, PvE combat refs and attacker set, **duplicates included**. It stops on the budget, the first unknown participant, participant or attacker overflow, or API unavailability. The runtime `break`s each loop immediately, so the global lifecycle mutex is never held for an unbounded scan (CS01 review).
+  - **Zero participants:** a tracked creature with zero observed participants is treated as unknown, so it stays visible.
+  - **`ApplyParticipantSnapshot`:** any token-0 participant, overflow, an unenumerable list or a dead creature marks the entry uncertain. Otherwise it only records evidence.
+  - **Read-only outputs:** `GetConservativeEvidence` is explicitly non-authoritative and never consumed. `BuildCreatureSnapshot` fills only identity, revision and plain observations; every authoritative proof field stays **false**.
+  - **Invalidation:** `OnParticipantEvidence` handles damage, periodic and heal sources; `OnAssistOfActor` handles heals on rostered bots; `OnCreatureLeftCombat` handles combat end and evade.
+- **`src/IndividualProgressionF14LifecycleScript.cpp`:** existing `UnitScript` hooks `OnDamage`, `ModifyPeriodicDamageAurasTick` (DoT and HoT), `OnHeal`, `OnUnitEnterCombat`, `OnUnitExitCombat` and `OnUnitEnterEvadeMode`. These are invalidation evidence only, and amounts are never modified.
+  - **No snapshot in the same event:** an unverified or unrostered source only adds uncertainty. A snapshot is taken only on a later event from an already-rostered verified bot.
+  - **Snapshot contents:** the full unsorted threat list (offline entries included), PvE combat refs, the attacker set and the loot recipient.
+  - **Unknown means visible:** a PvP ref, a missing threat list, a creature not in its map, overflow, any loot group, or any human, Altbot, GM, pet, minion, totem, creature or unknown participant.
+  - **Creature scope:** a type-scope exclusion only. **Hostility is not verified**, so the pure model's `plainUnscriptedNonEliteHostileNpc` stays false. Rare, elite or boss creatures, ScriptName or AIName, summons, vehicles, charmed units, pets, guardians, totems, triggers, guards, civilians and any NPC flag are excluded.
+  - **Untracked creatures:** they return before any lock is taken.
+  - **Retirement cleanup:** retirement on corpse, respawn, removal and combat end runs whenever a stamp exists, even if IP itself is disabled (CS01 cleanup edge).
+- **`src/IndividualProgression.h`:** three read-only status counters.
+
+**Unchanged:** the config (still `ExperimentalAttackLifecycleRegistry = 0`), `IndividualProgression.cpp`, `IndividualProgressionPlayer.cpp`, the loader, all four pure policy headers, Core, Playerbots and SQL.
+
+**Open needs (stated, not invented):** each of these is required before any hiding can be approved.
+- **Complete participant census:** delayed damage, heals and zero-threat effects.
+- **Minion and pet ownership.**
+- **Loot-group membership** across maps and offline.
+- **Quest, skin and kill credit.**
+- **The observer half.**
+- **The Core per-viewer refresh bridge.**
+- **Thread ownership:** there is no Core thread-ownership API. The hooks fire from map updates by construction.
+- **An in-game rights audit.**
+
+**Tests:**
+- **Native registry tests:** 232 checks on GCC and Clang, C++17 and C++20, with and without NDEBUG. They include budget exhaustion by duplicate flooding, one shared budget across the three ranges, stopping on unknown participants and overflow, and zero participants. They include CS01's named cases: zero-threat, DoT-only, no attack target, caster damage, cross-map/offline loot group, unknown pet owner, enemy creature links, API unavailability, overflow and the logout race. They also show that the pure model never conceals from this stage, even with every observer fact true.
+- **Source contracts:** 23, including that all three loops break immediately. Deliberate breakages were verified.
+- **CI:** an exact 7-path scope against `1ca9823`, and a full native Worldserver link on #69's pins with an `nm` check of all ten hook overrides.
+- **No in-game test was done.**
+
+**Rollback:** close the draft or discard the child branch. Nothing on any host, database, config or client was changed.

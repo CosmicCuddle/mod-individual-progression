@@ -71,14 +71,16 @@ class ConsumerIsBookkeepingOnly(unittest.TestCase):
         code = strip_comments(read(SCRIPT)) + strip_comments(read(REGISTRY))
         for forbidden in ("sRandomPlayerbotMgr", "RandomPlayerbotMgr", "ObjectAccessor",
                           "UpdateObjectVisibility", "UpdateVisibility", "DestroyForPlayer",
+                          "DestroyForNearbyPlayers", "SendUpdateToPlayer", "SetVisibility",
+                          "SetPhaseMask(", "AddThreat(", "ClearThreat(", "SetLootRecipient(",
                           "SetVisible", "SetPhaseMask", "WorldPacket", "SendDirectMessage",
                           "ForceUpdateProgressionState", "UpdateProgressionState",
                           "SetPlayerSetting", "CharacterDatabase", "WorldDatabase",
                           "LoginDatabase", "RewardQuest", "ModifyMoney", "SaveToDB",
-                          "IsConcealmentCandidate(", "Kill(", "DespawnOrUnsummon",
+                          "IsConcealmentCandidate(", "BuildCreatureSnapshot(", "GetConservativeEvidence(", "ShouldConcealCreatureFromObserver", "Kill(", "DespawnOrUnsummon",
                           "CombatStop(", "AttackStop(", "Attack("):
-            if forbidden == "IsConcealmentCandidate(":
-                # Declared/defined in the pure header, never CALLED by the consumer.
+            if forbidden in ("IsConcealmentCandidate(", "BuildCreatureSnapshot(", "GetConservativeEvidence(", "ShouldConcealCreatureFromObserver"):
+                # Pure-header API only; never CALLED by the runtime consumer.
                 self.assertNotIn(forbidden, strip_comments(read(SCRIPT)))
                 continue
             self.assertNotIn(forbidden, code, forbidden)
@@ -109,7 +111,8 @@ class ConsumerIsBookkeepingOnly(unittest.TestCase):
         self.assertNotRegex(reg, r"\b(Unit|Creature|Player|Map|WorldObject|ObjectGuid)\b")
         includes = re.findall(r'#include\s+[<"]([^>"]+)[>"]', reg)
         self.assertEqual(sorted(includes), sorted([
-            "IndividualProgressionF14MultiAttackerPolicy.h", "cstddef", "cstdint",
+            "IndividualProgressionF14CombatVisibilityPolicy.h",
+            "IndividualProgressionF14MultiAttackerPolicy.h", "array", "cstddef", "cstdint",
             "functional", "limits", "unordered_map"]))
 
     def test_actor_identity_is_cache_only_and_players_only(self):
@@ -129,7 +132,8 @@ class ConsumerIsBookkeepingOnly(unittest.TestCase):
                    "IndividualProgression::F14LifecycleStatus IndividualProgression::GetF14LifecycleStatus()",
                    "void OnF14AttackTargetTransition(",
                    "static void RetireIncarnation(",
-                   "void OnCreatureRemoveWorld(Creature* creature) override"):
+                   "void OnCreatureRemoveWorld(Creature* creature) override",
+                   "void OnUnitEnterCombat(Unit* unit, Unit* victim) override"):
             body = src.split(fn, 1)[1]
             body = body[:body.index("\n}\n") if fn.startswith(("void Ind", "Ind")) else body.index("\n    }\n")]
             self.assertIn("std::lock_guard<std::mutex> guard(LifecycleLock());", body, fn)
@@ -233,6 +237,127 @@ class IndependentVerifiedLogin(unittest.TestCase):
         hits = [m.start() for m in re.finditer(r"f14ExperimentalAttackLifecycleRegistry", core)]
         self.assertEqual(len(hits), 5)
         self.assertTrue(all(lo - 200 < h < hi for h in hits), hits)
+
+
+class Stage2ParticipantSnapshot(unittest.TestCase):
+    def script(self):
+        return strip_comments(read(SCRIPT))
+
+    def fn(self, src, signature, end="\n    }\n"):
+        body = src.split(signature, 1)[1]
+        return body[:body.index(end)]
+
+    def test_invalidation_hooks_registered_once_and_values_untouched(self):
+        src = read(SCRIPT)
+        for hook in ("UNITHOOK_ON_DAMAGE", "UNITHOOK_MODIFY_PERIODIC_DAMAGE_AURAS_TICK",
+                     "UNITHOOK_ON_HEAL", "UNITHOOK_ON_UNIT_ENTER_COMBAT",
+                     "UNITHOOK_ON_UNIT_EXIT_COMBAT", "UNITHOOK_ON_UNIT_ENTER_EVADE_MODE"):
+            self.assertEqual(src.count(hook), 1, hook)
+        # Damage/heal amounts are unnamed parameters: they cannot be modified.
+        for sig in ("void OnDamage(Unit* attacker, Unit* victim, uint32& /*damage*/) override",
+                    "void ModifyPeriodicDamageAurasTick(Unit* target, Unit* caster, uint32& /*amount*/, SpellInfo const* /*spellInfo*/) override",
+                    "void OnHeal(Unit* healer, Unit* receiver, uint32& /*gain*/) override"):
+            self.assertIn(sig, src)
+
+    def test_snapshot_only_after_rostered_source_never_same_event(self):
+        body = self.fn(self.script(), "void HandleParticipantEvent(Unit* source, Unit* target, bool mayBeAssist)", "\n    }\n\n")
+        self.assertTrue(body.split("{", 1)[1].lstrip().startswith("if (!LifecycleEnabled() || !target)"))
+        self.assertIn("if (!registry.OnParticipantEvidence(key, stamp, sourceToken) &&\n                registry.NeedsSnapshot(key, stamp))", body)
+        self.assertEqual(body.count("ApplyParticipantSnapshot("), 1)
+        self.assertEqual(body.count("std::lock_guard<std::mutex> guard(LifecycleLock());"), 2)
+        self.assertIn("AsWorldCreature(source) ? 0 : ActorTokenOf(source)", body)
+        self.assertIn("(source->IsPlayer() || source->IsControlledByPlayer())", body)
+        self.assertIn("OnAssistOfActor(receiver, ActorTokenOf(source))", body)
+        # Untracked creatures return before any lock is taken.
+        self.assertLess(body.index("if (!StampOf(tracked))"), body.index("LifecycleLock()"))
+
+    def test_snapshot_reads_threat_combat_attackers_and_tap_with_bounded_loops(self):
+        body = self.fn(self.script(), "Registry::ParticipantSnapshot CollectSnapshot(Creature* creature)", "\n    }\n\n")
+        for token in ("GetThreatMgr().GetUnsortedThreatList()", "ref->GetVictim()",
+                      "GetCombatManager().GetPvECombatRefs()", "GetOther(creature)",
+                      "GetCombatManager().GetPvPCombatRefs().empty()",
+                      "GetThreatMgr().CanHaveThreatList()", "creature->getAttackers()",
+                      "GetLootRecipientGroupGUID() == 0", "GetLootRecipientGUID()",
+                      "Registry::SnapshotCollector collector;", "collector.Fail();",
+                      "collector.Take();"):
+            self.assertIn(token, body)
+        # Every one of the three range loops is guarded by the collector and
+        # breaks IMMEDIATELY when it says stop (CS01 bounded-lock rule).
+        loops = re.findall(r"if \(!collector\.Stopped\(\)\)\n\s+for \(([^\n]+)\)\n\s+if \(!collector\.(AddParticipant|AddAttacker)\(([^\n]+)\)\)\n\s+break;", body)
+        self.assertEqual(len(loops), 3, loops)
+        self.assertEqual([l[1] for l in loops], ["AddParticipant", "AddParticipant", "AddAttacker"])
+        self.assertEqual(len(re.findall(r"\bfor \(", body)), 3)
+        # Offline threat references are NOT filtered out; no allocation.
+        for forbidden in ("IsOffline()", "IsOnline()", "IsAvailable()", "std::vector", "new ",
+                          "continue;", "addParticipant"):
+            self.assertNotIn(forbidden, body)
+
+    def test_collector_has_total_visit_budget(self):
+        reg = strip_comments(read(REGISTRY))
+        self.assertIn("constexpr std::size_t MaxSnapshotVisits = 64;", reg)
+        add = reg.split("bool AddParticipant(std::uint64_t token)", 1)[1].split("\n        }\n", 1)[0]
+        # The visit counter is incremented BEFORE the duplicate check, so
+        # duplicate flooding consumes the budget.
+        self.assertLess(add.index("++_visits > MaxSnapshotVisits"), add.index("return true; "))
+        self.assertIn("if (_stopped)", add)
+        attacker = reg.split("bool AddAttacker(std::uint64_t token)", 1)[1].split("\n        }\n", 1)[0]
+        self.assertIn("if (!AddParticipant(token))", attacker)
+
+    def test_hostility_never_claimed(self):
+        reg = strip_comments(read(REGISTRY))
+        self.assertIn("out.plainUnscriptedNonEliteHostileNpc = false;", reg)
+        self.assertEqual(reg.count("plainUnscriptedNonEliteHostileNpc"), 1)
+        self.assertNotIn("HostileNpc", self.script())
+
+    def test_plain_creature_scope_is_conservative(self):
+        body = self.fn(self.script(), "bool IsPlainUnscriptedNonEliteNpc(Creature const* creature)")
+        for token in ("rank == CREATURE_ELITE_NORMAL", "!creature->isWorldBoss()", "!creature->IsDungeonBoss()",
+                      "!creature->IsSummon()", "!creature->IsVehicle()", "!creature->IsCharmed()",
+                      "!creature->IsPet()", "!creature->IsGuardian()", "!creature->IsTotem()",
+                      "!creature->IsTrigger()", "!creature->IsGuard()", "!creature->IsCivilian()",
+                      "GetScriptId() == 0", "GetAIName().empty()", "GetNpcFlags() == UNIT_NPC_FLAG_NONE"):
+            self.assertIn(token, body)
+
+    def test_retirement_runs_even_when_ip_or_option_disabled(self):
+        src = self.script()
+        for sig in ("static void RetireIncarnation(Creature* creature, bool respawn)",
+                    "void OnCreatureRemoveWorld(Creature* creature) override",
+                    "void RetireOnCombatEnd(Unit* unit)"):
+            body = self.fn(src, sig)
+            self.assertNotIn("->enabled", body, sig)
+            self.assertNotIn("LifecycleEnabled()", body, sig)
+            self.assertIn("SetStamp(creature, 0);", body, sig)
+        exit_ = self.fn(src, "void OnUnitExitCombat(Unit* unit) override")
+        evade = self.fn(src, "void OnUnitEnterEvadeMode(Unit* unit, uint8 ) override")
+        self.assertIn("RetireOnCombatEnd(unit);", exit_)
+        self.assertIn("RetireOnCombatEnd(unit);", evade)
+
+    def test_registry_never_sets_participant_or_rights_proof(self):
+        reg = strip_comments(read(REGISTRY))
+        # CS01 acceptance rule: Core threat/combat/tap snapshots are not a
+        # complete census. The registry never calls the proof/rebuild APIs.
+        self.assertNotIn("ReverifyCompleteParticipantFacts", reg)
+        self.assertNotIn("ReplaceWithFullyVerifiedRoster", reg)
+        self.assertNotIn("completeCurrentParticipantProof", reg)
+        body = reg.split("bool BuildCreatureSnapshot(", 1)[1].split("\n        }\n", 1)[0]
+        for field in ("complete", "eligibleHiddenRandomBotCurrentlyAttackingThisCreature",
+                      "everyParticipantVerifiedTbcRaceRandomBotOrItsMinion",
+                      "noRealPlayerCombatThreatTapOrRights", "noPendingThreatOrCombatantChanges"):
+            self.assertIn("out." + field + " = false;", body)
+            self.assertEqual(body.count("out." + field + " ="), 1, field)
+        cand = reg.split("bool IsConcealmentCandidate(", 1)[1].split("\n        }\n", 1)[0]
+        self.assertIn("Policy::HasVerifiedAttackerCandidates(", cand)
+        # Snapshots may only ADD uncertainty and never create entries.
+        apply_ = reg.split("void ApplyParticipantSnapshot(", 1)[1].split("bool GetConservativeEvidence(", 1)[0]
+        self.assertIn("Apply(*entry, Policy::Event::UnverifiedOrHumanParticipant, 0);", apply_)
+        self.assertNotIn("uncertain = false", apply_)
+        self.assertNotIn("Create(", apply_)
+        self.assertNotIn("state =", apply_.replace("entry->state.generation", ""))
+        # The registry never fills any observer-side fact.
+        for observer_only in ("ObserverSnapshot", "coreVisibilityAndThreatRefreshVerified",
+                              "explicitlyEnabled", "ShouldConcealCreatureFromObserver"):
+            self.assertNotIn(observer_only, reg)
+        self.assertIn("struct ConservativeEvidence", reg)
 
 
 if __name__ == "__main__":
