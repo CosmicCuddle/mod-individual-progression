@@ -502,3 +502,21 @@ future enabled version is deployed, first preserve source/config/character
 backup and require owner approval; switching OFF resumes original
 synchronisation but cannot automatically restore prior progression markers.
 **Review:** https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6600875179
+
+## IP-UPSTREAM-20261104 — Grimfeather source integration (DEVELOPMENT / NOT DEPLOYED)
+
+**Owner:** CosmicCuddle. **Source refs:** Grimfeather IP master 42c9a32892740af55a40e076e6381cc879181396; original common ancestor dd96f2b77e3ebfa2a4726bf785525ba133f1ab61; protected Cosmic custom candidate IP #46 at 26d5b7a1de30ad92a595aaf251fc14754cf54f32.
+
+**Proposed intended behaviour:** Accept reviewed upstream bug fixes without removing CosmicCuddle's paid-era receipts, F14 group/login default-OFF safeguards, Hunter autocast/rank continuity, GM target/access/paid audits, quest and group progression rules, or established Chromaggus Time Lapse. The new optional upstream AutoAttune must remain 0/OFF; if later enabled it can grant raid attunement items, complete quests or mail items. Owner policy is still unresolved.
+
+**Owning component and staged files:** Individual Progression fork, isolated work/cs01-grim-upstream-source-merge-20261104 branch. Six manually reconciled shared paths: conf/individualProgression.conf.dist, src/IndividualProgression.cpp, src/IndividualProgression.h, src/IndividualProgressionPlayer.cpp, src/IndividualProgressionSpells.cpp, src/cs_individualProgression.cpp. Another 18 exact upstream-only source/SQL/optional files were copied. Exact inventory and merge design: docs/UPSTREAM_GRIM_20261104_INTEGRATION_MATRIX.md. Upstream mirror draft PR #57; conflict exploration draft PR #58. No true Git two-parent merge has been made.
+
+**Deliberately protected upstream deviations:** Chromaggus boss_chromaggus.cpp removal, related IndividualProgression_loader.cpp symbol removal and dungeon_blackwing_lair.sql binding removal are NOT accepted (coordination Issue #5). Upstream excluded-human Stage18 force-login update is deliberately NOT adopted over Cosmic IP's historical non-normal-account 0/8/13 fallback (Issue #25). Both are pending owner decisions and tests. Eight GM command source collisions retain stronger custom null/session/in-world checks. Existing custom AutoAttune config remains OFF.
+
+**Core / config / SQL / DBC / client dependencies:** Historical Grim Core 8daffdabe9202c228e45d833c9a1d399597a15cd, Playerbots e88cc4099e69f35126b28942a412ca702d20453b, Naxx #292, Services #16; latest Grim Core 0d754d1921261dfd939f91060ebc022eae280f71 is 84 commits newer and has SQL / C++ deltas; no latest core compile proof. Owner actual installed files/configs, world/auth/characters DB, optional SQL/DBC/client files, backup restore readiness and migrations must be inspected before a deployment.
+
+**Risks:** C++ API changes, auto-grant stage/quest/item/mailing behaviour, excluded-human stage reset, paid receipt overwrite, Hunter pet autocast, world SQL DELETE/REPLACE and player quest flags, Chromaggus threat, compatibility with other modules. All source-only SQL copies remain UNAPPLIED to database.
+
+**Tests / live status:** Source comparisons, hunk overlap inspection and preservation checks passed during proposal assembly only. No native build, game test, live installed version check, DB migration, host edit or deployment verified. Continue actual native Worldserver compilation and regression on disposable CI, then owner-approved isolated game/client tests. Paid/F14 experimental and AutoAttune flags remain OFF.
+
+**Decisions & rollback:** Source authority CosmicCuddle; AutoAttune policy coordination #35, Chromaggus #5, excluded-account login #25, manual GM commands #14, paid eras #18. Owner approval before merge/deploy/migration. Today discard draft source branches to roll back; future deployment rollback requires exact source+binaries+effective config backups and restorable DB snapshots, with character data protection.
