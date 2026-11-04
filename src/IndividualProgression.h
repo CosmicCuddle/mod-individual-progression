@@ -434,6 +434,10 @@ public:
     bool f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
     // F14 world-player and cached WHO pilot, fail OFF until full Core refresh.
     bool f14ExperimentalRndbotPlayerVisibility = false;
+    // F14 attack/corpse lifecycle registry: bookkeeping only, never hides.
+    // Forced OFF without the Core attack-event hook, Playerbots, or an
+    // enabled F14 identity source (group floor or player visibility pilot).
+    bool f14ExperimentalAttackLifecycleRegistry = false;
     // Independent F14 group-time pilot; leave OFF until owner approval.
     bool f14ProtectVerifiedRandomBotGroupFloor = false;
     std::string paidExpansionVendorName;
@@ -465,6 +469,24 @@ public:
     bool HasF14VerifiedRandomBotIdentity(Player const* player);
     bool HasF14VerifiedRandomBotGuid(ObjectGuid const& guid);
     std::uint64_t GetF14VerifiedRandomBotLoginEpoch(ObjectGuid const& guid);
+    // F14 attack/corpse lifecycle registry (IndividualProgressionF14LifecycleScript.cpp).
+    // Read-only status for diagnostics; no concealment decision is exposed.
+    struct F14LifecycleStatus
+    {
+        bool enabled = false;
+        bool poisoned = false;
+        std::size_t trackedCreatures = 0;
+        std::size_t capacity = 0;
+        std::uint64_t verifiedBegins = 0;
+        std::uint64_t verifiedEnds = 0;
+        std::uint64_t unverifiedMarks = 0;
+        std::uint64_t expiryFanout = 0;
+        std::uint64_t retired = 0;
+    };
+    F14LifecycleStatus GetF14LifecycleStatus();
+    void ResetF14LifecycleRegistry();
+    // Must be called WITHOUT _f14GroupCacheLock held (lock order).
+    void ExpireF14LifecycleActor(std::uint64_t loginEpoch);
     bool ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage);
     void checkHunterPetSpells(Player* player);
     void checkWarlockPetSpells(Player* player);

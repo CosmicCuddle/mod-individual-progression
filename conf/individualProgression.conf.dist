@@ -78,6 +78,23 @@ IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0
 #
 IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0
 
+# IndividualProgression.F14.ExperimentalAttackLifecycleRegistry
+#
+#        DEVELOPMENT ONLY / OFF by default. Bookkeeping of which positively
+#        VERIFIED Blood Elf/Draenei RandomBot login incarnations are attacking
+#        which world creature, retired on creature corpse/respawn/evade and on
+#        bot logout/relogin. It hides NOTHING, sends no visibility refresh,
+#        changes no stage, quest, loot or database data, and never calls
+#        Playerbots from map threads. Humans, Altbots, GMs, pets/minions and
+#        unknown participants only mark a creature uncertain (fail visible).
+#        Any overflow disables the registry until the next config reload.
+#        FORCED OFF unless the Core attack/corpse event hook, the Playerbots
+#        API and an F14 identity source (ProtectVerifiedRandomBotGroupFloor or
+#        ExperimentalRndbotPlayerVisibility) are present and ON.
+#        Never enable without owner permission and gameplay regression tests.
+#
+IndividualProgression.F14.ExperimentalAttackLifecycleRegistry = 0
+
 # IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor
 #
 #        INCOMPLETE F14 / DEVELOPMENT PILOT - DEFAULT OFF.
