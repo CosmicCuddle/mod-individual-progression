@@ -750,7 +750,8 @@ namespace IndividualProgressionF14LifecycleRegistry
 
         // Logout / relogin / identity loss of a login epoch. Never trusts an
         // AttackStop to arrive. Returns the number of affected creatures.
-        std::size_t ExpireActor(std::uint64_t actorToken)
+        std::size_t ExpireActor(std::uint64_t actorToken,
+                                std::function<void(CreatureKey const&, std::uint64_t)> onAffected = {})
         {
             if (Guard() || actorToken == 0)
                 return 0;
@@ -763,6 +764,11 @@ namespace IndividualProgressionF14LifecycleRegistry
                         contained = true;
                 if (contained)
                 {
+                    // COPY ONLY key+incarnation before invalidating roster.
+                    // Consumer is restricted to value-only queue writes under
+                    // LifecycleLock; it may NOT touch any live map objects.
+                    if (onAffected)
+                        onAffected(pair.second.key, pair.second.token);
                     Apply(pair.second, Policy::Event::ActorIncarnationExpired, actorToken);
                     ++affected;
                     continue;
@@ -776,6 +782,8 @@ namespace IndividualProgressionF14LifecycleRegistry
                         owned = true;
                 if (!owned)
                     continue;
+                if (onAffected)
+                    onAffected(pair.second.key, pair.second.token);
                 Apply(pair.second, Policy::Event::ThreatRightsOrIdentityChanged, actorToken);
                 ++_counters.minionOwnerExpiries;
                 ++affected;
