@@ -364,6 +364,18 @@ INSERT INTO `conditions` (`SourceTypeOrReferenceId`, `SourceGroup`, `SourceEntry
 (15, 9087, 0, 0, 0, 8, 0, 11535, 0, 0, 0, 0, 0, '', 'Trade Option requires quest \'Making Ready\' to be complete'),
 (15, 9198, 0, 0, 0, 8, 0, 11520, 0, 0, 0, 0, 0, '', 'Trade Option requires quest \'Discovering Your Roots\' to be complete');
 
+-- disable summon creature Emissary of Hate (IP adds this creature to the world)
+DELETE FROM `smart_scripts` WHERE `source_type` = 0 AND `entryorguid` = 23310;
+INSERT INTO `smart_scripts` (`entryorguid`, `source_type`, `id`, `link`,
+`event_type`, `event_phase_mask`, `event_chance`, `event_flags`, `event_param1`, `event_param2`, `event_param3`, `event_param4`, `event_param5`, `event_param6`,
+`action_type`, `action_param1`, `action_param2`, `action_param3`, `action_param4`, `action_param5`, `action_param6`,
+`target_type`, `target_param1`, `target_param2`, `target_param3`, `target_param4`, `target_x`, `target_y`, `target_z`, `target_o`, `comment`) VALUES
+--
+(23310, 0, 0, 0, 11, 0, 100, 1, 0, 0, 0, 0, 0, 0, 11, 46907, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,                 'Fel Portal Alarm - On Respawn - Cast Boss Fel Portal State'),
+(23310, 0, 1, 0, 38, 0, 100, 512, 1, 1, 0, 0, 0, 0, 23, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,                   'Fel Portal Alarm - On Data Set 1 1 - Increment Phase');
+-- (23310, 0, 2, 3, 60, 4064, 100, 0, 1000, 1000, 1000, 1000, 0, 0, 12, 25003, 6, 60000, 0, 0, 0, 1, 0,0,0,0,0,0,0,0,  'Fel Portal Alarm - On Update - Summon Creature Emissary of Hate'),
+-- (23310, 0, 3, 0, 61, 0, 100, 512, 0, 0, 0, 0, 0, 0, 22, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,                'Fel Portal Alarm - Out of Combat - Set Event Phase 0');
+
 -- Shattered Sun Warriors coming out of the portal AFTER phase 2
 DELETE FROM `smart_scripts` WHERE `source_type` = 0 AND `entryorguid` IN (-673002, -673003, -673004, -673005);
 INSERT INTO `smart_scripts` (`entryorguid`, `source_type`, `id`, `link`, `event_type`, `event_phase_mask`, `event_chance`, `event_flags`, 
