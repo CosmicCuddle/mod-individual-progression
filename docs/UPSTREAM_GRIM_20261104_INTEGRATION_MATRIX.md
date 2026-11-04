@@ -53,6 +53,25 @@ Latest Grim [#328](https://github.com/Grimfeather/mod-individual-progression/com
 - **Safety correction under development:** Grim's upstream `ProfessionTierCap=1` can remove above-tier skills/achievements/titles at login. Cosmic fork integration will preserve the feature **OFF by default** across config, C++ fallback and member initialization; ON needs explicit owner policy and a restorable character backup. This is independent of AutoAttune=0.
 - Remaining: native Worldserver + latest-Core/PB cross-version evidence, full SQL/DBC migration review, separate in-game acceptance, owner-installed SHAs/config+backup evidence and explicit release approval.
 
+## Owner direction — comprehensive upstream adoption (4 November 2026)
+
+CosmicCuddle has requested: **bring everything Grimfeather adds into our IP fork wherever possible**. Interpret this as a target of **complete compatible functionality and upstream fixes**, not permission to switch on every new setting, delete established custom behavior, apply SQL or deploy automatically.
+
+For each upstream change, classify and record:
+1. **Included / preserved:** integrated in isolated source with a traceable upstream ref; source build/test and installed status recorded separately.
+2. **Included but OFF:** functionality carried over, but a potentially destructive or gameplay-changing option remains OFF until exact rule, backup and test approvals. In the current candidate this covers AutoAttune and ProfessionTierCap, in addition to protected Cosmic paid/F14 switches.
+3. **Needs compatibility adaptation:** retain upstream intended utility via a safe custom integration when it conflicts with Cosmic progression, GM, Hunter, bots, DB/SQL or core APIs. Report deviations, tests and later owner decision.
+4. **Not yet adopted / blocked:** name the exact missing upstream behaviour, reason, owner choice and proposed path. Do not silently discard an upstream feature merely because the original code conflicts.
+
+**Explicit current exceptions that require resolution rather than blind copying:**
+- **Chromaggus Time Lapse:** upstream *removes* an established Cosmic script/loader/DB binding. Preserve custom behavior while Issue #5 decides whether to keep, fix or replace it; removing it is not automatically 'adding everything'.
+- **Excluded-account stage-18 login:** upstream forces a different human-account stage policy from current Cosmic logic. Keep existing human stages unchanged while Issue #25 is unresolved, but carry the upstream option into the exception register for later compatible design.
+- **ProfessionTierCap:** upstream code and its optional ON behavior are present in the integration candidate; Cosmic's safe default is OFF (config + C++), because turning it on at login may strip profession skills and achievements. Issue #36 tracks gameplay approval.
+- **AutoAttune:** upstream functionality is present, default OFF pending Issue #35; it can change attunement quests, items and mail.
+- **World/optional SQL:** carry source migrations for review but do not execute destructive/updating statements until row-level compatibility, effective installed DB state, restorable backups and owner approval are established.
+
+**Acceptance target:** a per-change upstream inventory with **no unexplained omissions**, compatible compiled Worldserver and gameplay checks (including genuine older/newer Core effects), separately approved toggles, and an exact host rollback. A successful Git ancestry check alone does **not** meet this target. PR #56 F14 child follows the upstream integration stage per the owner's sequencing decision.
+
 ## Release-gate order
 
 1. **Source merge — DEVELOPMENT CANDIDATE PREPARED, REVIEW PENDING:** six shared paths were reconciled on the isolated #59 branch and authentic merge commit `39299ddf` has custom and Grim parents. Review exact source/SQL, preserved Chromaggus and owner-pending excluded-human hunk; validate merge CI and source contracts. Keep #57/#58/#59 DRAFT until reviewed. Do not replace protected #46 or live module. F14 #55/#56 remains separate and **FORCED OFF**.
