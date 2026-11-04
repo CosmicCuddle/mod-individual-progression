@@ -703,3 +703,13 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 - **No in-game test was done.**
 
 **Rollback:** close the draft or discard the child branch. Nothing on any host, database, config or client was changed.
+
+
+### F14 event-driven post-retirement one-shot refresh requester — CS01 (4 Nov 2026)
+
+- **Intended behaviour:** default-OFF guarded actual UnitScript consumer queues a one-shot *request for a visibility pass* on a previously tracked creature's engagement, target switch, last attacker, combat retirement, corpse and respawn. The request survives erasing the old F14 tracked token, allowing a future *reveal* to be requested after current hide eligibility disappears. It NEVER denies/changes player or creature visibility itself.
+- **Owning component:** CosmicCuddle/mod-individual-progression, experimental CS01 branch `research/cs01-f14-postevent-reveal-request-20261104` (child of frozen Claude IP #78 `4bb8a8e`); **source:** `src/IndividualProgressionF14LifecycleScript.cpp`; tests: `tests/test_ip_f14_postevent_reveal_request_source.py`; workflow: isolated newest Grim #77 Core hook integration; detailed guidance in `docs/F14_POSTEVENT_REVEAL_REQUEST_CONSUMER_2026-11-04.md`.
+- **Core version/dependencies:** Grimfeather/azerothcore-wotlk `0d754d1921261dfd939f91060ebc022eae280f71` plus disposable reviewed #56/#67/#76/#77 Core patches; Playerbots pinned `e88cc409` unchanged; Naxx #292 and Services #16 pinned; **experimental compiler-only** `COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT=1` requires the #77 UnitScript hook, never shipped as an enabled config. `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION` (full-ready) is NOT defined. No SQL, DBC or client patch.
+- **Known risks/limits:** a server-side visibility *pass* is not a client ACK or actual hide/reveal. No rights-complete viewer/creature deny, bot logout fanout, prior-hidden per-viewer ledger or proof of human loot/DoT/quest/tap. The only Core event request is still default-FALSE without this experimental source+compile gate. Never activate hide or stage floor from this development proof.
+- **Tests:** five source contracts pending hosted CI; full pinned Worldserver native compile/link pending; no server start/gameplay acceptance. Existing source model can be checked without production changes.
+- **Live status:** **NOT DEPLOYED; default OFF**. **Decision/approval:** no protected merge/production/feature enablement approved. CosmicCuddle remains final decision-maker. **Rollback:** close/discard the isolated DRAFT; production rollback would require installed-version/backups and an approved plan.
