@@ -271,7 +271,12 @@ jobs:
           normalized="$RUNNER_TEMP/f14-event-refresh-normalized.patch"
           sed 's/^@F14_BLANK_CONTEXT@$/ /' "$patch" > "$normalized"
           ! grep -q '^@F14_BLANK_CONTEXT@' "$normalized"
-          git -C acore apply --check "$normalized"
+          # This is a disposable public-source preflight, not a live server dump.
+          # Print the exact post-#56 target context if hunk matching fails.
+          grep -nF 'Unit* const f14PreviousVictim = m_attacking;' acore/src/server/game/Entities/Unit/Unit.cpp
+          grep -nF 'sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);' acore/src/server/game/Entities/Unit/Unit.cpp
+          sed -n '7158,7194p' acore/src/server/game/Entities/Unit/Unit.cpp
+          git -C acore apply --check --verbose "$normalized"
           git -C acore apply "$normalized"
           git -C acore diff --check
           git -C acore diff --name-only | sort > /tmp/event-refresh-core-actual
