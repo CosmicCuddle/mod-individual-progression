@@ -1,0 +1,60 @@
+# CosmicCuddle: development-only Grim GM teleport adaptation safety gate.
+# Portable tests only. No server, host, client, DB, SQL, config or deployment.
+name: Grim GM tele adaptation + Cosmic group protections (NO HOST)
+on:
+  pull_request:
+    branches:
+      - work/cs01-grim-upstream-source-merge-20261104
+    paths:
+      - "src/cs_individualProgression.cpp"
+      - "src/IndividualProgressionGmTeleportPolicy.h"
+      - "tests/ip_gm_raid_teleport_policy.cpp"
+      - "tests/test_ip_grim_20261104_source_preservation.py"
+      - ".github/workflows/ip-grim-gm-tele-adaptation-20261104.yml"
+permissions:
+  contents: read
+jobs:
+  gm-policy-and-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - name: Exact candidate checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert Cosmic and Grim merge ancestry; no host operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 26d5b7a1de30ad92a595aaf251fc14754cf54f32 HEAD
+          git merge-base --is-ancestor 42c9a32892740af55a40e076e6381cc879181396 HEAD
+          grep -Fqx 'IndividualProgression.AutoAttune = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.ProfessionTierCap = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.AllowVanillaRaidAccess = 0' conf/individualProgression.conf.dist
+      - name: Exact source scope and historical GM null/console protections
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_grim_20261104_source_preservation.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_gm_command_null_safety.py' -v
+      - name: Compile/run real unchanged pure GM teleport policy (four variants)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${{ matrix.cxx }}" "-std=${{ matrix.std }}" -O2 -UNDEBUG -Wall -Wextra -Werror -pedantic \
+            tests/ip_gm_raid_teleport_policy.cpp -o /tmp/ip-grim-gm-tele
+          /tmp/ip-grim-gm-tele | tee /tmp/ip-grim-gm-tele.out
+          grep -Fqx 'GM GRIM TELEPORT POLICY 18/18 passed' /tmp/ip-grim-gm-tele.out
+      - name: Scope and confidence
+        if: always()
+        run: |
+          echo 'Source + pure C++ model ONLY; no native Worldserver link or in-game GM validation.'
+          echo 'Exact protected human/Altbot/RandomBot and party/difficulty rules remain owner review pending.'
+          echo 'Do not merge into main sync DRAFT #59, deploy, alter SQL, or enable feature until approval.'

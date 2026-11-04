@@ -3,6 +3,7 @@
 #include "Tokenize.h"
 #include "IndividualProgression.h"
 #include "IndividualProgressionGmCommandAccessPolicy.h"
+#include "IndividualProgressionGmTeleportPolicy.h"
 #include "Log.h"
 #include "naxxramas_40.h"
 
@@ -185,6 +186,11 @@ public:
             handler->PSendSysMessage("Player |cff00ffff{}|r is not online.", player->GetName());
             return false;
         }
+
+        // Match Grim upstream: reject lower-security GM actions on protected targets.
+        // Enforce before any stage reads, achievement resets or paid-mode auditing.
+        if (handler->HasLowerSecurity(target))
+            return false;
 
         std::string playername = target->GetName();
         uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(target);
@@ -693,8 +699,7 @@ public:
             return false;
         }
 
-        // Preserve an explicit name/GUID; console or missing target must
-        // not dereference an empty identifier or an offline player.
+        // Retain Cosmic's explicit identifier, console and online-target protections.
         if (!player)
             player = PlayerIdentifier::FromTargetOrSelf(handler);
 
@@ -711,67 +716,54 @@ public:
             return false;
         }
 
-        uint32 progressionLevel = sIndividualProgression->GetPlayerProgressionFromQuests(target);
-        std::string playername = target->GetName();
+        // Import Grim's lower-security guard before any player/group writes.
+        if (handler->HasLowerSecurity(target))
+            return false;
 
-        if (location == "naxx" || location == "naxx40")
+        bool const naxx = location == "naxx" || location == "naxx40";
+        uint32 const rawStage = sIndividualProgression->GetPlayerProgressionFromQuests(target);
+        // Preserve Cosmic's existing rejection order: a forbidden era/level
+        // must receive the "not allowed" response even without attunement.
+        // Here 'true' means only test level/stage eligibility. Actual
+        // attunement is checked below, before any difficulty/teleport writes.
+        bool const eligible = IndividualProgressionGmTeleportPolicy::CanTeleport(
+            target->GetLevel(), rawStage, PROGRESSION_TBC_TIER_5,
+            sIndividualProgression->isExcludedAccount(target),
+            sIndividualProgression->hasPassedProgression(target, PROGRESSION_WOTLK_TIER_5),
+            sIndividualProgression->AllowVanillaRaidAccess, true);
+        std::string const playername = target->GetName();
+
+        if (!eligible)
         {
- 			if (target->GetLevel() <= 70 && ((progressionLevel < PROGRESSION_TBC_TIER_5) || sIndividualProgression->isExcludedAccount(target)))
-            {
-                if (sIndividualProgression->isAttuned(target))
-                {
-                    Group* group = target->GetGroup();
-
-                    if (group)
-                        group->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC);
-                    else
-                        target->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC);
-
-                    target->TeleportTo(533, 3005.51f, -3434.64f, 304.195f, 6.2831f);
-                    return true;
-                }
-                else
-                {
-                    handler->PSendSysMessage("|cff00ffff{}|r has not completed the Naxxramas attunement quest.", playername);
-                    return false;
-                }
-            }
-            else
-            {
-                handler->PSendSysMessage("|cff00ffff{}|r is not allowed to teleport to |cff00ffff{}|r.", playername, location);
-                return false;
-            }
-        }
-        else if (location == "onyxia" || location == "onyxia40")
-        {
-            if (target->GetLevel() <= 70 && ((progressionLevel < PROGRESSION_TBC_TIER_5) || sIndividualProgression->isExcludedAccount(target)))
-            {
-                if (target->HasItemCount(ITEM_DRAKEFIRE_AMULET))
-                {
-                    Group* group = target->GetGroup();
-
-                    if (group)
-                        group->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC);
-                    else
-                        target->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC);
-                   
-                    target->TeleportTo(249, 29.1607f, -71.3372f, -8.18032f, 4.58f);
-                    return true;
-                }
-                else
-                {
-                    handler->PSendSysMessage("|cff00ffff{}|r does not have a Drakefire Amulet.", playername);
-                    return false;
-                }
-            }
-            else
-            {
-                handler->PSendSysMessage("|cff00ffff{}|r is not allowed to teleport to |cff00ffff{}|r.", playername, location);
-                return false;
-            }
+            handler->PSendSysMessage("|cff00ffff{}|r is not allowed to teleport to |cff00ffff{}|r.", playername, location);
+            return false;
         }
 
-        return false;
+        bool const hasAttunement = naxx
+            ? sIndividualProgression->isAttuned(target)
+            : target->HasItemCount(ITEM_DRAKEFIRE_AMULET);
+        if (!hasAttunement)
+        {
+            if (naxx)
+                handler->PSendSysMessage("|cff00ffff{}|r has not completed the Naxxramas attunement quest.", playername);
+            else
+                handler->PSendSysMessage("|cff00ffff{}|r does not have a Drakefire Amulet.", playername);
+            return false;
+        }
+
+        // Keep Cosmic's group raid difficulty handling, not Grim's target-only write.
+        Group* group = target->GetGroup();
+        if (group)
+            group->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC);
+        else
+            target->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC);
+
+        if (naxx)
+            target->TeleportTo(533, 3005.51f, -3434.64f, 304.195f, 6.2831f);
+        else
+            target->TeleportTo(249, 29.1607f, -71.3372f, -8.18032f, 4.58f);
+
+        return true;
     }
 
     static bool HandleAttuneIndividualProgressionCommand(ChatHandler* handler, std::string location)
