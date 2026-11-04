@@ -33,6 +33,7 @@
 #include "Log.h"
 #include "Player.h"
 #include "ScriptMgr.h"
+#include "TemporarySummon.h"
 #include <array>
 #include <mutex>
 
@@ -159,13 +160,57 @@ namespace
     }
 
     // Verified current RandomBot login epoch, or 0. Players only: a pet,
-    // minion or charmed unit is unverified because no owner-resolution
-    // contract exists yet. Must be called with LifecycleLock() held.
+    // minion or charmed unit is NEVER a first-party bot token (see
+    // MinionOwnerEpochOf for separate, weaker minion evidence). Must be
+    // called with LifecycleLock() held.
     std::uint64_t ActorTokenOf(Unit const* unit)
     {
         if (!unit || !unit->IsPlayer())
             return 0;
         return sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(unit->GetGUID());
+    }
+
+    // Stage 3: value-only minion lineage. Returns the OWNER's current
+    // verified login epoch for a pet/guardian/totem/summon only when every
+    // GUID in its lineage agrees with one player owner; otherwise 0
+    // (unknown => visible). No owner/charmer/summoner pointer is ever
+    // dereferenced and Playerbots is never consulted. LifecycleLock() held.
+    std::uint64_t MinionOwnerEpochOf(Unit const* unit)
+    {
+        if (!unit || unit->IsPlayer())
+            return 0;
+        Creature const* minion = unit->ToCreature();
+        if (!minion)
+            return 0;
+        Registry::MinionLineage lineage;
+        lineage.minionType = minion->IsPet() || minion->IsGuardian() || minion->IsTotem() || minion->IsSummon();
+        lineage.vehicleOrPossessed = minion->IsVehicle() || minion->isPossessed();
+        ObjectGuid const owner = minion->GetOwnerGUID();
+        lineage.owner = owner.GetRawValue();
+        lineage.ownerIsPlayer = owner.IsPlayer();
+        lineage.charmer = minion->GetCharmerGUID().GetRawValue();
+        lineage.creator = minion->GetCreatorGUID().GetRawValue();
+        lineage.summon = minion->IsSummon();
+        if (TempSummon const* summon = minion->ToTempSummon())
+        {
+            lineage.summonDataAvailable = true;
+            lineage.summoner = summon->GetSummonerGUID().GetRawValue();
+        }
+        if (!Registry::LineageMatchesSingleOwner(lineage))
+            return 0;
+        return Registry::MinionOwnerEvidence(lineage,
+            sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(owner));
+    }
+
+    // One visited entry: a first-party verified bot, else a verified-owner
+    // minion, else unknown. Returns false when the caller must break.
+    bool VisitUnit(Registry::SnapshotCollector& collector, Unit const* unit, bool attacking)
+    {
+        if (std::uint64_t const bot = ActorTokenOf(unit))
+            return attacking ? collector.AddAttacker(bot) : collector.AddParticipant(bot);
+        if (std::uint64_t const owner = MinionOwnerEpochOf(unit))
+            return collector.AddMinion(owner);
+        return collector.AddParticipant(0);
     }
 
     bool LifecycleEnabled()
@@ -223,17 +268,18 @@ namespace
         // Every threat-list victim, offline references included.
         if (!collector.Stopped())
             for (ThreatReference const* ref : creature->GetThreatMgr().GetUnsortedThreatList())
-                if (!collector.AddParticipant(ref ? ActorTokenOf(ref->GetVictim()) : 0))
+                if (!VisitUnit(collector, ref ? ref->GetVictim() : nullptr, false))
                     break;
         // Every PvE combat reference (threat implies combat, not vice versa).
         if (!collector.Stopped())
             for (auto const& pair : creature->GetCombatManager().GetPvECombatRefs())
-                if (!collector.AddParticipant(pair.second ? ActorTokenOf(pair.second->GetOther(creature)) : 0))
+                if (!VisitUnit(collector, pair.second ? pair.second->GetOther(creature) : nullptr, false))
                     break;
-        // Current attackers: participants AND attacker set.
+        // Current attackers: participants AND attacker set (minions are
+        // recorded only as minion-owner evidence, never as attackers).
         if (!collector.Stopped())
             for (Unit* attacker : creature->getAttackers())
-                if (!collector.AddAttacker(ActorTokenOf(attacker)))
+                if (!VisitUnit(collector, attacker, true))
                     break;
 
         Registry::ParticipantSnapshot snap = collector.Take();

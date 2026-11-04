@@ -54,6 +54,8 @@ namespace IndividualProgressionF14LifecycleRegistry
     // refs and attacker set, duplicates included. This bounds the time the
     // global lifecycle mutex is held, independent of unique-token count.
     constexpr std::size_t MaxSnapshotVisits = 64;
+    // Distinct verified OWNER epochs a snapshot may record for minions.
+    constexpr std::size_t MaxSnapshotMinionOwners = 16;
 
     // Identity of the live creature object as seen by the map thread.
     struct CreatureKey
@@ -107,6 +109,8 @@ namespace IndividualProgressionF14LifecycleRegistry
         std::uint64_t assistInvalidations = 0;
         std::uint64_t snapshotsApplied = 0;
         std::uint64_t snapshotsOnlyVerifiedBots = 0;
+        std::uint64_t snapshotsOnlyVerifiedBotsOrOwnedMinions = 0;
+        std::uint64_t minionOwnerExpiries = 0;
     };
 
     // Creature-side facts sampled synchronously on the owning map thread by
@@ -130,7 +134,53 @@ namespace IndividualProgressionF14LifecycleRegistry
         // Every threat-list victim (offline included) and PvE combat ref.
         std::array<std::uint64_t, MaxSnapshotParticipants + 1> participants{};
         std::size_t participantCount = 0;
+        // Stage 3: SEPARATE minion-owner evidence. Each entry is the current
+        // verified login epoch of the OWNER of a pet/guardian/totem/summon
+        // whose whole value-only lineage matched. A minion is never a
+        // participant, attacker or roster member and never an eligible bot.
+        std::array<std::uint64_t, MaxSnapshotMinionOwners + 1> minionOwners{};
+        std::size_t minionOwnerCount = 0;
+        std::size_t minionVisits = 0;
     };
+
+    // Stage 3: value-only lineage of a pet/guardian/totem/summon, copied
+    // from Core GUID fields (raw values, no pointers). Defaults fail.
+    struct MinionLineage
+    {
+        bool minionType = false;          // pet, guardian, totem or summon
+        bool vehicleOrPossessed = true;
+        bool ownerIsPlayer = false;
+        std::uint64_t owner = 0;          // GetOwnerGUID raw
+        std::uint64_t charmer = 0;        // GetCharmerGUID raw (0 = none)
+        std::uint64_t creator = 0;        // GetCreatorGUID raw (0 = none)
+        bool summon = false;
+        bool summonDataAvailable = false; // ToTempSummon() succeeded
+        std::uint64_t summoner = 0;       // GetSummonerGUID raw (0 = none)
+    };
+
+    // True only when every GUID in the lineage agrees with ONE player owner.
+    // Any charmer/creator/summoner mismatch, missing owner, non-player
+    // owner, possession, vehicle or missing summon data => false.
+    inline bool LineageMatchesSingleOwner(MinionLineage const& l)
+    {
+        if (!l.minionType || l.vehicleOrPossessed || !l.ownerIsPlayer || l.owner == 0)
+            return false;
+        if (l.charmer != 0 && l.charmer != l.owner)
+            return false;
+        if (l.creator != 0 && l.creator != l.owner)
+            return false;
+        if (l.summon && (!l.summonDataAvailable || (l.summoner != 0 && l.summoner != l.owner)))
+            return false;
+        return true;
+    }
+
+    // Minion-owner evidence token: the owner's CURRENT verified login epoch
+    // (0 if the owner is human/Altbot/GM/unverified/disconnected), and only
+    // if the lineage matched. Never a first-party bot token.
+    inline std::uint64_t MinionOwnerEvidence(MinionLineage const& l, std::uint64_t ownerCurrentEpoch)
+    {
+        return LineageMatchesSingleOwner(l) ? ownerCurrentEpoch : 0;
+    }
 
     // Pure, bounded snapshot builder. The runtime feeds it one token per
     // visited entry and MUST `break` its loop as soon as a call returns
@@ -192,6 +242,36 @@ namespace IndividualProgressionF14LifecycleRegistry
             return true;
         }
 
+        // A pet/guardian/totem/summon whose lineage matched a verified owner
+        // (ownerEpoch != 0). ownerEpoch 0 = unknown lineage: stop, visible.
+        // Spends the same visit budget BEFORE de-duplication.
+        bool AddMinion(std::uint64_t ownerEpoch)
+        {
+            if (_stopped)
+                return false;
+            if (++_visits > MaxSnapshotVisits)
+            {
+                Fail();
+                return false;
+            }
+            if (ownerEpoch == 0)
+            {
+                Append(_snap.participants, _snap.participantCount, 0);
+                Fail();
+                return false;
+            }
+            ++_snap.minionVisits;
+            for (std::size_t i = 0; i < _snap.minionOwnerCount; ++i)
+                if (_snap.minionOwners[i] == ownerEpoch)
+                    return true;
+            if (!Append(_snap.minionOwners, _snap.minionOwnerCount, ownerEpoch))
+            {
+                Fail();
+                return false;
+            }
+            return true;
+        }
+
         // Copies the enumerated lists out; scalar facts are set by the caller.
         ParticipantSnapshot Take() const { return _snap; }
 
@@ -224,6 +304,10 @@ namespace IndividualProgressionF14LifecycleRegistry
         bool inCombat = false;
         bool tapHolderNoneOrVerifiedBot = false;
         bool observedOnlyVerifiedBots = false;
+        bool observedOnlyVerifiedBotsOrOwnedMinions = false;
+        // Owner epochs the minion evidence depended on (for owner expiry).
+        std::array<std::uint64_t, MaxSnapshotMinionOwners> minionOwners{};
+        std::size_t minionOwnerCount = 0;
     };
 
     // NON-AUTHORITATIVE bookkeeping evidence. It is NOT a census of every
@@ -243,6 +327,11 @@ namespace IndividualProgressionF14LifecycleRegistry
         bool alive = false;
         bool inCombat = false;
         bool threatCombatAndAttackersObservedOnlyVerifiedBots = false;
+        // Stage 3, separate and weaker: only verified bots and/or minions
+        // whose value-only lineage matched a CURRENT verified owner epoch.
+        // Minion presence still makes the roster uncertain.
+        bool observedOnlyVerifiedBotsOrVerifiedOwnerMinions = false;
+        unsigned verifiedOwnerMinionOwners = 0;
         bool tapHolderObservedNoneOrVerifiedBot = false;
     };
 
@@ -557,17 +646,29 @@ namespace IndividualProgressionF14LifecycleRegistry
 
             bool const enumerated = snap.complete &&
                                     snap.attackerCount <= Policy::MaxTrackedAttackers &&
-                                    snap.participantCount <= MaxSnapshotParticipants;
+                                    snap.participantCount <= MaxSnapshotParticipants &&
+                                    snap.minionOwnerCount <= MaxSnapshotMinionOwners;
+            // No unknown (token 0) anywhere; minion owners are all nonzero.
+            bool noUnknown = enumerated;
+            for (std::size_t i = 0; noUnknown && i < snap.participantCount; ++i)
+                if (snap.participants[i] == 0)
+                    noUnknown = false;
+            for (std::size_t i = 0; noUnknown && i < snap.attackerCount; ++i)
+                if (snap.attackers[i] == 0)
+                    noUnknown = false;
+            for (std::size_t i = 0; noUnknown && i < snap.minionOwnerCount; ++i)
+                if (snap.minionOwners[i] == 0)
+                    noUnknown = false;
+            bool const anyMinion = snap.minionVisits != 0 || snap.minionOwnerCount != 0;
             // Zero observed participants for a tracked creature is not
             // evidence of anything: treat it as unknown (fail visible).
-            bool onlyVerified = enumerated && snap.participantCount > 0;
-            for (std::size_t i = 0; onlyVerified && i < snap.participantCount; ++i)
-                if (snap.participants[i] == 0)
-                    onlyVerified = false;
-            for (std::size_t i = 0; onlyVerified && i < snap.attackerCount; ++i)
-                if (snap.attackers[i] == 0)
-                    onlyVerified = false;
+            // First-party: ONLY verified bots, no minions at all.
+            bool const onlyVerified = noUnknown && snap.participantCount > 0 && !anyMinion;
+            // Weaker, separate: verified bots and/or verified-owner minions.
+            bool const onlyVerifiedOrOwned = noUnknown && (snap.participantCount + snap.minionOwnerCount) > 0;
 
+            // Unchanged conservative rule: anything but first-party verified
+            // bots (minions included) adds uncertainty.
             if (!onlyVerified || !snap.alive)
                 Apply(*entry, Policy::Event::UnverifiedOrHumanParticipant, 0);
 
@@ -581,8 +682,14 @@ namespace IndividualProgressionF14LifecycleRegistry
             facts.inCombat = snap.inCombat;
             facts.tapHolderNoneOrVerifiedBot = snap.tapHolderNoneOrVerifiedBot;
             facts.observedOnlyVerifiedBots = onlyVerified && snap.alive;
+            facts.observedOnlyVerifiedBotsOrOwnedMinions = onlyVerifiedOrOwned && snap.alive;
+            if (enumerated)
+                for (std::size_t i = 0; i < snap.minionOwnerCount && i < facts.minionOwners.size(); ++i)
+                    facts.minionOwners[facts.minionOwnerCount++] = snap.minionOwners[i];
             if (facts.observedOnlyVerifiedBots)
                 ++_counters.snapshotsOnlyVerifiedBots;
+            if (facts.observedOnlyVerifiedBotsOrOwnedMinions)
+                ++_counters.snapshotsOnlyVerifiedBotsOrOwnedMinions;
         }
 
         // Non-authoritative evidence for diagnostics/tests only.
@@ -607,6 +714,8 @@ namespace IndividualProgressionF14LifecycleRegistry
             out.alive = current && f.alive && e.state.alive;
             out.inCombat = current && f.inCombat;
             out.threatCombatAndAttackersObservedOnlyVerifiedBots = current && f.observedOnlyVerifiedBots;
+            out.observedOnlyVerifiedBotsOrVerifiedOwnerMinions = current && f.observedOnlyVerifiedBotsOrOwnedMinions;
+            out.verifiedOwnerMinionOwners = current ? static_cast<unsigned>(f.minionOwnerCount) : 0u;
             out.tapHolderObservedNoneOrVerifiedBot = current && f.tapHolderNoneOrVerifiedBot;
             return true;
         }
@@ -652,9 +761,23 @@ namespace IndividualProgressionF14LifecycleRegistry
                 for (auto known : pair.second.state.verifiedAttackers)
                     if (known == actorToken)
                         contained = true;
-                if (!contained)
+                if (contained)
+                {
+                    Apply(pair.second, Policy::Event::ActorIncarnationExpired, actorToken);
+                    ++affected;
                     continue;
-                Apply(pair.second, Policy::Event::ActorIncarnationExpired, actorToken);
+                }
+                // Stage 3: minion evidence that depended on this OWNER epoch
+                // becomes stale and uncertain; it can never outlive logout.
+                SnapshotFacts const& f = pair.second.facts;
+                bool owned = false;
+                for (std::size_t i = 0; i < f.minionOwnerCount; ++i)
+                    if (f.minionOwners[i] == actorToken)
+                        owned = true;
+                if (!owned)
+                    continue;
+                Apply(pair.second, Policy::Event::ThreatRightsOrIdentityChanged, actorToken);
+                ++_counters.minionOwnerExpiries;
                 ++affected;
             }
             _counters.expiryFanout += affected;
