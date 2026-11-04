@@ -5,6 +5,12 @@
  * plus the existing AllCreatureScript::OnCreatureRemoveWorld hook, and keeps
  * the pure IndividualProgressionF14LifecycleRegistry up to date.
  *
+ * Stage 2: existing UnitScript damage / periodic / heal / combat / evade
+ * hooks are INVALIDATION evidence only, and a bounded complete threat +
+ * combat + attacker + tap snapshot fills the creature half of the pure
+ * F14CombatVisibilityPolicy::CreatureSnapshot. The observer half and the
+ * Core refresh bridge do not exist here, so nothing can be concealed.
+ *
  * Bookkeeping ONLY. It hides nothing, sends no packets, requests no visibility
  * refresh, writes no stage/SQL/settings and never calls Playerbots. Actor
  * identity comes from the login-thread cache (GetF14VerifiedRandomBotLoginEpoch),
@@ -98,7 +104,11 @@ IndividualProgression::F14LifecycleStatus IndividualProgression::GetF14Lifecycle
     status.verifiedEnds = c.verifiedEnds;
     status.unverifiedMarks = c.unverifiedMarks;
     status.expiryFanout = c.expiryFanout;
-    status.retired = c.corpseRetired + c.respawnRetired + c.evadeRetired + c.removedRetired + c.staleKeyReplaced;
+    status.retired = c.corpseRetired + c.respawnRetired + c.evadeRetired + c.removedRetired +
+                     c.leftCombatRetired + c.staleKeyReplaced;
+    status.evidenceInvalidations = c.evidenceInvalidations + c.assistInvalidations;
+    status.snapshotsApplied = c.snapshotsApplied;
+    status.snapshotsVerified = c.snapshotsVerified;
     return status;
 }
 
@@ -162,6 +172,146 @@ namespace
     {
         return sIndividualProgression->enabled && sIndividualProgression->f14ExperimentalAttackLifecycleRegistry;
     }
+
+    // Conservative first-pilot creature scope. Anything rare, elite, boss,
+    // scripted (ScriptName or AIName such as SmartAI/escort), summoned,
+    // vehicle, charmed, pet/guardian/totem, trigger, guard, civilian or
+    // carrying any NPC flag (quest giver, vendor, ...) fails visible.
+    bool IsPlainUnscriptedNonEliteNpc(Creature const* creature)
+    {
+        CreatureTemplate const* tmpl = creature->GetCreatureTemplate();
+        return tmpl && tmpl->rank == CREATURE_ELITE_NORMAL &&
+               !creature->isWorldBoss() && !creature->IsDungeonBoss() &&
+               !creature->IsSummon() && !creature->IsVehicle() && !creature->IsCharmed() &&
+               !creature->IsPet() && !creature->IsGuardian() && !creature->IsTotem() &&
+               !creature->IsTrigger() && !creature->IsGuard() && !creature->IsCivilian() &&
+               creature->GetScriptId() == 0 && creature->GetAIName().empty() &&
+               creature->GetNpcFlags() == UNIT_NPC_FLAG_NONE;
+    }
+
+    // Complete, bounded, allocation-free participant snapshot of a tracked
+    // creature, taken on its map thread under LifecycleLock(). Every unit is
+    // reduced to a token immediately; nothing is retained. Must only be
+    // called from an event whose source is already rostered (see
+    // OnParticipantEvidence) so a just-added participant is never missed.
+    Registry::ParticipantSnapshot CollectSnapshot(Creature* creature)
+    {
+        Registry::ParticipantSnapshot snap;
+        snap.alive = creature->IsAlive();
+        snap.inCombat = creature->IsInCombat();
+        snap.plainUnscriptedNonEliteHostileNpc = IsPlainUnscriptedNonEliteNpc(creature);
+
+        // Tap: nobody, or one verified bot. Any loot group fails visible
+        // (group membership is not proven here).
+        ObjectGuid const tapper = creature->GetLootRecipientGUID();
+        snap.tapHolderNoneOrVerifiedBot = creature->GetLootRecipientGroupGUID() == 0 &&
+            (!tapper || (tapper.IsPlayer() &&
+                         sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(tapper) != 0));
+
+        bool complete = creature->GetThreatMgr().CanHaveThreatList() &&
+                        creature->GetCombatManager().GetPvPCombatRefs().empty();
+        bool unverifiedSeen = false;
+        auto addParticipant = [&](Unit const* unit)
+        {
+            if (!complete)
+                return;
+            std::uint64_t const token = ActorTokenOf(unit);
+            if (token == 0)
+            {
+                if (unverifiedSeen)
+                    return;
+                unverifiedSeen = true;
+            }
+            else
+            {
+                for (std::size_t i = 0; i < snap.participantCount; ++i)
+                    if (snap.participants[i] == token)
+                        return;
+            }
+            if (snap.participantCount == snap.participants.size())
+            {
+                complete = false; // more than MaxSnapshotParticipants
+                return;
+            }
+            snap.participants[snap.participantCount++] = token;
+        };
+
+        // Every threat-list victim, offline references included.
+        for (ThreatReference const* ref : creature->GetThreatMgr().GetUnsortedThreatList())
+            addParticipant(ref ? ref->GetVictim() : nullptr);
+        // Every PvE combat reference (threat implies combat, not vice versa).
+        for (auto const& pair : creature->GetCombatManager().GetPvECombatRefs())
+            addParticipant(pair.second ? pair.second->GetOther(creature) : nullptr);
+        // Current attackers: participants AND the roster source.
+        for (Unit* attacker : creature->getAttackers())
+        {
+            addParticipant(attacker);
+            if (snap.attackerCount == snap.attackers.size())
+            {
+                complete = false;
+                break;
+            }
+            snap.attackers[snap.attackerCount++] = ActorTokenOf(attacker);
+        }
+
+        snap.complete = complete;
+        return snap;
+    }
+
+    // Damage / periodic tick / heal touching units. Pointers are used only
+    // for this synchronous call. Returns quickly for untracked creatures
+    // (the stamp lives in the creature's own CustomData on its map thread).
+    void HandleParticipantEvent(Unit* source, Unit* target, bool mayBeAssist)
+    {
+        if (!LifecycleEnabled() || !target)
+            return;
+
+        if (Creature* tracked = AsWorldCreature(target))
+        {
+            if (!StampOf(tracked))
+                return;
+            std::lock_guard<std::mutex> guard(LifecycleLock());
+            Registry::Registry& registry = LifecycleRegistry();
+            std::uint64_t const stamp = StampOf(tracked);
+            Registry::CreatureKey const key = KeyOf(tracked);
+            // Creatures, pets, minions, totems, environment (null) and
+            // unverified players are all unverified sources.
+            std::uint64_t const sourceToken = AsWorldCreature(source) ? 0 : ActorTokenOf(source);
+            if (!registry.OnParticipantEvidence(key, stamp, sourceToken) &&
+                registry.NeedsSnapshot(key, stamp))
+                registry.ApplyParticipantSnapshot(key, stamp, CollectSnapshot(tracked));
+            LogPoisonOnce();
+            return;
+        }
+
+        // A heal/HoT on a player gives the healer threat on that player's
+        // creatures with no creature-side event: invalidate those rosters.
+        if (mayBeAssist && target->IsPlayer() && source && source != target &&
+            (source->IsPlayer() || source->IsControlledByPlayer()))
+        {
+            std::lock_guard<std::mutex> guard(LifecycleLock());
+            std::uint64_t const receiver = ActorTokenOf(target);
+            if (receiver)
+                LifecycleRegistry().OnAssistOfActor(receiver, ActorTokenOf(source));
+            LogPoisonOnce();
+        }
+    }
+
+    // Combat end / evade of a tracked creature retires its incarnation.
+    // Runs whenever a stamp exists, even with the option or IP disabled.
+    void RetireOnCombatEnd(Unit* unit)
+    {
+        Creature* creature = AsWorldCreature(unit);
+        if (!creature || !StampOf(creature))
+            return;
+        std::lock_guard<std::mutex> guard(LifecycleLock());
+        std::uint64_t const stamp = StampOf(creature);
+        if (!stamp)
+            return;
+        LifecycleRegistry().OnCreatureLeftCombat(KeyOf(creature), stamp);
+        SetStamp(creature, 0);
+        LogPoisonOnce();
+    }
 }
 
 class IndividualProgressionF14LifecycleScript : public UnitScript
@@ -171,7 +321,56 @@ public:
         : UnitScript("IndividualProgression_F14Lifecycle", true,
                      {UNITHOOK_ON_F14_ATTACK_TARGET_TRANSITION,
                       UNITHOOK_ON_F14_CREATURE_CORPSE_READY,
-                      UNITHOOK_ON_F14_CREATURE_RESPAWNED}) { }
+                      UNITHOOK_ON_F14_CREATURE_RESPAWNED,
+                      UNITHOOK_ON_DAMAGE,
+                      UNITHOOK_MODIFY_PERIODIC_DAMAGE_AURAS_TICK,
+                      UNITHOOK_ON_HEAL,
+                      UNITHOOK_ON_UNIT_ENTER_COMBAT,
+                      UNITHOOK_ON_UNIT_EXIT_COMBAT,
+                      UNITHOOK_ON_UNIT_ENTER_EVADE_MODE}) { }
+
+    // Invalidation evidence only. Values are never modified, and no single
+    // hook is ever treated as proof of a complete participant roster.
+    void OnDamage(Unit* attacker, Unit* victim, uint32& /*damage*/) override
+    {
+        HandleParticipantEvent(attacker, victim, false);
+    }
+
+    // Called for periodic damage AND periodic heal ticks.
+    void ModifyPeriodicDamageAurasTick(Unit* target, Unit* caster, uint32& /*amount*/, SpellInfo const* /*spellInfo*/) override
+    {
+        HandleParticipantEvent(caster, target, true);
+    }
+
+    void OnHeal(Unit* healer, Unit* receiver, uint32& /*gain*/) override
+    {
+        HandleParticipantEvent(healer, receiver, true);
+    }
+
+    // A tracked creature engaging a target: unverified targets are new
+    // participants (same rule as its own target change).
+    void OnUnitEnterCombat(Unit* unit, Unit* victim) override
+    {
+        if (!LifecycleEnabled())
+            return;
+        Creature* creature = AsWorldCreature(unit);
+        if (!creature || !StampOf(creature))
+            return;
+        std::lock_guard<std::mutex> guard(LifecycleLock());
+        if (std::uint64_t const stamp = StampOf(creature))
+            LifecycleRegistry().OnCreatureTargetChange(KeyOf(creature), stamp, ActorTokenOf(victim) != 0);
+        LogPoisonOnce();
+    }
+
+    void OnUnitExitCombat(Unit* unit) override
+    {
+        RetireOnCombatEnd(unit);
+    }
+
+    void OnUnitEnterEvadeMode(Unit* unit, uint8 /*evadeReason*/) override
+    {
+        RetireOnCombatEnd(unit);
+    }
 
     // Synchronous, inside Unit::Attack / Unit::AttackStop on the owning map
     // update. Pointers are valid only for this call and are never stored.
@@ -260,9 +459,9 @@ public:
 private:
     static void RetireIncarnation(Creature* creature, bool respawn)
     {
-        // Runs even when the option is OFF so a stamp can never survive
-        // death or respawn into a later enabled period.
-        if (!sIndividualProgression->enabled || !creature)
+        // Runs even when the option or IP itself is OFF so a stamp can never
+        // survive death or respawn into a later enabled period.
+        if (!creature)
             return;
         std::lock_guard<std::mutex> guard(LifecycleLock());
         std::uint64_t const stamp = StampOf(creature);
@@ -286,8 +485,9 @@ public:
 
     void OnCreatureRemoveWorld(Creature* creature) override
     {
-        // Runs even when the option is OFF; only stamped creatures matter.
-        if (!sIndividualProgression->enabled || !creature)
+        // Runs even when the option or IP itself is OFF; only stamped
+        // creatures matter.
+        if (!creature)
             return;
         std::lock_guard<std::mutex> guard(LifecycleLock());
         std::uint64_t const stamp = StampOf(creature);

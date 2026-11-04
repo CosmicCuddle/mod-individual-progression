@@ -5,9 +5,12 @@
  * plain value tokens BEFORE calling in, and holds one mutex around every
  * call. This header never stores Unit*, Player*, Creature* or Map*, never
  * queries Playerbots, never sends packets, never writes stages, SQL or
- * settings, and NEVER authorises concealment: a fresh event-built roster
- * has no complete threat/tap/loot/quest-rights proof, so
- * HasVerifiedAttackerCandidates() stays false for every entry it creates.
+ * settings, and NEVER authorises concealment. An event-built roster has
+ * no participant proof. Only a complete, all-verified map-thread snapshot
+ * (ApplyParticipantSnapshot) at the current generation sets it, and that
+ * is still only the observer-agnostic CREATURE half of the pure
+ * F14CombatVisibilityPolicy: the observer half and the Core refresh bridge
+ * are not provided here.
  *
  * Token rules (no recycling, so no "expired" ledgers are needed):
  *  - actor token  = the nonzero, monotonic, never-wrapping per-login epoch
@@ -30,7 +33,9 @@
 #ifndef INDIVIDUAL_PROGRESSION_F14_LIFECYCLE_REGISTRY_H
 #define INDIVIDUAL_PROGRESSION_F14_LIFECYCLE_REGISTRY_H
 
+#include "IndividualProgressionF14CombatVisibilityPolicy.h"
 #include "IndividualProgressionF14MultiAttackerPolicy.h"
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -40,8 +45,11 @@
 namespace IndividualProgressionF14LifecycleRegistry
 {
     namespace Policy = IndividualProgressionF14MultiAttackerPolicy;
+    namespace Visibility = IndividualProgressionF14CombatVisibilityPolicy;
 
     constexpr std::size_t DefaultMaxCreatures = 4096;
+    // Distinct participants a complete snapshot may list. More => incomplete.
+    constexpr std::size_t MaxSnapshotParticipants = 32;
 
     // Identity of the live creature object as seen by the map thread.
     struct CreatureKey
@@ -90,6 +98,48 @@ namespace IndividualProgressionF14LifecycleRegistry
         std::uint64_t removedRetired = 0;
         std::uint64_t staleKeyReplaced = 0;
         std::uint64_t poisonedCalls = 0;
+        std::uint64_t leftCombatRetired = 0;
+        std::uint64_t evidenceInvalidations = 0;
+        std::uint64_t assistInvalidations = 0;
+        std::uint64_t snapshotsApplied = 0;
+        std::uint64_t snapshotsVerified = 0;
+    };
+
+    // Creature-side facts sampled synchronously on the owning map thread by
+    // the caller, already converted to value tokens (0 = unverified: human,
+    // Altbot, GM, pet/minion/totem, creature or unknown). Every flag defaults
+    // to the fail-visible value.
+    struct ParticipantSnapshot
+    {
+        // Every list below was enumerated in full, within its bound, and no
+        // unsupported reference kind (e.g. PvP combat refs) was present.
+        bool complete = false;
+        bool plainUnscriptedNonEliteHostileNpc = false;
+        bool alive = false;
+        bool inCombat = false;
+        // Loot recipient is nobody or a verified bot, and no loot group.
+        bool tapHolderNoneOrVerifiedBot = false;
+
+        // Units currently attacking the creature (its attacker set).
+        std::array<std::uint64_t, Policy::MaxTrackedAttackers + 1> attackers{};
+        std::size_t attackerCount = 0;
+        // Every threat-list victim (offline included) and PvE combat ref.
+        std::array<std::uint64_t, MaxSnapshotParticipants + 1> participants{};
+        std::size_t participantCount = 0;
+    };
+
+    // Last snapshot result stored per entry. Valid only for the policy
+    // generation it was taken at; any later event makes it stale.
+    struct SnapshotFacts
+    {
+        bool valid = false;
+        std::uint32_t generation = 0;
+        bool complete = false;
+        bool plainUnscriptedNonEliteHostileNpc = false;
+        bool alive = false;
+        bool inCombat = false;
+        bool tapHolderNoneOrVerifiedBot = false;
+        bool everyParticipantVerified = false;
     };
 
     struct Entry
@@ -99,6 +149,7 @@ namespace IndividualProgressionF14LifecycleRegistry
         std::uint64_t token = 0;
         CreatureKey key{};
         Policy::State state{};
+        SnapshotFacts facts{};
     };
 
     // Result of a participant-begin call. The caller writes `stamp` onto the
@@ -131,9 +182,11 @@ namespace IndividualProgressionF14LifecycleRegistry
         std::size_t Capacity() const { return _maxCreatures; }
         Counters const& GetCounters() const { return _counters; }
 
-        // Read-only. Always false for event-built rosters (no complete
-        // participant/rights proof); false whenever poisoned or unknown.
-        bool IsConcealmentCandidate(std::uint64_t stamp) const
+        // Read-only. True only after a complete, all-verified map-thread
+        // snapshot at the current generation (ApplyParticipantSnapshot);
+        // event-built rosters alone never qualify. This is the PARTICIPANT
+        // half of the model only: it is not a concealment decision.
+        bool HasParticipantProof(std::uint64_t stamp) const
         {
             if (IsPoisoned() || stamp == 0)
                 return false;
@@ -315,6 +368,177 @@ namespace IndividualProgressionF14LifecycleRegistry
             Erase(*entry);
         }
 
+        // The tracked creature left combat or entered evade: this combat
+        // incarnation is over. Retire regardless of roster or uncertainty;
+        // a later attack starts a fresh entry with no proof.
+        bool OnCreatureLeftCombat(CreatureKey const& key, std::uint64_t stamp)
+        {
+            if (Guard())
+                return false;
+            Entry* entry = Find(stamp, key);
+            if (!entry)
+                return false;
+            ++_counters.leftCombatRetired;
+            Erase(*entry);
+            return true;
+        }
+
+        // Damage, periodic tick or heal involving the tracked creature, from
+        // `sourceToken` (0 = unverified). A rostered verified source changes
+        // nothing. Anything else is a participant the roster may not know:
+        // fail visible until a later complete snapshot proves otherwise.
+        // NEVER take a snapshot in the same event: the source's threat/combat
+        // reference may not exist yet. Returns true if state changed.
+        bool OnParticipantEvidence(CreatureKey const& key, std::uint64_t stamp, std::uint64_t sourceToken)
+        {
+            if (Guard())
+                return false;
+            Entry* entry = Find(stamp, key);
+            if (!entry)
+                return false;
+            if (sourceToken != 0 && Rostered(entry->state, sourceToken))
+                return false;
+            ++_counters.evidenceInvalidations;
+            Apply(*entry, sourceToken == 0 ? Policy::Event::UnverifiedOrHumanParticipant
+                                           : Policy::Event::ThreatRightsOrIdentityChanged, sourceToken);
+            return true;
+        }
+
+        // A heal/HoT on a rostered bot gives the healer threat on every
+        // creature that bot is fighting, without any creature-side event.
+        // Mark each such creature uncertain unless the healer is that same
+        // verified bot or is already rostered there. Returns affected count.
+        std::size_t OnAssistOfActor(std::uint64_t receiverToken, std::uint64_t helperToken)
+        {
+            if (Guard() || receiverToken == 0 || receiverToken == helperToken)
+                return 0;
+            std::size_t affected = 0;
+            for (auto& pair : _entries)
+            {
+                if (!Rostered(pair.second.state, receiverToken))
+                    continue;
+                if (helperToken != 0 && Rostered(pair.second.state, helperToken))
+                    continue;
+                Apply(pair.second, helperToken == 0 ? Policy::Event::UnverifiedOrHumanParticipant
+                                                    : Policy::Event::ThreatRightsOrIdentityChanged, helperToken);
+                ++affected;
+            }
+            _counters.assistInvalidations += affected;
+            return affected;
+        }
+
+        // True when the entry exists and has no current snapshot.
+        bool NeedsSnapshot(CreatureKey const& key, std::uint64_t stamp)
+        {
+            if (Guard())
+                return false;
+            Entry* entry = Find(stamp, key);
+            return entry && (!entry->facts.valid || entry->facts.generation != entry->state.generation ||
+                             entry->state.uncertain);
+        }
+
+        // Apply a complete map-thread snapshot. Only an all-verified,
+        // complete, alive snapshot may rebuild the roster from the actual
+        // attacker set (pure ReplaceWithFullyVerifiedRoster) and set the
+        // participant proof (pure ReverifyCompleteParticipantFacts). Any
+        // gap leaves or makes the entry uncertain. Never creates an entry.
+        void ApplyParticipantSnapshot(CreatureKey const& key, std::uint64_t stamp, ParticipantSnapshot const& snap)
+        {
+            if (Guard())
+                return;
+            Entry* entry = Find(stamp, key);
+            if (!entry)
+                return;
+            ++_counters.snapshotsApplied;
+
+            bool allVerified = snap.complete &&
+                               snap.attackerCount <= Policy::MaxTrackedAttackers &&
+                               snap.participantCount <= MaxSnapshotParticipants;
+            std::array<std::uint64_t, Policy::MaxTrackedAttackers> roster{};
+            std::size_t rosterCount = 0;
+            if (allVerified)
+            {
+                for (std::size_t i = 0; i < snap.participantCount; ++i)
+                    if (snap.participants[i] == 0)
+                        allVerified = false;
+                for (std::size_t i = 0; i < snap.attackerCount && allVerified; ++i)
+                {
+                    std::uint64_t const actor = snap.attackers[i];
+                    if (actor == 0)
+                    {
+                        allVerified = false;
+                        break;
+                    }
+                    bool duplicate = false;
+                    for (std::size_t j = 0; j < rosterCount; ++j)
+                        if (roster[j] == actor)
+                            duplicate = true;
+                    if (!duplicate)
+                        roster[rosterCount++] = actor;
+                }
+            }
+
+            if (allVerified && snap.alive && entry->state.alive)
+            {
+                Policy::Transition const replaced = Policy::ReplaceWithFullyVerifiedRoster(
+                    entry->state, entry->token, entry->state.generation, roster, rosterCount, true);
+                entry->state = replaced.state;
+                if (!entry->state.uncertain)
+                    entry->state = Policy::ReverifyCompleteParticipantFacts(
+                        entry->state, entry->token, entry->state.generation, true);
+            }
+            else
+            {
+                allVerified = false;
+                Apply(*entry, Policy::Event::UnverifiedOrHumanParticipant, 0);
+            }
+
+            SnapshotFacts& facts = entry->facts;
+            facts = {};
+            facts.valid = true;
+            facts.generation = entry->state.generation;
+            facts.complete = snap.complete;
+            facts.plainUnscriptedNonEliteHostileNpc = snap.plainUnscriptedNonEliteHostileNpc;
+            facts.alive = snap.alive;
+            facts.inCombat = snap.inCombat;
+            facts.tapHolderNoneOrVerifiedBot = snap.tapHolderNoneOrVerifiedBot;
+            facts.everyParticipantVerified = allVerified && !entry->state.uncertain;
+            if (facts.everyParticipantVerified)
+                ++_counters.snapshotsVerified;
+        }
+
+        // Observer-agnostic creature half of the pure visibility model.
+        // Fields are true only for a current snapshot at the CURRENT
+        // generation. The observer half (and the Core refresh bridge) is
+        // NOT provided here, so this alone can never conceal anything.
+        bool BuildCreatureSnapshot(std::uint64_t stamp, Visibility::CreatureSnapshot& out) const
+        {
+            out = {};
+            if (IsPoisoned() || stamp == 0)
+                return false;
+            auto const it = _entries.find(stamp);
+            if (it == _entries.end())
+                return false;
+            Entry const& e = it->second;
+            SnapshotFacts const& f = e.facts;
+            bool const current = f.valid && f.generation != 0 && f.generation == e.state.generation &&
+                                 !e.state.uncertain;
+            out.creatureIdentityToken = e.token;
+            out.generation = e.state.generation;
+            out.current = current;
+            out.complete = current && f.complete;
+            out.plainUnscriptedNonEliteHostileNpc = current && f.plainUnscriptedNonEliteHostileNpc;
+            out.alive = current && f.alive && e.state.alive;
+            out.inCombat = current && f.inCombat;
+            out.eligibleHiddenRandomBotCurrentlyAttackingThisCreature =
+                current && Policy::HasVerifiedAttackerCandidates(e.state);
+            out.everyParticipantVerifiedTbcRaceRandomBotOrItsMinion = current && f.everyParticipantVerified;
+            out.noRealPlayerCombatThreatTapOrRights =
+                current && f.everyParticipantVerified && f.tapHolderNoneOrVerifiedBot;
+            out.noPendingThreatOrCombatantChanges = current;
+            return true;
+        }
+
         // Logout / relogin / identity loss of a login epoch. Never trusts an
         // AttackStop to arrive. Returns the number of affected creatures.
         std::size_t ExpireActor(std::uint64_t actorToken)
@@ -338,6 +562,16 @@ namespace IndividualProgressionF14LifecycleRegistry
         }
 
     private:
+        static bool Rostered(Policy::State const& state, std::uint64_t actor)
+        {
+            if (actor == 0)
+                return false;
+            for (auto known : state.verifiedAttackers)
+                if (known == actor)
+                    return true;
+            return false;
+        }
+
         bool Guard()
         {
             if (!IsPoisoned())

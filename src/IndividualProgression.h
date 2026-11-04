@@ -482,6 +482,9 @@ public:
         std::uint64_t unverifiedMarks = 0;
         std::uint64_t expiryFanout = 0;
         std::uint64_t retired = 0;
+        std::uint64_t evidenceInvalidations = 0;
+        std::uint64_t snapshotsApplied = 0;
+        std::uint64_t snapshotsVerified = 0;
     };
     F14LifecycleStatus GetF14LifecycleStatus();
     void ResetF14LifecycleRegistry();
