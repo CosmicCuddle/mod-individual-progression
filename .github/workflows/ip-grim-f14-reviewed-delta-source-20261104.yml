@@ -1,0 +1,135 @@
+# Review-only 2026-11-04 SOURCE contract. This is NOT the frozen #59
+# upstream provenance test: that original test correctly detects added F14 code.
+# This second gate approves only the EXACT reviewed F14 child delta of #69,
+# while keeping all upstream Grim/Cosmic CI and runtime custom code intact.
+# Second CI-only addition checks opt-in PB quest-marker reset on a disposable runner.
+name: Grim DEV plus F14 exact approved source delta (NO HOST)
+
+on:
+  push:
+    branches:
+      - integration/cs01-grim-dev-plus-f14-lifecycle-20261104
+    paths:
+      - ".github/workflows/ip-grim-f14-reviewed-delta-source-20261104.yml"
+  pull_request:
+    branches:
+      - integration/cs01-grim-upstream-into-ip46-20261104
+    paths:
+      - ".github/workflows/ip-grim-f14-reviewed-delta-source-20261104.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  reviewed-f14-integration:
+    name: Frozen Grim history + explicit F14 32-path allowlist / OFF / source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout proposed exact integration source (NO HOST)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify both real parents, all reviewed deltas and protected upstream CI blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          dev=1fd527b790f182ac496bab06c26ac0b21e18e13d
+          f14=1ca982386558371adee319cf93dbadacf39149b0
+          merge=d87e2ff9344fa800ce2353c284e0e299ac864ed9
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          git merge-base --is-ancestor "$dev" HEAD
+          git merge-base --is-ancestor "$f14" HEAD
+          git merge-base --is-ancestor "$merge" HEAD
+          test "$(git rev-list --parents -n1 "$merge")" = "$merge $f14 $dev"
+          # EXACT one CI-only extension beyond the reviewed two-parent merge.
+          git diff --name-only "$merge" HEAD | sort > /tmp/source-gates
+          printf '%s\n' '.github/workflows/ip-grim-f14-reviewed-delta-source-20261104.yml' '.github/workflows/ip-pb-earned-marker-reset-newer-grim-source-20261104.yml' | sort > /tmp/source-gates-allowed
+          diff -u /tmp/source-gates-allowed /tmp/source-gates
+          git diff --check "$merge" HEAD
+          # Important: future source changes cannot piggyback on old approval.
+          git diff --name-only "$dev" HEAD | sort > /tmp/actual
+          cat >/tmp/reviewed <<'PATHS'
+          .github/workflows/ip-f14-attack-lifecycle-20261104.yml
+          .github/workflows/ip-f14-grim-core-seam-apply-preflight-20261104.yml
+          .github/workflows/ip-f14-grim-model-carry-forward-20261104.yml
+          .github/workflows/ip-f14-grim-newest-core-native-prototypes-20261104.yml
+          .github/workflows/ip-f14-grim-who-observer-native-20261104.yml
+          .github/workflows/ip-f14-grim-who-observer-pilot-source-20261104.yml
+          .github/workflows/ip-f14-rndbot-stage-floor-20261104.yml
+          .github/workflows/ip-grim-f14-reviewed-delta-source-20261104.yml
+          .github/workflows/ip-pb-earned-marker-reset-newer-grim-source-20261104.yml
+          conf/individualProgression.conf.dist
+          docs/CUSTOM_MODIFICATIONS_REGISTER.md
+          docs/F14_COMBAT_VISIBILITY_SAFETY_2026-11-03.md
+          docs/F14_MULTI_ATTACKER_LIFECYCLE_POLICY_2026-11-03.md
+          src/IndividualProgression.cpp
+          src/IndividualProgression.h
+          src/IndividualProgressionF14ActorCreatureIndex.h
+          src/IndividualProgressionF14CombatVisibilityPolicy.h
+          src/IndividualProgressionF14LifecycleRegistry.h
+          src/IndividualProgressionF14LifecycleScript.cpp
+          src/IndividualProgressionF14LoginPolicy.h
+          src/IndividualProgressionF14MultiAttackerPolicy.h
+          src/IndividualProgressionF14RefreshPolicy.h
+          src/IndividualProgressionPlayer.cpp
+          tests/f14_actor_creature_index.cpp
+          tests/f14_lifecycle_registry.cpp
+          tests/f14_multi_attacker_policy.cpp
+          tests/f14_verified_rndbot_tbc_floor.cpp
+          tests/f14_visibility_refresh_policy.cpp
+          tests/ip_f14_combat_visibility_policy.cpp
+          tests/test_ip_f14_grim_player_who_observer_source.py
+          tests/test_ip_f14_lifecycle_source.py
+          tests/test_ip_f14_verified_rndbot_tbc_floor.py
+          PATHS
+          sort /tmp/reviewed > /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          # Protect every source/config/SQL/test/doc byte of Claude's F14 head.
+          test -z "$(git diff --name-only "$f14" HEAD -- src conf sql data tests docs)"
+          # The 5 exact Grimsync DEV CI corrections must remain byte-identical.
+          test "$(git rev-parse HEAD:.github/workflows/ip-combined-c3-f14-partial-login-20261031.yml)" = e2641e68a26d2490655b486de880907265ef07d6
+          test "$(git rev-parse HEAD:.github/workflows/ip-f19-login-floor-20261101.yml)" = 55678a36cd1b44b9571a9402f20a222021d1ee07
+          test "$(git rev-parse HEAD:.github/workflows/ip-grim-release-source-20261104.yml)" = 9d887634882b3af28d6a8cd806cb5754a98971ee
+          test "$(git rev-parse HEAD:.github/workflows/ip-grim-upstream-merge-conflict-audit-20261104.yml)" = f0da3e1a83a62fd3de6fc5e740a67ce56ce2ed5a
+          test "$(git rev-parse HEAD:.github/workflows/ip-paid-expansion-entitlement-20261101.yml)" = dc3c1dfb38cd2a1ee940ff5414987b17f9034c46
+          grep -Fq 'AddSC_boss_chromaggus_60_2_A();' src/IndividualProgression_loader.cpp
+          test -s src/vanillaScripts/boss_chromaggus.cpp
+          test -s data/sql/world/base/dungeon_blackwing_lair.sql
+          grep -Fq 'PurchaseExpansion(Player* player' src/IndividualProgression.h
+          grep -Fq 'GetAccountEffectiveProgression(uint32 accountId)' src/IndividualProgressionExpansion.cpp
+          ! git grep -q 'define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION' -- src
+          test -z "$(git status --porcelain)"
+          echo 'PASS: explicit F14 runtime reviewed; protected Grim upstream CI and original Cosmic source exactly retained'
+
+      - name: Assert every required configuration option remains OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in AutoAttune PaidExpansion.Enable F14.ProtectVerifiedRandomBotGroupFloor \
+                     F14.PreserveVerifiedRandomBotStageOnLogin F14.ForceVerifiedRandomBotTbcFloorOnLogin \
+                     F14.ExperimentalRndbotPlayerVisibility F14.ExperimentalAttackLifecycleRegistry; do
+            grep -Fqx "IndividualProgression.$key = 0" conf/individualProgression.conf.dist
+          done
+          test -s docs/CUSTOM_MODIFICATIONS_REGISTER.md
+          grep -Fq 'IndividualProgressionF14LifecycleRegistry' src/IndividualProgressionF14LifecycleScript.cpp
+          echo 'PASS: all F14, paid and AutoAttune features still OFF; register and lifecycle source exist'
+
+      - name: Run current F14 source contracts; do not falsify frozen historical #59 tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_lifecycle_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_grim_player_who_observer_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_verified_rndbot_tbc_floor.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_gm_command_null_safety.py' -v
+
+      - name: Confidence boundary / rollback
+        if: always()
+        run: |
+          echo 'Source/CI/provenance only. Original #59 provenance remains frozen as historic baseline.'
+          echo 'No gameplay, compiled Core/PB module or client redraw is proven here.'
+          echo 'No database, SQL, service, host or master updated. F14 remains OFF.'

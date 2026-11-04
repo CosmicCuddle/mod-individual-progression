@@ -429,6 +429,15 @@ public:
     // the expansion vendor opens the next era.
     bool paidExpansionEnabled = false;
     bool paidExpansionGrandfatherStage13 = false;
+    // F14: verified headless racial RandomBot login stage floor. Do not
+    // enable until observer+combat+WHO concealment is actually wired.
+    bool f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
+    // F14 world-player and cached WHO pilot, fail OFF until full Core refresh.
+    bool f14ExperimentalRndbotPlayerVisibility = false;
+    // F14 attack/corpse lifecycle registry: bookkeeping only, never hides.
+    // Its own verified-login identity opt-in; forced OFF without the Core
+    // attack-event hook or the Playerbots API.
+    bool f14ExperimentalAttackLifecycleRegistry = false;
     // Independent F14 group-time pilot; leave OFF until owner approval.
     bool f14ProtectVerifiedRandomBotGroupFloor = false;
     std::string paidExpansionVendorName;
@@ -455,6 +464,29 @@ public:
     // F14: verified GUID is recorded only on the login thread; group workers never call Playerbots.
     void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
     void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
+    // Read-only current verified incarnation; no Playerbots access on
+    // observer/WHO threads. Missing or stale means ALLOW visibility.
+    bool HasF14VerifiedRandomBotIdentity(Player const* player);
+    bool HasF14VerifiedRandomBotGuid(ObjectGuid const& guid);
+    std::uint64_t GetF14VerifiedRandomBotLoginEpoch(ObjectGuid const& guid);
+    // F14 attack/corpse lifecycle registry (IndividualProgressionF14LifecycleScript.cpp).
+    // Read-only status for diagnostics; no concealment decision is exposed.
+    struct F14LifecycleStatus
+    {
+        bool enabled = false;
+        bool poisoned = false;
+        std::size_t trackedCreatures = 0;
+        std::size_t capacity = 0;
+        std::uint64_t verifiedBegins = 0;
+        std::uint64_t verifiedEnds = 0;
+        std::uint64_t unverifiedMarks = 0;
+        std::uint64_t expiryFanout = 0;
+        std::uint64_t retired = 0;
+    };
+    F14LifecycleStatus GetF14LifecycleStatus();
+    void ResetF14LifecycleRegistry();
+    // Must be called WITHOUT _f14GroupCacheLock held (lock order).
+    void ExpireF14LifecycleActor(std::uint64_t loginEpoch);
     bool ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage);
     void checkHunterPetSpells(Player* player);
     void checkWarlockPetSpells(Player* player);
@@ -532,6 +564,9 @@ private:
     // F14 optional GroupSync containment; only positively verified headless
     // Blood Elf / Draenei RandomBots are present, refreshed on each login.
     std::unordered_map<uint32, bool> _f14VerifiedRandomBotGroupCache;
+    // Do not recycle a GUID-only identity for a new login incarnation.
+    std::unordered_map<uint32, std::uint64_t> _f14VerifiedRandomBotLoginEpoch;
+    std::uint64_t _f14NextRandomBotLoginEpoch = 0;
     std::shared_mutex _f14GroupCacheLock;
 };
 

@@ -540,3 +540,81 @@ synchronisation but cannot automatically restore prior progression markers.
 **Semantics:** when feature OFF (default in config and C++), spell/item-use hooks permit normal behavior and don't inspect profession ranks. When ON with a legitimate in-world session, the upstream cap logic is unchanged. When there is **no session**, skip profession enforcement/cleanup rather than delete character data or crash. Existing (non-profession) account helper paths are **not** broadly rewritten. This does not mean tier cap is approved ON; [coordination #36](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/36) still asks for owner policy.
 
 **Dependencies/tests/status:** Player session lifecycle, Playerbots/RNDbots, Grim Core `PlayerScript` hooks, achievement DB, account security cache. Additive offline source tests and CI compile required; full Core+PB+Naxx+Services native link, bot runtime/headless paths, GM/excluded accounts and character backup/rollback still required. No SQL/DBC/config/client changes. No host/DB/server operation or live gameplay test. Rollback: revert this scoped development commit without altering installed data.
+
+## 4 November 2026 — F14 verified racial RandomBot TBC login floor (IP development-only child of #59)
+
+**Owner intent:** positively verified headless Blood Elf/Draenei RandomBots must reach TBC progression while Vanilla observers must not see them or combat with creatures that appear to attack thin air. Only selected RandomBots are eligible; HUMAN Blood Elves/Draenei and Altbots are excluded. See coordination Issue #9 and existing UNWIRED F14 PR #56.
+
+**Implementation and source:** src/IndividualProgressionF14LoginPolicy.h supplies pure DesiredVerifiedTbcRaceStage / CanSetVerifiedTbcRaceStage helpers. OnPlayerLogin in src/IndividualProgressionPlayer.cpp requires the bot account, positively selected RandomBot GUID, race 10/11, headless session and enabled option. Eligible login target is max(saved progression, TBC 8, level-based 0/8/13). It never lowers a higher saved stage, refuses unsupported stage above 18 and nonzero ProgressionLimit below target. Only a needed upward raw quest stage write is made. All other characters and skipped paths retain the original login fallback, with paid-expansion entitlements unchanged.
+
+**OFF and fail-safe dependencies:** IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0 in dist config, default-false C++ member and absent-key config fallback. Also forcibly OFF if the Playerbots API header or Core COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION >= 1 compile marker is absent. These hooks are not currently installed: this feature is intentionally INACTIVE. A future compile marker is only a prerequisite, NOT proof that world/WHO/creature/corpse/combat/loot/client refresh works. Never activate until all F14 requirements are implemented and tested with two humans and bots and CosmicCuddle approves.
+
+**Affected paths:** src/IndividualProgressionF14LoginPolicy.h, src/IndividualProgression.h, src/IndividualProgression.cpp, src/IndividualProgressionPlayer.cpp, conf/individualProgression.conf.dist, tests/f14_verified_rndbot_tbc_floor.cpp, tests/test_ip_f14_verified_rndbot_tbc_floor.py, .github/workflows/ip-f14-rndbot-stage-floor-20261104.yml, this register. This is a separate development branch based on Grim IP sync draft #59 at 7562a526; no changes to master, live Core, Playerbots, Naxx, Services, SQL, DBC or client.
+
+**Validation, risks and rollback:** source + four-compiler pure model tests required; native full Worldserver compile, positively selected Playerbots identity in the real login path, group downgrades, actual world visibility, corpse rights and persistent character stages remain UNTESTED. Avoid activating in the Vanilla server because it could expose bots and mutate hidden stage markers. Development rollback is discard this isolated branch. Live activation would need restorable auth/world/characters backups, approved gameplay rules and staged in-game tests before deployment.
+
+## 4 November 2026 — F14 tested pure-model preservation on current Grim sync (isolated draft)
+
+**Owner/component:** CosmicCuddle; Individual Progression F14, with future narrow Core observer/refresh dependency. **Intent:** preserve the four existing tested, *pure/unwired* F14 policies for protected RandomBots attacking creatures, observer concealment decisions, refresh generation and fan-out on logout/death, while migrating to newer Grim IP source. Never generalise to human races 10/11 or Altbots. In-progress stage-floor draft #62 is the parent of this separate preservation child.
+
+**Exact source provenance:** carry these source/test pairs unchanged by blob ID from F14 DRAFT #56 HEAD `6cf528c0f1728ed3ec8fdd11e020f07ec23f3af5`:
+- src/IndividualProgressionF14MultiAttackerPolicy.h + tests/f14_multi_attacker_policy.cpp (88 policy assertions)
+- src/IndividualProgressionF14ActorCreatureIndex.h + tests/f14_actor_creature_index.cpp (61 policy assertions)
+- src/IndividualProgressionF14CombatVisibilityPolicy.h + tests/ip_f14_combat_visibility_policy.cpp
+- src/IndividualProgressionF14RefreshPolicy.h + tests/f14_visibility_refresh_policy.cpp
+
+Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_VISIBILITY_SAFETY Markdown research reference files from the same exact branch. A new, scoped four-compiler workflow validates the byte-identity of **all ten carried blobs**, four standalone model executables, source-provenance boundaries and exact changed-file allowlist against Grim #62 `a24fd911`; it does not rewrite old frozen PR baselines.
+
+**Invariants:** all four policy headers remain side-effect-free and **UNWIRED**; there is no new `.cpp` worldserver logic, no map/WHO/packet/attacker callback, no Playerbots call or DB writes, and no F14 switch ON. Unknown/stale/overflow identities fail visible; positive concealment requires full current-map rights/threat/tap/observer audit and completed client refresh. Pure model capacities (16 attackers, 32 creatures, 64 expired-login and 64 retired-creature tokens) are **NOT proven sufficient** for a real worldserver.
+
+**Intersections and pending work:** parent #62 includes default-OFF verified BE/Draenei RNDbot TBC floor requiring the missing Core visibility-refresh marker; all previous custom paid, grouped era, Hunter, Chromaggus, GM and Grim upstream changes must remain untouched. Future actual runtime seam must reconcile separate experimental Core patch/prototype files, serialise attacker event generation on map thread, refresh visible players and restore creatures/corpses on death/combat end, preserve PvP, quest and loot rights and test multiple bots and humans. Do NOT enable based on this model integration; full native cross-module and gameplay tests with restorable backups/owner approval still outstanding. **Rollback:** discard this isolated child draft; no host, world SQL, character state, config, DBC or client changed.
+
+## 4 November 2026 — F14 first world-player and cached WHO observer pilot on Grim (separate review-only child)
+
+**Owner/gameplay intent:** Blood Elf/Draenei RandomBots only, positively selected and headless, should be hidden from Vanilla-era normal human observers. Do not hide legitimate human race10/11 characters, player Altbots, other races, GM or excluded accounts. This is a separately guarded player-only/WHO pilot: it does NOT conceal creatures, restore corpse/loot rights, or issue visibility refresh packets. Integration parent #63 carries the exact 4 pure combat safety models from old PR #56; upstream Grim IP and new profession/paid/GM/Hunter/group rules remain protected.
+
+**Source provenance and exact controlled changes:** per-viewer default-ALLOW WorldObjectScript observer + cached GUID/race WHO callback originated from isolated older F14 #56 (pinned `6cf528c0`) and is scoped to `src/IndividualProgressionPlayer.cpp`; observer callback reads only lock-protected positive login identity / epoch, not mutable Playerbots state. Login identity capture remains on the source-verified WorldScript/PlayerScript login thread; refresh on each selected bot login evicts stale epochs and verifies `IsRandomBot` only for bot-account + races 10/11 + headless. `src/IndividualProgression.cpp` adds epoch storage and source-proven read-only getters under shared mutex. Epoch overflow never wraps, failing visible. Logout evicts identity. Old group-downgrade behaviour is preserved with the original true/false cache. ON option is independent of the F14 TBC-stage floor in parent #62.
+
+**Safety gate:** `IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0` in dist config, absent-key fallback false, C++ initializer false. Even if ON in a config, forcibly disabled if Playerbots API unavailable or any required Core hook missing: `COSMIC_F14_OBSERVER_HOOK_VERSION`, `COSMIC_F14_WHO_FILTER_HOOK_VERSION`, `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION >= 1`. Only the first two exist in the current test-only default-ALLOW patches; **the real immediate refresh hook is ABSENT**. Therefore F14 visibility remains INERT, normal players and bots see original default behaviour even with these scripts compiled. The future bridge needs a complete, separately tested map-thread observer invalidation implementation, not a macro alone.
+
+**Affected existing paths:** `src/IndividualProgression.cpp`, `src/IndividualProgression.h`, `src/IndividualProgressionPlayer.cpp`, `conf/individualProgression.conf.dist`, plus this register, new contract tests and isolated build workflow. No SQL, DBC, Core/Playerbots/Naxx/Services source commits or host operations; no effective player/entity visibility change. Tests: source+portable tests and linked native Worldserver with original Core prototype patches required; real WHO packet, client redraw, visibility/tap/corpse/multi-attacker regression and owner approval not done. Production install/enable forbidden. Development rollback: close draft/discard child branch without changes to production. Future host deployment requires backups/rollback and explicit CosmicCuddle approval.
+
+## 4 November 2026 — F14 attack/corpse lifecycle registry (IP-side event consumer, separate review-only child)
+
+**Owner/gameplay intent:** later F14 work may need to know which positively verified headless Blood Elf/Draenei RandomBots are fighting which world creature, so that a creature fought only by such bots can eventually be handled consistently with the hidden bots. This entry adds **bookkeeping only**. It hides nothing, sends no visibility refresh, changes no stage, quest, loot, tap or database data, and does not repair Playerbots. Parent is draft #64 (`c2cc14bc`), which inherits #63, #62 and the protected Grim integration #59.
+
+**Source and exact changes:**
+- New pure header `src/IndividualProgressionF14LifecycleRegistry.h`: a bounded registry built on the unchanged `F14MultiAttackerPolicy`.
+  - Actor tokens are the existing monotonic per-login epochs; 0 means unverified.
+  - Creature tokens are issued monotonically and never reused. They are stamped in the live Creature's own `CustomData`, so a recycled GUID, instance id or Creature object cannot inherit an old roster.
+  - Only a verified begin creates an entry, seeded from the creature's complete current attacker set.
+  - Humans, Altbots, GMs, pets/minions, creatures or unknown participants only mark an entry uncertain.
+  - Retirement happens on corpse-ready, respawn, removal from the world (despawn, grid or instance unload), and evade with no verified attacker left. A same-key stale incarnation is dropped, never merged.
+  - Every overflow or impossible state poisons the whole registry (fail visible) until config reload.
+  - Event-built rosters never carry the complete participant/rights proof, so no entry is ever a concealment candidate.
+- New `src/IndividualProgressionF14LifecycleScript.cpp`, compiled only when `COSMIC_F14_ATTACK_EVENT_HOOK_VERSION >= 1`:
+  - A `UnitScript` consumer for the three original default-ALLOW prototype hooks (attack target transition, corpse ready, respawned).
+  - An `AllCreatureScript` subscriber on the **existing, unpatched** Core hook `OnCreatureRemoveWorld`. `Creature::RemoveFromWorld` calls it first, while map, instance and GUID are still valid.
+  - It converts callback pointers to value tokens under one mutex and never stores `Unit*`. The attacker snapshot is a fixed-size array (no allocation under the mutex).
+  - Actor identity is read only from the login-thread cache; there are no Playerbots calls on map threads.
+- `src/IndividualProgression.cpp` / `.h`:
+  - Option `IndividualProgression.F14.ExperimentalAttackLifecycleRegistry`: member false, fallback false. It is forced OFF without the attack-event hook or the Playerbots API. It is an independent opt-in and does not need any other F14 option. The registry is reset on every config (re)load.
+  - Logout/relogin expires the previous login epoch after the identity lock is released. Lock order: registry mutex, then identity lock.
+  - Read-only `GetF14LifecycleStatus()`.
+  - The script is registered from `AddSC_mod_individual_progression()`, so the upstream Grim loader stays byte-identical.
+- `src/IndividualProgressionPlayer.cpp`: one line only. The existing `OnPlayerLogin` positive-identity gate gains `|| f14ExperimentalAttackLifecycleRegistry` as a third reason to verify. The bot account, BE/Draenei race, headless session and positive `IsRandomBot` gates are unchanged, so humans, Altbots, GMs and unknown GUIDs stay unverified. No group or stage semantics change.
+- `conf/individualProgression.conf.dist`: the new key `= 0`.
+
+**Known gaps (not invented around):**
+- Removal from the world now uses the existing Core `OnCreatureRemoveWorld` hook. Bounded capacity with poison, same-key stale replacement and per-object stamps remain as backstops. Instance-unload retirement is proven by source order only, not by a runtime test.
+- There is no pet/minion owner-resolution contract, so bot pets mark creatures uncertain.
+- Threat-only participants (healers, DoTs without an attack target) are not audited. No tap, loot or quest rights are checked.
+- `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION` remains undefined, and every F14 visibility path stays inert.
+
+**Tests:**
+- `tests/f14_lifecycle_registry.cpp`: native GCC/Clang, C++17/20, with and without NDEBUG.
+- `tests/test_ip_f14_lifecycle_source.py`: source contracts.
+- A full native Worldserver link on newest Grim Core `0d754d19` with unmodified Playerbots `e88cc409`, Naxx #292, Services #16 and the original prototypes @ `6cf528c0`.
+- No in-game combat, corpse, logout, visibility or client test was done. Production install or enable is forbidden.
+
+**Rollback:** close the draft or discard the child branch. Nothing on any host, database, config, client or Core fork was changed. A future host deployment needs backups, rollback and explicit CosmicCuddle approval.
