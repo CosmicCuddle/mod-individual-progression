@@ -85,7 +85,8 @@ class RefreshRequestContract(unittest.TestCase):
             self.assertFalse(line.endswith((" ", "\t")), repr(line))
         self.assertEqual(PATCH.count("diff --git a/"), 5)
         # Encoded empty diff contexts are restored by CI BEFORE git apply.
-        self.assertEqual(PATCH.count("@F14_BLANK_CONTEXT@"), 4)
+        self.assertEqual(PATCH.count("@F14_BLANK_CONTEXT@"), 5)
+        self.assertIn("ObjectGuid const f14VictimGuid = victim->GetGUID();\n@F14_BLANK_CONTEXT@\n     m_attacking->_removeAttacker(this);", PATCH)
         self.assertNotIn("\\n-\\n+\\n", PATCH)
 
 if __name__ == "__main__":
