@@ -11,24 +11,22 @@ diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.h b/src/server/g
  };
 @@ -121,2 +122,6 @@
      virtual void OnF14CreatureRespawned(Creature* /*creature*/) { }
-+    // Set request=true only with a complete and current conceal/reveal proof.
-+    // Called after the combat/corpse/respawn bookkeeping hook returned;
-+    // its caller performs the refresh after this hook also returns.
-+    virtual void OnF14CreatureVisibilityRefreshRequested(Creature const* /*creature*/, bool& /*request*/) { }
++    // Return true only with a complete and current conceal/reveal proof.
++    // Default FALSE; this script hook is called only after the previous
++    // combat/corpse/respawn bookkeeping hook has returned.
++    [[nodiscard]] virtual bool OnF14ShouldRefreshCreatureVisibility(Creature const* /*creature*/) { return false; }
  };
 diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp b/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
 --- a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
 +++ b/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
-@@ -156,3 +156,11 @@
+@@ -156,3 +156,9 @@
          script->OnF14CreatureRespawned(creature));
  }
 +bool ScriptMgr::ShouldF14RefreshCreatureVisibility(Creature const* creature)
 +{
 +    ASSERT(creature);
-+    bool requested = false;
-+    CALL_ENABLED_HOOKS(UnitScript, UNITHOOK_ON_F14_CREATURE_VISIBILITY_REFRESH_REQUEST,
-+        script->OnF14CreatureVisibilityRefreshRequested(creature, requested));
-+    return requested;
++    CALL_ENABLED_BOOLEAN_HOOKS_WITH_DEFAULT_FALSE(UnitScript, UNITHOOK_ON_F14_CREATURE_VISIBILITY_REFRESH_REQUEST,
++        script->OnF14ShouldRefreshCreatureVisibility(creature));
 +}
 -
 +
