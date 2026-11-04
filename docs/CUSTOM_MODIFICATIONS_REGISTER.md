@@ -589,19 +589,24 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
   - Creature tokens are issued monotonically and never reused. They are stamped in the live Creature's own `CustomData`, so a recycled GUID, instance id or Creature object cannot inherit an old roster.
   - Only a verified begin creates an entry, seeded from the creature's complete current attacker set.
   - Humans, Altbots, GMs, pets/minions, creatures or unknown participants only mark an entry uncertain.
-  - Retirement happens on corpse-ready, respawn, and evade with no verified attacker left. A same-key stale incarnation is dropped, never merged.
+  - Retirement happens on corpse-ready, respawn, removal from the world (despawn, grid or instance unload), and evade with no verified attacker left. A same-key stale incarnation is dropped, never merged.
   - Every overflow or impossible state poisons the whole registry (fail visible) until config reload.
   - Event-built rosters never carry the complete participant/rights proof, so no entry is ever a concealment candidate.
-- New `src/IndividualProgressionF14LifecycleScript.cpp`: a `UnitScript` consumer for the three original default-ALLOW prototype hooks (attack target transition, corpse ready, respawned). It is compiled only when `COSMIC_F14_ATTACK_EVENT_HOOK_VERSION >= 1`. It converts callback pointers to value tokens under one mutex and never stores `Unit*`. Actor identity is read only from the login-thread cache; there are no Playerbots calls on map threads.
+- New `src/IndividualProgressionF14LifecycleScript.cpp`, compiled only when `COSMIC_F14_ATTACK_EVENT_HOOK_VERSION >= 1`:
+  - A `UnitScript` consumer for the three original default-ALLOW prototype hooks (attack target transition, corpse ready, respawned).
+  - An `AllCreatureScript` subscriber on the **existing, unpatched** Core hook `OnCreatureRemoveWorld`. `Creature::RemoveFromWorld` calls it first, while map, instance and GUID are still valid.
+  - It converts callback pointers to value tokens under one mutex and never stores `Unit*`. The attacker snapshot is a fixed-size array (no allocation under the mutex).
+  - Actor identity is read only from the login-thread cache; there are no Playerbots calls on map threads.
 - `src/IndividualProgression.cpp` / `.h`:
-  - Option `IndividualProgression.F14.ExperimentalAttackLifecycleRegistry`: member false, fallback false. It is forced OFF without the attack-event hook, the Playerbots API, or an enabled F14 identity source (`ProtectVerifiedRandomBotGroupFloor` or `ExperimentalRndbotPlayerVisibility`). The registry is reset on every config (re)load.
+  - Option `IndividualProgression.F14.ExperimentalAttackLifecycleRegistry`: member false, fallback false. It is forced OFF without the attack-event hook or the Playerbots API. It is an independent opt-in and does not need any other F14 option. The registry is reset on every config (re)load.
   - Logout/relogin expires the previous login epoch after the identity lock is released. Lock order: registry mutex, then identity lock.
   - Read-only `GetF14LifecycleStatus()`.
   - The script is registered from `AddSC_mod_individual_progression()`, so the upstream Grim loader stays byte-identical.
+- `src/IndividualProgressionPlayer.cpp`: one line only. The existing `OnPlayerLogin` positive-identity gate gains `|| f14ExperimentalAttackLifecycleRegistry` as a third reason to verify. The bot account, BE/Draenei race, headless session and positive `IsRandomBot` gates are unchanged, so humans, Altbots, GMs and unknown GUIDs stay unverified. No group or stage semantics change.
 - `conf/individualProgression.conf.dist`: the new key `= 0`.
 
 **Known gaps (not invented around):**
-- The Core prototype has no creature-removed-from-world or instance-unload hook. Mitigations are bounded capacity with poison, same-key stale replacement, and per-object stamps.
+- Removal from the world now uses the existing Core `OnCreatureRemoveWorld` hook. Bounded capacity with poison, same-key stale replacement and per-object stamps remain as backstops. Instance-unload retirement is proven by source order only, not by a runtime test.
 - There is no pet/minion owner-resolution contract, so bot pets mark creatures uncertain.
 - Threat-only participants (healers, DoTs without an attack target) are not audited. No tap, loot or quest rights are checked.
 - `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION` remains undefined, and every F14 visibility path stays inert.

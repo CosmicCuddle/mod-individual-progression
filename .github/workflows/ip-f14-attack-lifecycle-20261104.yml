@@ -35,7 +35,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: "Verify #64 ancestry and EXACT nine-path child scope"
+      - name: "Verify #64 ancestry and EXACT ten-path child scope"
         shell: bash
         run: |
           set -euo pipefail
@@ -51,17 +51,28 @@ jobs:
             'src/IndividualProgression.h' \
             'src/IndividualProgressionF14LifecycleRegistry.h' \
             'src/IndividualProgressionF14LifecycleScript.cpp' \
+            'src/IndividualProgressionPlayer.cpp' \
             'tests/f14_lifecycle_registry.cpp' \
             'tests/test_ip_f14_lifecycle_source.py' | sort > /tmp/allowed
           diff -u /tmp/allowed /tmp/actual
           git diff --check c2cc14bc9c18a3e60c984c491370e7da787a388a HEAD
           # Upstream Grim loader and every pure F14 policy stay byte-identical.
-          for f in src/IndividualProgression_loader.cpp src/IndividualProgressionPlayer.cpp \
+          for f in src/IndividualProgression_loader.cpp \
                    src/IndividualProgressionF14MultiAttackerPolicy.h src/IndividualProgressionF14ActorCreatureIndex.h \
                    src/IndividualProgressionF14CombatVisibilityPolicy.h src/IndividualProgressionF14RefreshPolicy.h; do
             git diff --quiet c2cc14bc9c18a3e60c984c491370e7da787a388a HEAD -- "$f"
           done
+          # IndividualProgressionPlayer.cpp: ONLY the login identity OR gate gains
+          # the registry flag (one line changed, one line added). Nothing else.
+          git diff -U0 c2cc14bc9c18a3e60c984c491370e7da787a388a HEAD -- src/IndividualProgressionPlayer.cpp \
+            | grep -E '^[+-]' | grep -Ev '^(\+\+\+|---) ' > /tmp/player-diff
+          printf '%s\n' \
+            '-             sIndividualProgression->f14ExperimentalRndbotPlayerVisibility) &&' \
+            '+             sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||' \
+            '+             sIndividualProgression->f14ExperimentalAttackLifecycleRegistry) &&' > /tmp/player-expected
+          diff -u /tmp/player-expected /tmp/player-diff
           grep -Fqx 'IndividualProgression.F14.ExperimentalAttackLifecycleRegistry = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0' conf/individualProgression.conf.dist
           grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
           grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
           echo 'PASS: exact scope, OFF defaults, upstream loader and pure policies untouched'
@@ -223,6 +234,19 @@ jobs:
             'src/server/game/Handlers/MiscHandler.cpp' | sort > /tmp/allowed-core
           diff -u /tmp/allowed-core /tmp/actual-core
           grep -Fq '#define COSMIC_F14_ATTACK_EVENT_HOOK_VERSION 1' acore/src/server/game/Scripting/ScriptDefines/UnitScript.h
+          # Existing (unpatched) Core removal hook used for retirement: exact
+          # signature, dispatched FIRST in Creature::RemoveFromWorld.
+          grep -Fq 'virtual void OnCreatureRemoveWorld(Creature* /*creature*/) { }' acore/src/server/game/Scripting/ScriptDefines/AllCreatureScript.h
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path('acore/src/server/game/Entities/Creature/Creature.cpp').read_text()
+          body=src.split('void Creature::RemoveFromWorld()',1)[1]
+          body=body[:body.index('\n}\n')]
+          hook=body.index('sScriptMgr->OnCreatureRemoveWorld(this);')
+          assert hook < body.index('Unit::RemoveFromWorld();'), 'removal hook must precede Unit::RemoveFromWorld'
+          assert hook < body.index('GetMap()->GetObjectsStore().Remove<Creature>(GetGUID());')
+          print('PASS: OnCreatureRemoveWorld fires before the creature leaves its map')
+          PY
           ! grep -Rq 'define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION' acore/src/server/game
           echo 'PASS: original default-ALLOW prototypes applied; refresh bridge still absent'
 
@@ -272,9 +296,12 @@ jobs:
           set -euo pipefail
           obj=$(find acore-build -name 'IndividualProgressionF14LifecycleScript.cpp.o' | head -n1)
           test -s "$obj"
-          nm -C "$obj" | grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14AttackTargetTransition(Unit*, Unit*, Unit*)'
-          nm -C "$obj" | grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14CreatureCorpseReady(Creature*)'
-          nm -C "$obj" | grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14CreatureRespawned(Creature*)'
+          # Render once to a file: `nm | grep -q` can SIGPIPE under pipefail.
+          nm -C "$obj" > /tmp/f14-lifecycle-symbols.txt
+          grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14AttackTargetTransition(Unit*, Unit*, Unit*)' /tmp/f14-lifecycle-symbols.txt
+          grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14CreatureCorpseReady(Creature*)' /tmp/f14-lifecycle-symbols.txt
+          grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14CreatureRespawned(Creature*)' /tmp/f14-lifecycle-symbols.txt
+          grep -Fq 'IndividualProgressionF14LifecycleRemovalScript::OnCreatureRemoveWorld(Creature*)' /tmp/f14-lifecycle-symbols.txt
           test -x acore-build/src/server/apps/worldserver
           echo 'PASS: newest Grim Core + unchanged PB + Naxx292 + Services16 + F14 prototypes + OFF lifecycle consumer linked'
       - name: Safety and confidence boundary
