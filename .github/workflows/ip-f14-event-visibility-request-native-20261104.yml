@@ -276,8 +276,19 @@ jobs:
           grep -nF 'Unit* const f14PreviousVictim = m_attacking;' acore/src/server/game/Entities/Unit/Unit.cpp
           grep -nF 'sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);' acore/src/server/game/Entities/Unit/Unit.cpp
           sed -n '7158,7194p' acore/src/server/game/Entities/Unit/Unit.cpp
-          git -C acore apply --check --verbose "$normalized"
-          git -C acore apply "$normalized"
+          # Only run against the exact pinned public Core+F14 patch chain above.
+          # Git's apply can reject a short valid context hunk on this premodified
+          # disposable checkout; GNU patch with fuzz=0 is an exact-context fallback.
+          if git -C acore apply --check --verbose "$normalized"; then
+            git -C acore apply "$normalized"
+          else
+            echo 'Git hunk preflight rejected exact pinned source; trying zero-fuzz GNU patch in disposable Core only'
+            command -v patch
+            test "$(grep -cF 'Unit* const f14PreviousVictim = m_attacking;' acore/src/server/game/Entities/Unit/Unit.cpp)" = 1
+            test "$(grep -cF 'sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);' acore/src/server/game/Entities/Unit/Unit.cpp)" = 1
+            patch --batch --fuzz=0 --dry-run -p1 -d acore < "$normalized"
+            patch --batch --fuzz=0 -p1 -d acore < "$normalized"
+          fi
           git -C acore diff --check
           git -C acore diff --name-only | sort > /tmp/event-refresh-core-actual
           diff -u /tmp/joint-core-allowed /tmp/event-refresh-core-actual
