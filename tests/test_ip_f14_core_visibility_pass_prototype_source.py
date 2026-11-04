@@ -29,6 +29,33 @@ class CoreF14ReevaluationPrototype(unittest.TestCase):
         self.assertNotIn("src/server/game/Handlers/MiscHandler.cpp", paths)
         self.assertNotIn("src/server/game/Entities/Creature/Creature.cpp", paths)
 
+    def test_unified_diff_has_context_and_exact_line_counts(self):
+        # A zero-context or unterminated patch can pass simple string tests
+        # yet be rejected by git apply before any source can compile.
+        self.assertTrue(self.patch.endswith("\\n"))
+        rows = self.patch.splitlines()
+        hunks = 0
+        i = 0
+        while i < len(rows):
+            match = re.fullmatch(r"@@ -(\\d+),(\\d+) \\+(\\d+),(\\d+) @@", rows[i])
+            if not match:
+                i += 1
+                continue
+            expect_old, expect_new = int(match[2]), int(match[4])
+            i += 1
+            actual_old = actual_new = context = 0
+            while i < len(rows) and not rows[i].startswith(("diff --git ", "@@ ")):
+                marker = rows[i][:1]
+                self.assertIn(marker, (" ", "+", "-"), (i, rows[i]))
+                actual_old += marker in (" ", "-")
+                actual_new += marker in (" ", "+")
+                context += marker == " "
+                i += 1
+            self.assertEqual((actual_old, actual_new), (expect_old, expect_new))
+            self.assertGreater(context, 0)
+            hunks += 1
+        self.assertEqual(hunks, 6)
+
     def test_new_callback_is_observational_and_never_declares_complete_bridge(self):
         p = self.patch
         self.assertIn("void OnF14VisibilityReevaluationProcessed(WorldObject const* object, bool playerFrame);", p)
