@@ -1,0 +1,78 @@
+# Source-only check: can the three original F14 #56 Core prototype patches
+# apply unmodified to historical and newest Grim Core? NO compiled runtime/host.
+name: F14 original Core seam patch compatibility both Grim pins (NO HOST)
+on:
+  pull_request:
+    branches: [work/cs01-f14-verified-rndbot-tbc-floor-20261104]
+    paths:
+      - ".github/workflows/ip-f14-grim-core-seam-apply-preflight-20261104.yml"
+permissions:
+  contents: read
+jobs:
+  core-patch-apply:
+    name: Original F14 hooks on Grim Core (${{ matrix.core_name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - core_name: historical-8daffd
+            core_sha: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          - core_name: newer-0d754d
+            core_sha: 0d754d1921261dfd939f91060ebc022eae280f71
+    steps:
+      - name: Checkout immutable Grimfeather Core on disposable runner
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: ${{ matrix.core_sha }}
+          path: core
+          persist-credentials: false
+      - name: Checkout original tested F14 #56 patch source unchanged
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: 6cf528c0f1728ed3ec8fdd11e020f07ec23f3af5
+          path: original-f14
+          persist-credentials: false
+      - name: Verify exact refs and apply three F14 seam prototypes (NO EXECUTION)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C core rev-parse HEAD)" = "${{ matrix.core_sha }}"
+          test "$(git -C original-f14 rev-parse HEAD)" = 6cf528c0f1728ed3ec8fdd11e020f07ec23f3af5
+          for patch in \
+            f14_observer_visibility_default_allow_prototype.patch \
+            f14_who_cached_entry_prototype.patch \
+            f14_attack_corpse_event_bridge_prototype.patch; do
+            source="original-f14/tests/core_patches/$patch"
+            test -s "$source"
+            git -C core apply --check "../$source"
+            git -C core apply "../$source"
+            echo "PASS: $patch applies to ${{ matrix.core_name }}"
+          done
+          git -C core diff --check
+          git -C core diff --name-only | sort > /tmp/actual
+          printf '%s\n' \
+            src/server/game/Scripting/ScriptMgr.h \
+            src/server/game/Scripting/ScriptDefines/WorldObjectScript.h \
+            src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp \
+            src/server/game/Scripting/ScriptDefines/UnitScript.h \
+            src/server/game/Scripting/ScriptDefines/UnitScript.cpp \
+            src/server/game/Entities/Object/Object.cpp \
+            src/server/game/Entities/Player/Player.cpp \
+            src/server/game/Entities/Unit/Unit.cpp \
+            src/server/game/Entities/Creature/Creature.cpp \
+            src/server/game/Handlers/MiscHandler.cpp | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          grep -Fq 'COSMIC_F14_OBSERVER_HOOK_VERSION' core/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+          grep -Fq 'COSMIC_F14_ATTACK_EVENT_HOOK_VERSION' core/src/server/game/Scripting/ScriptDefines/UnitScript.h
+          ! grep -Rq 'define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION' core/src/server/game
+          echo 'PASS: original F14 observer, WHO and attack/corpse hooks source-apply; full refresh STILL MISSING'
+      - name: Confidence boundary
+        if: always()
+        run: |
+          echo 'Only source patch applicability checked against disposable GitHub Core checkout.'
+          echo 'This is NOT a Worldserver binary build, enabled F14 feature, or real gameplay validation.'
+          echo 'No custom Core fork, installation, DB, server, production or owner host changed.'
