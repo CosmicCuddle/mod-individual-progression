@@ -99,6 +99,9 @@ jobs:
         run: |
           set -euo pipefail
           ip=acore/modules/mod-individual-progression
+          # New additive contract specifically for the Grim+Cosmic source merge;
+          # leave the older frozen original-PR provenance tests intact.
+          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_grim_20261104_source_preservation.py' -v
           python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_gm_command_null_safety.py' -v
           python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_group_floor_source.py' -v
           g++ -std=c++17 -Wall -Wextra -Werror -pedantic -O2 "$ip/tests/f14_group_sync_floor.cpp" -o /tmp/ip-grim-f14-floor
