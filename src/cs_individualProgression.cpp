@@ -292,8 +292,6 @@ public:
         if (!player || !player->IsInWorld() || !accountId)
         {
             handler->SendSysMessage("Player not found or not in world.");
-        {
-            handler->SendSysMessage("Player not found.");
             return false;
         }
 
