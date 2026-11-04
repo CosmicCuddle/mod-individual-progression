@@ -15,6 +15,7 @@ on:
       - "tests/f14_logout_refresh_queue.cpp"
       - "tests/test_ip_f14_logout_mapthread_source.py"
       - "tests/test_ip_f14_postevent_reveal_request_source.py"
+      - "tests/test_ip_f14_lifecycle_source.py"
       - "docs/F14_LOGOUT_MAPTHREAD_REFRESH_2026-11-04.md"
       - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
 
@@ -32,7 +33,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify only nine reviewed child paths and test logout queue
+      - name: Verify only ten reviewed child paths and test logout queue
         shell: bash
         run: |
           set -euo pipefail
@@ -46,6 +47,7 @@ jobs:
             'tests/f14_logout_refresh_queue.cpp' \
             'tests/test_ip_f14_logout_mapthread_source.py' \
             'tests/test_ip_f14_postevent_reveal_request_source.py' \
+            'tests/test_ip_f14_lifecycle_source.py' \
             'docs/F14_LOGOUT_MAPTHREAD_REFRESH_2026-11-04.md' \
             'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/expected
           diff -u /tmp/expected /tmp/actual
@@ -139,7 +141,7 @@ jobs:
           test "$(git -C "$ip" rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           git -C "$ip" merge-base --is-ancestor c2cc14bc9c18a3e60c984c491370e7da787a388a HEAD
           # Frozen #82 is the exact source parent. Only the new queue, hook
-          # delivery, two tests, docs and this CI may differ in this branch.
+          # delivery, three guarded source/model tests, docs and CI may differ.
           git -C "$ip" merge-base --is-ancestor 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD
           git -C "$ip" diff --name-only 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD | sort > /tmp/source-actual
           printf '%s\n' \
@@ -150,6 +152,7 @@ jobs:
             'tests/f14_logout_refresh_queue.cpp' \
             'tests/test_ip_f14_logout_mapthread_source.py' \
             'tests/test_ip_f14_postevent_reveal_request_source.py' \
+            'tests/test_ip_f14_lifecycle_source.py' \
             'docs/F14_LOGOUT_MAPTHREAD_REFRESH_2026-11-04.md' \
             'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/source-allowed
           diff -u /tmp/source-allowed /tmp/source-actual
