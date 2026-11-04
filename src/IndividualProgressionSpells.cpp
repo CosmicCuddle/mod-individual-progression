@@ -89,7 +89,10 @@ static uint16 GetProfessionRank(uint32 spellId)
 // none. It goes by the account and not by .gm on, or the login cap would undo what a GM set.
 uint16 IndividualProgression::GetProfessionSkillCap(Player* player)
 {
-    if (!enabled || !ProfessionTierCap || !player || !player->IsInWorld() || isExcludedAccount(player) || isGMAccount(player))
+    // A missing session cannot safely identify excluded/GM accounts. Fail
+    // open (no destructive cap) rather than mutate or crash a headless bot.
+    if (!enabled || !ProfessionTierCap || !player || !player->IsInWorld() ||
+        !player->GetSession() || isExcludedAccount(player) || isGMAccount(player))
         return 0;
 
     if (!hasPassedProgression(player, PROGRESSION_PRE_TBC))
@@ -106,6 +109,12 @@ uint16 IndividualProgression::GetProfessionSkillCap(Player* player)
 // teaches are looked at as well.
 bool IndividualProgression::IsProfessionRankAboveCap(Player* player, uint32 spellId)
 {
+    // Called for ordinary spell learning and item use: avoid SpellMgr work
+    // when this optional upstream feature is disabled (default).
+    if (!enabled || !ProfessionTierCap || !player || !player->IsInWorld() ||
+        !player->GetSession())
+        return false;
+
     uint16 rank = GetProfessionRank(spellId);
     if (SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId))
         for (SpellEffectInfo const& effect : spellInfo->Effects)
