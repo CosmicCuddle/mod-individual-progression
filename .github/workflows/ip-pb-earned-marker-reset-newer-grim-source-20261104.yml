@@ -1,0 +1,121 @@
+# Source-only cross-module compatibility preflight. Existing PB prototype from #49
+# is copied to a disposable checkout only, not forked or installed. No launch.
+name: Newest Grim / IP F14 + original Playerbots earned-marker reset proposal (OFF, NO HOST)
+
+on:
+  push:
+    branches:
+      - integration/cs01-grim-dev-plus-f14-lifecycle-20261104
+    paths:
+      - ".github/workflows/ip-pb-earned-marker-reset-newer-grim-source-20261104.yml"
+  pull_request:
+    branches:
+      - integration/cs01-grim-upstream-into-ip46-20261104
+    paths:
+      - ".github/workflows/ip-pb-earned-marker-reset-newer-grim-source-20261104.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  prototype-with-reviewed-grim-f14:
+    name: Exact #49 PB opt-in patch + Grim/F14 IP integration (source only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: ['17', '20']
+    steps:
+      - name: Checkout current exact reviewed Grim DEV / F14 integration source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          path: ip
+          persist-credentials: false
+
+      - name: Checkout EXACT unchanged historical Playerbots
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: pb
+          persist-credentials: false
+
+      - name: Checkout original successful PB keep-list proposal #49 (reference only)
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: e9252a4f37248d8727cb96004006a741a6c6c263
+          fetch-depth: 0
+          path: pb-prototype
+          persist-credentials: false
+
+      - name: Verify fixed source parents, original tested patch and all F14 defaults OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C ip rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          git -C ip merge-base --is-ancestor 31d1a6f4c52114627dd394d5c94cb3596509f4de HEAD
+          git -C ip merge-base --is-ancestor 1fd527b790f182ac496bab06c26ac0b21e18e13d HEAD
+          git -C ip merge-base --is-ancestor 1ca982386558371adee319cf93dbadacf39149b0 HEAD
+          test "$(git -C pb rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          test "$(git -C pb-prototype rev-parse HEAD)" = e9252a4f37248d8727cb96004006a741a6c6c263
+          test -s pb-prototype/tests/pb_patches/reset_earned_ip_markers_prototype.patch
+          test -s pb-prototype/tests/test_ip_pb_keep_list_prototype.py
+          test -s pb-prototype/tests/pb_reset_keep_list_prototype.cpp
+          test -z "$(git -C ip diff --name-only 1ca982386558371adee319cf93dbadacf39149b0 HEAD -- src conf sql data tests docs)"
+          for key in AutoAttune PaidExpansion.Enable F14.ProtectVerifiedRandomBotGroupFloor \
+                     F14.PreserveVerifiedRandomBotStageOnLogin F14.ForceVerifiedRandomBotTbcFloorOnLogin \
+                     F14.ExperimentalRndbotPlayerVisibility F14.ExperimentalAttackLifecycleRegistry; do
+            grep -Fqx "IndividualProgression.$key = 0" ip/conf/individualProgression.conf.dist
+          done
+          echo 'PASS: original PB prototype fixed, revised F14+Grim source unmodified, toggles OFF'
+
+      - name: Apply exactly four reviewed Playerbots changes to disposable checkout ONLY
+        shell: bash
+        run: |
+          set -euo pipefail
+          patchfile=../pb-prototype/tests/pb_patches/reset_earned_ip_markers_prototype.patch
+          git -C pb apply --check "$patchfile"
+          git -C pb apply "$patchfile"
+          git -C pb diff --check
+          git -C pb diff --name-only | sort > /tmp/pb-changed
+          printf '%s\n' \
+            src/PlayerbotAIConfig.cpp \
+            src/PlayerbotAIConfig.h \
+            src/Bot/Factory/PlayerbotFactory.cpp \
+            conf/playerbots.conf.dist | sort > /tmp/pb-approved
+          diff -u /tmp/pb-approved /tmp/pb-changed
+          grep -Fqx 'Playerbots.ResetQuestsPreserveQuestIds =' pb/conf/playerbots.conf.dist
+          test -z "$(git -C ip status --porcelain)"
+          echo 'PASS: PB source patch applies; existing rewarded only, 66001..66018 whitelist, default empty'
+
+      - name: Execute original #49 source tests on actual patched PB and original diff
+        shell: bash
+        env:
+          COSMIC_PB_PATCHED_ROOT: ${{ github.workspace }}/pb
+        run: |
+          set -euo pipefail
+          cd pb-prototype
+          python3 -B -m unittest discover -s tests -p 'test_ip_pb_keep_list_prototype.py' -v
+
+      - name: Compile and execute original #49 policy model without server
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${{ matrix.compiler }}" -std=c++${{ matrix.standard }} -O2 -Wall -Wextra -Werror -pedantic \
+            pb-prototype/tests/pb_reset_keep_list_prototype.cpp -o /tmp/pb-keep-list-model
+          /tmp/pb-keep-list-model | tee /tmp/pb-keep-list-model.out
+          grep -Eq '^F14 Playerbots keep-list candidate model: [0-9]+/[0-9]+ checks passed; PROTOTYPE ONLY, no gameplay\.$' /tmp/pb-keep-list-model.out
+
+      - name: Distinguish Altbot and native gameplay gaps (never silently approve)
+        if: always()
+        run: |
+          echo 'This patch changes ResetQuests for every bot using the PB Factory, including Altbots.'
+          echo 'It only keeps already-rewarded whitelisted IP markers; it grants no quests/stages.'
+          echo 'Neither selected RNDBOT restriction nor host/client proof is implemented in this patch.'
+          echo 'No owner-paid settings, host, Core fork, original PB repo, config file or database changed.'
+          echo 'Newest Grim Core + ALL F14 + patched PB needs separate final native/gameplay tests.'
