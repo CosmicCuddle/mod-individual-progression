@@ -83,6 +83,19 @@ class ConsumerIsBookkeepingOnly(unittest.TestCase):
                 # Pure-header API only; never CALLED by the runtime consumer.
                 self.assertNotIn(forbidden, strip_comments(read(SCRIPT)))
                 continue
+            if forbidden == "UpdateObjectVisibility":
+                # Approved experimental successor to the ORIGINAL no-refresh
+                # invariant: EXACTLY one call, in owning-map OnUnitUpdate
+                # after LifecycleLock is released. Never inside the lifecycle
+                # callback or logout event. The NEW source-contract suite
+                # independently verifies this exclusive opt-in scope.
+                script = strip_comments(read(SCRIPT))
+                self.assertEqual(script.count("creature->UpdateObjectVisibility(true);"), 1)
+                update = script.split("void OnUnitUpdate(Unit* unit, uint32 /*diff*/) override", 1)[1]
+                update = update.split("\n    }", 1)[0]
+                self.assertIn("creature->UpdateObjectVisibility(true);", update)
+                self.assertLess(update.index("\n        }"), update.index("creature->UpdateObjectVisibility(true);"))
+                continue
             self.assertNotIn(forbidden, code, forbidden)
 
     def test_attack_handler_checks_enable_first(self):
@@ -415,7 +428,8 @@ class Stage3MinionOwnerEvidence(unittest.TestCase):
         self.assertIn("if (!onlyVerified || !snap.alive)\n                Apply(*entry, Policy::Event::UnverifiedOrHumanParticipant, 0);", apply_)
         for forbidden in ("ReplaceWithFullyVerifiedRoster", "ReverifyCompleteParticipantFacts", "VerifiedAttackBegin"):
             self.assertNotIn(forbidden, apply_)
-        expire = reg.split("std::size_t ExpireActor(std::uint64_t actorToken)", 1)[1].split("\n        }\n", 1)[0]
+        expire = reg.split("std::size_t ExpireActor(std::uint64_t actorToken,", 1)[1].split("\n        }\n", 1)[0]
+        self.assertIn("std::function<void(CreatureKey const&, std::uint64_t)> onAffected = {}", expire)
         self.assertIn("f.minionOwners[i] == actorToken", expire)
         self.assertIn("Policy::Event::ThreatRightsOrIdentityChanged", expire)
         minion = reg.split("bool AddMinion(std::uint64_t ownerEpoch)", 1)[1].split("\n        }\n", 1)[0]
