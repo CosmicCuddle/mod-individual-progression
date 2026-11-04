@@ -17,10 +17,11 @@
  *                   unknown or expired). An unverified participant never
  *                   gets an entry; it only makes an existing entry uncertain.
  *  - creature token = issued here, monotonic, never reused. A new token is
- *                   issued whenever an entry is created; corpse and respawn
- *                   retire it. The caller stamps it on the live Creature
- *                   object, so a recycled GUID/instance id or a new Creature
- *                   object can never inherit an old roster.
+ *                   issued whenever an entry is created; corpse, respawn
+ *                   and removal from the world retire it. The caller stamps
+ *                   it on the live Creature object, so a recycled GUID or
+ *                   instance id or a new Creature object can never inherit
+ *                   an old roster.
  *
  * Every overflow (creatures, attackers, tokens) or impossible state poisons
  * the WHOLE registry: all mutators become no-ops and every query answers
@@ -86,6 +87,7 @@ namespace IndividualProgressionF14LifecycleRegistry
         std::uint64_t corpseRetired = 0;
         std::uint64_t respawnRetired = 0;
         std::uint64_t evadeRetired = 0;
+        std::uint64_t removedRetired = 0;
         std::uint64_t staleKeyReplaced = 0;
         std::uint64_t poisonedCalls = 0;
     };
@@ -296,6 +298,20 @@ namespace IndividualProgressionF14LifecycleRegistry
                 Apply(*entry, Policy::Event::CreatureDied, 0);
                 ++_counters.corpseRetired;
             }
+            Erase(*entry);
+        }
+
+        // The Creature object is leaving its map (despawn, grid/instance
+        // unload, RemoveFromMap). Always retire, before the object can be
+        // destroyed or its GUID reused. Idempotent with corpse/respawn.
+        void OnCreatureRemovedFromWorld(CreatureKey const& key, std::uint64_t stamp)
+        {
+            if (Guard())
+                return;
+            Entry* entry = Find(stamp, key);
+            if (!entry)
+                return;
+            ++_counters.removedRetired;
             Erase(*entry);
         }
 

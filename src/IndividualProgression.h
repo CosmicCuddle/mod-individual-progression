@@ -435,8 +435,8 @@ public:
     // F14 world-player and cached WHO pilot, fail OFF until full Core refresh.
     bool f14ExperimentalRndbotPlayerVisibility = false;
     // F14 attack/corpse lifecycle registry: bookkeeping only, never hides.
-    // Forced OFF without the Core attack-event hook, Playerbots, or an
-    // enabled F14 identity source (group floor or player visibility pilot).
+    // Its own verified-login identity opt-in; forced OFF without the Core
+    // attack-event hook or the Playerbots API.
     bool f14ExperimentalAttackLifecycleRegistry = false;
     // Independent F14 group-time pilot; leave OFF until owner approval.
     bool f14ProtectVerifiedRandomBotGroupFloor = false;

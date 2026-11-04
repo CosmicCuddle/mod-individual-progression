@@ -1456,15 +1456,9 @@ private:
             sIndividualProgression->f14ExperimentalAttackLifecycleRegistry = false;
         }
 #endif
-        // Verified login epochs are only issued while an F14 identity source
-        // is ON; without one every attacker would be unverified.
-        if (sIndividualProgression->f14ExperimentalAttackLifecycleRegistry &&
-            !sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor &&
-            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)
-        {
-            LOG_ERROR("module", "F14 attack lifecycle registry requires ProtectVerifiedRandomBotGroupFloor or ExperimentalRndbotPlayerVisibility identity; forcing OFF");
-            sIndividualProgression->f14ExperimentalAttackLifecycleRegistry = false;
-        }
+        // The registry is its own verified-identity source: when ON (and not
+        // forced OFF above), OnPlayerLogin records positive headless BE/Draenei
+        // RandomBot login epochs without enabling any other F14 feature.
         sIndividualProgression->ResetF14LifecycleRegistry();
         sIndividualProgression->fishingFix = sConfigMgr->GetOption<bool>("IndividualProgression.FishingFix", true);
         sIndividualProgression->VanillaHunterPets = sConfigMgr->GetOption<bool>("IndividualProgression.VanillaHunterPets", true);

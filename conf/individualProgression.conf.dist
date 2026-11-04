@@ -88,9 +88,9 @@ IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0
 #        Playerbots from map threads. Humans, Altbots, GMs, pets/minions and
 #        unknown participants only mark a creature uncertain (fail visible).
 #        Any overflow disables the registry until the next config reload.
-#        FORCED OFF unless the Core attack/corpse event hook, the Playerbots
-#        API and an F14 identity source (ProtectVerifiedRandomBotGroupFloor or
-#        ExperimentalRndbotPlayerVisibility) are present and ON.
+#        When ON it also records verified RandomBot login identity by itself;
+#        no other F14 option needs to be ON. FORCED OFF unless the Core
+#        attack/corpse event hook and the Playerbots API are present.
 #        Never enable without owner permission and gameplay regression tests.
 #
 IndividualProgression.F14.ExperimentalAttackLifecycleRegistry = 0

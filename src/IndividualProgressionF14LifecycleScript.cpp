@@ -2,7 +2,8 @@
  * CosmicCuddle IP F14 — attack/corpse lifecycle event consumer (DEFAULT OFF).
  *
  * Observes the optional Core prototype hooks (COSMIC_F14_ATTACK_EVENT_HOOK_VERSION)
- * and keeps the pure IndividualProgressionF14LifecycleRegistry up to date.
+ * plus the existing AllCreatureScript::OnCreatureRemoveWorld hook, and keeps
+ * the pure IndividualProgressionF14LifecycleRegistry up to date.
  *
  * Bookkeeping ONLY. It hides nothing, sends no packets, requests no visibility
  * refresh, writes no stage/SQL/settings and never calls Playerbots. Actor
@@ -20,17 +21,19 @@
  */
 #include "IndividualProgression.h"
 #include "IndividualProgressionF14LifecycleRegistry.h"
+#include "AllCreatureScript.h"
 #include "Creature.h"
 #include "DataMap.h"
 #include "Log.h"
 #include "Player.h"
 #include "ScriptMgr.h"
+#include <array>
 #include <mutex>
-#include <vector>
 
 namespace
 {
     namespace Registry = IndividualProgressionF14LifecycleRegistry;
+    namespace Policy = IndividualProgressionF14MultiAttackerPolicy;
 
     std::mutex& LifecycleLock()
     {
@@ -95,7 +98,7 @@ IndividualProgression::F14LifecycleStatus IndividualProgression::GetF14Lifecycle
     status.verifiedEnds = c.verifiedEnds;
     status.unverifiedMarks = c.unverifiedMarks;
     status.expiryFanout = c.expiryFanout;
-    status.retired = c.corpseRetired + c.respawnRetired + c.evadeRetired + c.staleKeyReplaced;
+    status.retired = c.corpseRetired + c.respawnRetired + c.evadeRetired + c.removedRetired + c.staleKeyReplaced;
     return status;
 }
 
@@ -218,16 +221,22 @@ public:
             if (actor || stamp)
             {
                 // Complete current attacker set of the creature (Core already
-                // linked this attacker before the hook fired).
-                std::vector<std::uint64_t> others;
-                Unit::AttackerSet const& attackers = newCreature->getAttackers();
-                others.reserve(attackers.size());
-                for (Unit* other : attackers)
-                    if (other && other != attacker)
-                        others.push_back(ActorTokenOf(other));
+                // linked this attacker before the hook fired). Fixed-size and
+                // allocation-free under the mutex: one slot beyond the policy
+                // limit is enough for the registry to mark overflow uncertain.
+                std::array<std::uint64_t, Policy::MaxTrackedAttackers + 1> others{};
+                std::size_t otherCount = 0;
+                for (Unit* other : newCreature->getAttackers())
+                {
+                    if (!other || other == attacker)
+                        continue;
+                    if (otherCount == others.size())
+                        break; // > MaxTrackedAttackers: registry fails visible
+                    others[otherCount++] = ActorTokenOf(other);
+                }
 
                 Registry::BeginResult const result = registry.OnParticipantBegin(
-                    KeyOf(newCreature), stamp, actor, others.data(), others.size());
+                    KeyOf(newCreature), stamp, actor, others.data(), otherCount);
                 SetStamp(newCreature, result.stamp);
                 if (result.created)
                     LOG_DEBUG("module", "IndividualProgression F14 lifecycle: tracking creature {} (incarnation {})",
@@ -264,11 +273,37 @@ private:
         LogPoisonOnce();
     }
 };
+
+// Existing Core hook (Creature::RemoveFromWorld calls it first, while the
+// creature still has its map, instance id and GUID): despawn, grid or
+// instance unload and RemoveFromMap retire the incarnation before the
+// object can be destroyed or its GUID reused. No hiding, packets or stages.
+class IndividualProgressionF14LifecycleRemovalScript : public AllCreatureScript
+{
+public:
+    IndividualProgressionF14LifecycleRemovalScript()
+        : AllCreatureScript("IndividualProgression_F14LifecycleRemoval") { }
+
+    void OnCreatureRemoveWorld(Creature* creature) override
+    {
+        // Runs even when the option is OFF; only stamped creatures matter.
+        if (!sIndividualProgression->enabled || !creature)
+            return;
+        std::lock_guard<std::mutex> guard(LifecycleLock());
+        std::uint64_t const stamp = StampOf(creature);
+        if (!stamp)
+            return;
+        LifecycleRegistry().OnCreatureRemovedFromWorld(KeyOf(creature), stamp);
+        SetStamp(creature, 0);
+        LogPoisonOnce();
+    }
+};
 #endif
 
 void AddSC_mod_individual_progression_f14_lifecycle()
 {
 #if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION) && COSMIC_F14_ATTACK_EVENT_HOOK_VERSION >= 1
     new IndividualProgressionF14LifecycleScript();
+    new IndividualProgressionF14LifecycleRemovalScript();
 #endif
 }
