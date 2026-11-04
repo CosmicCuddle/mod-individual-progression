@@ -93,8 +93,8 @@ jobs:
           }
           for path, branch in jobs.items():
               data = Path(path).read_text()
-              assert data.count("github.head_ref == '"+branch+"'") == 2, path
-              assert data.count("github.ref == 'refs/heads/"+branch+"'") == 2, path
+              assert data.count("github.head_ref == '"+branch+"'") == 3, path  # 1 prior job-path guard + 2 new job guards
+              assert data.count("github.ref == 'refs/heads/"+branch+"'") == 3, path  # 1 prior job-path guard + 2 new job guards
               assert "original PR development head" in data, path
               print("PASS: frozen historical jobs still present, scoped to",branch)
           PY
