@@ -765,6 +765,155 @@ namespace
         CHECK(!Uncertain(r, s1));
     }
 
+    // ---- Stage 3: verified-owner minion evidence (never proof) ----
+
+    constexpr std::uint64_t OwnerGuid = 0x0000000000000101ULL;   // player GUID raw
+    constexpr std::uint64_t OtherGuid = 0x0000000000000202ULL;
+
+    R::MinionLineage GoodLineage()
+    {
+        R::MinionLineage l;
+        l.minionType = true;
+        l.vehicleOrPossessed = false;
+        l.ownerIsPlayer = true;
+        l.owner = OwnerGuid;
+        l.creator = OwnerGuid;
+        return l;
+    }
+
+    void TestMinionLineageAllMismatchesFail()
+    {
+        CHECK(R::LineageMatchesSingleOwner(GoodLineage()));
+        CHECK(R::MinionOwnerEvidence(GoodLineage(), BotA) == BotA);
+        // Owner logged out / human / Altbot / GM / unselected: epoch 0.
+        CHECK(R::MinionOwnerEvidence(GoodLineage(), 0) == 0);
+        R::MinionLineage l;
+        CHECK(!R::LineageMatchesSingleOwner(l));                     // defaults fail
+        l = GoodLineage(); l.minionType = false;            CHECK(R::MinionOwnerEvidence(l, BotA) == 0);
+        l = GoodLineage(); l.vehicleOrPossessed = true;     CHECK(R::MinionOwnerEvidence(l, BotA) == 0);
+        l = GoodLineage(); l.owner = 0;                     CHECK(R::MinionOwnerEvidence(l, BotA) == 0);
+        l = GoodLineage(); l.ownerIsPlayer = false;         CHECK(R::MinionOwnerEvidence(l, BotA) == 0);
+        l = GoodLineage(); l.charmer = OtherGuid;           CHECK(R::MinionOwnerEvidence(l, BotA) == 0);
+        l = GoodLineage(); l.charmer = OwnerGuid;           CHECK(R::MinionOwnerEvidence(l, BotA) == BotA);
+        l = GoodLineage(); l.creator = OtherGuid;           CHECK(R::MinionOwnerEvidence(l, BotA) == 0);
+        l = GoodLineage(); l.creator = 0;                   CHECK(R::MinionOwnerEvidence(l, BotA) == BotA);
+        l = GoodLineage(); l.summon = true;                 CHECK(R::MinionOwnerEvidence(l, BotA) == 0); // no summon data
+        l.summonDataAvailable = true;                       CHECK(R::MinionOwnerEvidence(l, BotA) == BotA);
+        l.summoner = OtherGuid;                             CHECK(R::MinionOwnerEvidence(l, BotA) == 0);
+        l.summoner = OwnerGuid;                             CHECK(R::MinionOwnerEvidence(l, BotA) == BotA);
+    }
+
+    R::ParticipantSnapshot WithBasics(R::ParticipantSnapshot snap)
+    {
+        snap.alive = true;
+        snap.inCombat = true;
+        snap.tapHolderNoneOrVerifiedBot = true;
+        snap.plainUnscriptedNonEliteNpcScope = true;
+        return snap;
+    }
+
+    void TestMinionEvidenceSeparateAndNeverProof()
+    {
+        R::Registry r;
+        R::CreatureKey const k = Key(0, 0, 0xF130000400);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        R::SnapshotCollector c;
+        CHECK(c.AddAttacker(BotA));
+        CHECK(c.AddMinion(BotA));        // bot A's own pet
+        CHECK(c.AddMinion(BotB));        // bot B's totem; B is not even a participant
+        CHECK(c.AddMinion(BotA));        // duplicate owner: one more visit only
+        R::ParticipantSnapshot snap = WithBasics(c.Take());
+        CHECK(snap.complete && snap.minionOwnerCount == 2 && snap.minionVisits == 3);
+        CHECK(snap.participantCount == 1 && snap.attackerCount == 1);   // minions not participants
+        r.ApplyParticipantSnapshot(k, s, snap);
+        R::ConservativeEvidence e = Ev(r, s);
+        CHECK(e.current);
+        CHECK(e.observedOnlyVerifiedBotsOrVerifiedOwnerMinions);
+        CHECK(e.verifiedOwnerMinionOwners == 2);
+        CHECK(!e.threatCombatAndAttackersObservedOnlyVerifiedBots); // first-party stays false
+        CHECK(Uncertain(r, s));          // minion presence still adds uncertainty
+        CHECK(!Has(r, s, BotB));         // minion owner never enters the roster
+        CHECK(e.verifiedAttackers == 1);
+        CHECK(!r.IsConcealmentCandidate(s));
+        CHECK(!PolicyCandidate(r, s));
+        V::CreatureSnapshot cs;
+        r.BuildCreatureSnapshot(s, cs);
+        CHECK(NoAuthoritativeProof(cs));
+        CHECK(!V::ShouldConcealCreatureFromObserver(cs, EveryObserverFactTrue(cs)));
+    }
+
+    void TestMinionUnknownOwnerStops()
+    {
+        R::SnapshotCollector c;
+        CHECK(c.AddParticipant(BotA));
+        CHECK(!c.AddMinion(0));          // unknown lineage / owner: stop at once
+        CHECK(!c.AddMinion(BotA));
+        CHECK(!c.AddParticipant(BotB));
+        CHECK(c.Visits() == 2);
+        R::ParticipantSnapshot snap = WithBasics(c.Take());
+        CHECK(!snap.complete);
+        R::Registry r;
+        R::CreatureKey const k = Key(0, 0, 0xF130000401);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        r.ApplyParticipantSnapshot(k, s, snap);
+        CHECK(!Ev(r, s).observedOnlyVerifiedBotsOrVerifiedOwnerMinions);
+        CHECK(Uncertain(r, s));
+    }
+
+    void TestMinionBudgetAndOverflow()
+    {
+        R::SnapshotCollector flood;      // one pet flooding the lists
+        std::size_t calls = 0;
+        for (int i = 0; i < 10000; ++i) { ++calls; if (!flood.AddMinion(BotA)) break; }
+        CHECK(calls == R::MaxSnapshotVisits + 1);
+        CHECK(!flood.Take().complete);
+
+        R::SnapshotCollector mixed;      // participants and minions share one budget
+        bool ok = true;
+        for (int i = 0; ok && i < 40; ++i) ok = mixed.AddParticipant(BotA);
+        std::size_t minionCalls = 0;
+        for (int i = 0; ok && i < 40; ++i) { ++minionCalls; ok = mixed.AddMinion(BotB); }
+        CHECK(!ok && minionCalls == R::MaxSnapshotVisits - 40 + 1);
+
+        R::SnapshotCollector many;       // > MaxSnapshotMinionOwners distinct owners
+        calls = 0;
+        for (std::uint64_t t = 1; t < 1000; ++t) { ++calls; if (!many.AddMinion(9000 + t)) break; }
+        CHECK(calls == R::MaxSnapshotMinionOwners + 1);
+        CHECK(many.Take().minionOwnerCount == R::MaxSnapshotMinionOwners);
+        CHECK(!many.Take().complete);
+    }
+
+    void TestMinionOwnerExpiryMakesEvidenceStale()
+    {
+        R::Registry r;
+        R::CreatureKey const k = Key(0, 0, 0xF130000402);
+        std::uint64_t s = Begin(r, k, 0, BotA);
+        R::SnapshotCollector c;
+        CHECK(c.AddAttacker(BotA));
+        CHECK(c.AddMinion(BotB));        // owner B is NOT rostered here
+        r.ApplyParticipantSnapshot(k, s, WithBasics(c.Take()));
+        CHECK(Ev(r, s).current && Ev(r, s).observedOnlyVerifiedBotsOrVerifiedOwnerMinions);
+        std::uint32_t const before = Ev(r, s).generation;
+        // Owner B logs out: the evidence that depended on B is stale.
+        CHECK(r.ExpireActor(BotB) == 1);
+        R::ConservativeEvidence e = Ev(r, s);
+        CHECK(!e.current);
+        CHECK(e.generation != before);
+        CHECK(!e.observedOnlyVerifiedBotsOrVerifiedOwnerMinions);
+        CHECK(e.verifiedOwnerMinionOwners == 0);
+        CHECK(Has(r, s, BotA));          // first-party roster untouched
+        CHECK(r.GetCounters().minionOwnerExpiries == 1);
+        // A later snapshot re-reads owner identity under the lock: a logged
+        // out owner reports 0, so the minion is unknown and stops.
+        R::SnapshotCollector again;
+        CHECK(again.AddAttacker(BotA));
+        CHECK(!again.AddMinion(0));
+        r.ApplyParticipantSnapshot(k, s, WithBasics(again.Take()));
+        CHECK(!Ev(r, s).observedOnlyVerifiedBotsOrVerifiedOwnerMinions);
+        // Expiring an unrelated epoch touches nothing.
+        CHECK(r.ExpireActor(0x999999) == 0);
+    }
+
     void TestTokensMonotonicAcrossReset()
     {
         R::Registry r;
@@ -808,6 +957,11 @@ int main()
     TestCollectorBudgetAcrossThreeRanges();
     TestCollectorStopsOnUnknownAndOverflow();
     TestCollectorZeroAndNormal();
+    TestMinionLineageAllMismatchesFail();
+    TestMinionEvidenceSeparateAndNeverProof();
+    TestMinionUnknownOwnerStops();
+    TestMinionBudgetAndOverflow();
+    TestMinionOwnerExpiryMakesEvidenceStale();
 
     unsigned const total = g_pass + g_fail;
     std::printf("F14 LIFECYCLE REGISTRY %u/%u passed\n", g_pass, total);

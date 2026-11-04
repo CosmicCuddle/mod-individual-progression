@@ -283,9 +283,9 @@ class Stage2ParticipantSnapshot(unittest.TestCase):
             self.assertIn(token, body)
         # Every one of the three range loops is guarded by the collector and
         # breaks IMMEDIATELY when it says stop (CS01 bounded-lock rule).
-        loops = re.findall(r"if \(!collector\.Stopped\(\)\)\n\s+for \(([^\n]+)\)\n\s+if \(!collector\.(AddParticipant|AddAttacker)\(([^\n]+)\)\)\n\s+break;", body)
+        loops = re.findall(r"if \(!collector\.Stopped\(\)\)\n\s+for \(([^\n]+)\)\n\s+if \(!VisitUnit\(collector, ([^\n]+), (true|false)\)\)\n\s+break;", body)
         self.assertEqual(len(loops), 3, loops)
-        self.assertEqual([l[1] for l in loops], ["AddParticipant", "AddParticipant", "AddAttacker"])
+        self.assertEqual([l[2] for l in loops], ["false", "false", "true"])
         self.assertEqual(len(re.findall(r"\bfor \(", body)), 3)
         # Offline threat references are NOT filtered out; no allocation.
         for forbidden in ("IsOffline()", "IsOnline()", "IsAvailable()", "std::vector", "new ",
@@ -358,6 +358,69 @@ class Stage2ParticipantSnapshot(unittest.TestCase):
                               "explicitlyEnabled", "ShouldConcealCreatureFromObserver"):
             self.assertNotIn(observer_only, reg)
         self.assertIn("struct ConservativeEvidence", reg)
+
+
+class Stage3MinionOwnerEvidence(unittest.TestCase):
+    def script(self):
+        return strip_comments(read(SCRIPT))
+
+    def fn(self, signature):
+        body = self.script().split(signature, 1)[1]
+        return body[:body.index("\n    }\n")]
+
+    def test_lineage_is_value_only_and_delegates_to_pure_rule(self):
+        body = self.fn("std::uint64_t MinionOwnerEpochOf(Unit const* unit)")
+        for token in ("GetOwnerGUID()", "GetCharmerGUID()", "GetCreatorGUID()", "ToTempSummon()",
+                      "GetSummonerGUID()", "isPossessed()", "IsVehicle()", "IsPet()", "IsGuardian()",
+                      "IsTotem()", "IsSummon()", "owner.IsPlayer()",
+                      "Registry::LineageMatchesSingleOwner(lineage)",
+                      "Registry::MinionOwnerEvidence(lineage,",
+                      "GetF14VerifiedRandomBotLoginEpoch(owner)"):
+            self.assertIn(token, body)
+        # Never dereference owner/charmer/summoner, never ask Playerbots.
+        for forbidden in ("GetOwner()", "GetCharmer()", "GetCharmerOrOwner(", "GetSummonerUnit(",
+                          "GetSummoner()", "ObjectAccessor", "sRandomPlayerbotMgr", "ToPlayer("):
+            self.assertNotIn(forbidden, body)
+        # The epoch lookup happens only after the lineage matched.
+        self.assertLess(body.index("if (!Registry::LineageMatchesSingleOwner(lineage))"),
+                        body.index("GetF14VerifiedRandomBotLoginEpoch(owner)"))
+
+    def test_pure_lineage_rule_checks_every_guid(self):
+        reg = strip_comments(read(REGISTRY))
+        rule = reg.split("inline bool LineageMatchesSingleOwner(MinionLineage const& l)", 1)[1].split("\n    }\n", 1)[0]
+        for token in ("!l.minionType", "l.vehicleOrPossessed", "!l.ownerIsPlayer", "l.owner == 0",
+                      "l.charmer != 0 && l.charmer != l.owner", "l.creator != 0 && l.creator != l.owner",
+                      "!l.summonDataAvailable", "l.summoner != 0 && l.summoner != l.owner"):
+            self.assertIn(token, rule)
+        lineage = reg.split("struct MinionLineage", 1)[1].split("};", 1)[0]
+        self.assertIn("bool vehicleOrPossessed = true;", lineage)   # defaults fail
+        self.assertIn("bool minionType = false;", lineage)
+
+    def test_visit_order_bot_then_minion_then_unknown(self):
+        body = self.fn("bool VisitUnit(Registry::SnapshotCollector& collector, Unit const* unit, bool attacking)")
+        a = body.index("ActorTokenOf(unit)")
+        m = body.index("MinionOwnerEpochOf(unit)")
+        u = body.index("return collector.AddParticipant(0);")
+        self.assertLess(a, m)
+        self.assertLess(m, u)
+        self.assertIn("return collector.AddMinion(owner);", body)
+        # A minion is never added as a participant or attacker token.
+        self.assertNotIn("AddAttacker(owner)", body)
+        self.assertNotIn("AddParticipant(owner)", body)
+
+    def test_minions_never_reduce_uncertainty_or_reach_proof(self):
+        reg = strip_comments(read(REGISTRY))
+        apply_ = reg.split("void ApplyParticipantSnapshot(", 1)[1].split("bool GetConservativeEvidence(", 1)[0]
+        self.assertIn("bool const onlyVerified = noUnknown && snap.participantCount > 0 && !anyMinion;", apply_)
+        self.assertIn("if (!onlyVerified || !snap.alive)\n                Apply(*entry, Policy::Event::UnverifiedOrHumanParticipant, 0);", apply_)
+        for forbidden in ("ReplaceWithFullyVerifiedRoster", "ReverifyCompleteParticipantFacts", "VerifiedAttackBegin"):
+            self.assertNotIn(forbidden, apply_)
+        expire = reg.split("std::size_t ExpireActor(std::uint64_t actorToken)", 1)[1].split("\n        }\n", 1)[0]
+        self.assertIn("f.minionOwners[i] == actorToken", expire)
+        self.assertIn("Policy::Event::ThreatRightsOrIdentityChanged", expire)
+        minion = reg.split("bool AddMinion(std::uint64_t ownerEpoch)", 1)[1].split("\n        }\n", 1)[0]
+        self.assertLess(minion.index("++_visits > MaxSnapshotVisits"), minion.index("minionOwners[i] == ownerEpoch"))
+        self.assertIn("if (ownerEpoch == 0)", minion)
 
 
 if __name__ == "__main__":
