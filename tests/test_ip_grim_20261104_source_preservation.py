@@ -181,6 +181,28 @@ class PolicyPreservation(unittest.TestCase):
             current("conf/individualProgression.conf.dist"),
         )
 
+    def test_four_new_grim_feature_toggles_are_explicitly_off(self):
+        # Preserve all four upstream features but never activate them
+        # silently on an existing Cosmic live config or missing config key.
+        conf = options(current("conf/individualProgression.conf.dist"))
+        source = current("src/IndividualProgression.cpp")
+        for suffix in ("AutoAttune", "ProfessionTierCap",
+                       "LockLaterExpansionGear", "AllowVanillaRaidAccess"):
+            with self.subTest(setting=suffix):
+                self.assertEqual(conf.get("IndividualProgression." + suffix), "0")
+                self.assertIn(
+                    'GetOption<bool>("IndividualProgression.' + suffix + '", false)',
+                    source,
+                )
+        self.assertIn("bool AutoAttune = false;",
+                      current("src/IndividualProgression.h"))
+        self.assertIn("bool ProfessionTierCap = false;",
+                      current("src/IndividualProgression.h"))
+        self.assertIn("!LockLaterExpansionGear", source)
+        self.assertIn("!AutoAttune", source)
+        self.assertIn("!ProfessionTierCap",
+                      current("src/IndividualProgressionSpells.cpp"))
+
     def test_custom_gm_command_bodies_exactly_preserved(self):
         # The correct merge resolution is the complete custom source blob,
         # including group raid-difficulty and GM/console protections.
