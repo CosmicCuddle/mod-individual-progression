@@ -136,35 +136,23 @@ jobs:
           grep -Fq 'player->IsBeingTeleportedFar()' "$ip/src/IndividualProgressionExpansion.cpp"
           echo 'PASS: exact Core two-file raw-row guard applied only in disposable runner'
 
-      - name: Assert latest-Core Playerbots DB API; only locale compatibility edit on disposable runner
+      - name: Assert newest Core matches UNMODIFIED pinned Playerbots API
         shell: bash
         run: |
           set -euo pipefail
           core=acore/src/server/database/Database/ModuleDatabasePool.h
+          common=acore/src/common/Common.h
           pb=acore/modules/mod-playerbots
-          # Older Grim Core 8daffd had a two-argument CreateConnection API;
-          # newest Grim Core 0d754 changed that hook to CreateAsyncConnection.
-          # The pinned Playerbots file ALREADY implements the newest name,
-          # so the historic CI rename would break compilation here.
+          # Historical Core 8daffd needs two narrow compatibility patches,
+          # but Grim Core 0d754 already exposes BOTH native Playerbots APIs.
+          # Preserve the exact pinned Playerbots source without ANY edits.
           grep -Fq 'virtual MySQLConnection* CreateAsyncConnection(ProducerConsumerQueue<SQLOperation*>* queue,' "$core"
           grep -Fq 'MySQLConnection* CreateAsyncConnection(ProducerConsumerQueue<SQLOperation*>* queue,' "$pb/src/Db/PlayerbotsDatabase.h"
           ! grep -Fq 'virtual MySQLConnection* CreateConnection(ProducerConsumerQueue<SQLOperation*>* queue,' "$core"
-          # Keep only the independently required pinned locale adaptation.
-          python3 - <<'PY'
-          from pathlib import Path
-          root=Path('acore/modules/mod-playerbots')
-          f=root/'src/Util/LocaleColumns.h'
-          source=f.read_text()
-          old='if (!IsLocaleRegistered(locale))'
-          new='if (!localeNames[locale])'
-          assert source.count(old)==1 and new not in source
-          f.write_text(source.replace(old,new))
-          PY
-          git -C "$pb" diff --check
-          git -C "$pb" diff --name-only | sort > /tmp/actual.txt
-          printf '%s\n' 'src/Util/LocaleColumns.h' | sort > /tmp/allowed.txt
-          diff -u /tmp/allowed.txt /tmp/actual.txt
-          echo 'PASS: newest Core and Playerbots match CreateAsyncConnection; historic rename not applied'
+          grep -Fq 'inline bool IsLocaleRegistered(LocaleConstant locale)' "$common"
+          grep -Fq 'if (!IsLocaleRegistered(locale))' "$pb/src/Util/LocaleColumns.h"
+          test -z "$(git -C "$pb" status --porcelain)"
+          echo 'PASS: latest Grim Core and exact clean Playerbots checkout have compatible database and locale APIs'
       - name: Install compile dependencies on disposable runner only
         run: |
           sudo apt-get update
