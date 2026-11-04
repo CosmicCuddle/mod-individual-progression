@@ -1321,6 +1321,8 @@ private:
         sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = sConfigMgr->GetOption<bool>("IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin", false);
         sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = sConfigMgr->GetOption<bool>(
             "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor", false);
+        sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin", false);
 #if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
         if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin)
         {
@@ -1331,6 +1333,20 @@ private:
         {
             LOG_ERROR("module", "IndividualProgression F14 verified RandomBot group floor requires Playerbots API header; forcing OFF");
             sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = false;
+        }
+        if (sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 verified racial RandomBot TBC stage floor requires Playerbots API header; forcing OFF");
+            sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
+        }
+#endif
+#if !defined(COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION) || COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION < 1
+        // The source-only F14 models are NOT sufficient. Never move racial
+        // RandomBots to TBC until the Core refresh bridge is compiled in.
+        if (sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 racial RandomBot TBC stage floor requires Core visibility refresh integration; forcing OFF");
+            sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
         }
 #endif
         sIndividualProgression->fishingFix = sConfigMgr->GetOption<bool>("IndividualProgression.FishingFix", true);

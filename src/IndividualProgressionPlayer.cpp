@@ -84,6 +84,34 @@ public:
                 }
             }
 
+            // F14: independently default-OFF TBC floor for positively selected
+            // headless BE/Draenei RandomBots. This is NOT a visibility fix.
+            // The Core bridge version must exist at compile time, or the
+            // option is forced OFF during config load. Without a full map/WHO/
+            // combat observer refresh, showing these bots to Vanilla humans
+            // would be wrong; owner must approve actual feature activation.
+            bool appliedVerifiedRandomBotTbcFloor = false;
+#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE && defined(COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION) && COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION >= 1
+            if (sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin &&
+                sIndividualProgression->isBotAccount(player) &&
+                (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
+                player->GetSession() && player->GetSession()->IsHeadless() &&
+                sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()))
+            {
+                uint8 const savedStage = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+                if (IndividualProgressionF14LoginPolicy::CanSetVerifiedTbcRaceStage(
+                        savedStage, player->GetLevel(), sIndividualProgression->progressionLimit))
+                {
+                    uint8 const newStage = IndividualProgressionF14LoginPolicy::DesiredVerifiedTbcRaceStage(
+                        savedStage, player->GetLevel());
+                    if (savedStage < newStage)
+                        sIndividualProgression->ForceUpdateProgressionState(
+                            player, static_cast<ProgressionState>(newStage));
+                    appliedVerifiedRandomBotTbcFloor = true;
+                }
+            }
+#endif
+
             // F14 partial safeguard, OFF by default. Only preserve an already
             // recorded TBC/WotLK stage for a positively selected headless RNDbot.
             // This does not initialize stage 8, grant TBC, alter normal players,
@@ -113,7 +141,7 @@ public:
             }
 
 #endif
-            if (!preserveVerifiedRandomBotStage)
+            if (!preserveVerifiedRandomBotStage && !appliedVerifiedRandomBotTbcFloor)
             {
                 if (player->GetLevel() <= 60)
                     sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(0));
