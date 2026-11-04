@@ -28,8 +28,7 @@ diff --git a/src/server/game/Scripting/ScriptDefines/UnitScript.cpp b/src/server
 +    CALL_ENABLED_BOOLEAN_HOOKS_WITH_DEFAULT_FALSE(UnitScript, UNITHOOK_ON_F14_CREATURE_VISIBILITY_REFRESH_REQUEST,
 +        script->OnF14ShouldRefreshCreatureVisibility(creature));
 +}
--
-+
+@F14_BLANK_CONTEXT@
 diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
 --- a/src/server/game/Scripting/ScriptMgr.h
 +++ b/src/server/game/Scripting/ScriptMgr.h
@@ -62,8 +61,7 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 +        return;
 +    target->UpdateObjectVisibility(true);
 +}
--
-+
+@F14_BLANK_CONTEXT@
 @@ -7163,1 +7184,4 @@
      Unit* const f14PreviousVictim = m_attacking;
 +    // Capture GUIDs BEFORE script calls may retire or remove their targets.
@@ -76,8 +74,7 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 +    F14MaybeRefreshCreatureVisibility(this, f14PreviousGuid);
 +    if (f14PreviousGuid != f14CurrentGuid)
 +        F14MaybeRefreshCreatureVisibility(this, f14CurrentGuid);
--
-+
+@F14_BLANK_CONTEXT@
 @@ -7243,1 +7275,3 @@
      Unit* victim = m_attacking;
 +    // The F14 callback may invalidate target lifetime: keep GUID only.
@@ -86,8 +83,7 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
      sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);
 +    // Request visibility only AFTER the registry's attack-stop callback.
 +    F14MaybeRefreshCreatureVisibility(this, f14VictimGuid);
--
-+
+@F14_BLANK_CONTEXT@
 diff --git a/src/server/game/Entities/Creature/Creature.cpp b/src/server/game/Entities/Creature/Creature.cpp
 --- a/src/server/game/Entities/Creature/Creature.cpp
 +++ b/src/server/game/Entities/Creature/Creature.cpp
