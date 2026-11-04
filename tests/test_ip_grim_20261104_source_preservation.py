@@ -191,13 +191,13 @@ class PolicyPreservation(unittest.TestCase):
         new_tele = command_source(after, "HandleTeleIndividualProgressionCommand", "HandleAttuneIndividualProgressionCommand")
         old_set = command_source(before, "HandleSetIndividualProgressionCommand", "HandleSetBotIndividualProgressionCommand")
         new_set = command_source(after, "HandleSetIndividualProgressionCommand", "HandleSetBotIndividualProgressionCommand")
-        guard = ("        // Match Grim upstream: reject lower-security GM actions on protected targets.\\n"
-                 "        // Enforce before any stage reads, achievement resets or paid-mode auditing.\\n"
-                 "        if (handler->HasLowerSecurity(target))\\n"
-                 "            return false;\\n\\n")
+        guard = ("        // Match Grim upstream: reject lower-security GM actions on protected targets.\n"
+                 "        // Enforce before any stage reads, achievement resets or paid-mode auditing.\n"
+                 "        if (handler->HasLowerSecurity(target))\n"
+                 "            return false;\n\n")
         self.assertEqual(new_set, old_set.replace(
-            "        std::string playername = target->GetName();\\n",
-            guard + "        std::string playername = target->GetName();\\n"))
+            "        std::string playername = target->GetName();\n",
+            guard + "        std::string playername = target->GetName();\n"))
         self.assertLess(new_set.index("if (handler->HasLowerSecurity(target))"),
                         new_set.index("CheckProgressionAchievements(target"))
         self.assertLess(new_set.index("if (handler->HasLowerSecurity(target))"),
