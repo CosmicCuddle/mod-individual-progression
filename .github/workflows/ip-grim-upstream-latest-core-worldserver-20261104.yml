@@ -136,30 +136,35 @@ jobs:
           grep -Fq 'player->IsBeingTeleportedFar()' "$ip/src/IndividualProgressionExpansion.cpp"
           echo 'PASS: exact Core two-file raw-row guard applied only in disposable runner'
 
-      - name: Apply exactly two pinned Playerbots compatibility edits ON CI RUNNER ONLY
+      - name: Assert latest-Core Playerbots DB API; only locale compatibility edit on disposable runner
         shell: bash
         run: |
           set -euo pipefail
+          core=acore/src/server/database/Database/ModuleDatabasePool.h
+          pb=acore/modules/mod-playerbots
+          # Older Grim Core 8daffd had a two-argument CreateConnection API;
+          # newest Grim Core 0d754 changed that hook to CreateAsyncConnection.
+          # The pinned Playerbots file ALREADY implements the newest name,
+          # so the historic CI rename would break compilation here.
+          grep -Fq 'virtual MySQLConnection* CreateAsyncConnection(ProducerConsumerQueue<SQLOperation*>* queue,' "$core"
+          grep -Fq 'MySQLConnection* CreateAsyncConnection(ProducerConsumerQueue<SQLOperation*>* queue,' "$pb/src/Db/PlayerbotsDatabase.h"
+          ! grep -Fq 'virtual MySQLConnection* CreateConnection(ProducerConsumerQueue<SQLOperation*>* queue,' "$core"
+          # Keep only the independently required pinned locale adaptation.
           python3 - <<'PY'
           from pathlib import Path
           root=Path('acore/modules/mod-playerbots')
-          edits={
-            'src/Db/PlayerbotsDatabase.h': (
-              'MySQLConnection* CreateAsyncConnection(ProducerConsumerQueue<SQLOperation*>* queue,',
-              'MySQLConnection* CreateConnection(ProducerConsumerQueue<SQLOperation*>* queue,'),
-            'src/Util/LocaleColumns.h':(
-              'if (!IsLocaleRegistered(locale))','if (!localeNames[locale])')
-          }
-          for name,(old,new) in edits.items():
-            f=root/name
-            s=f.read_text()
-            assert s.count(old)==1 and new not in s,name
-            f.write_text(s.replace(old,new))
+          f=root/'src/Util/LocaleColumns.h'
+          source=f.read_text()
+          old='if (!IsLocaleRegistered(locale))'
+          new='if (!localeNames[locale])'
+          assert source.count(old)==1 and new not in source
+          f.write_text(source.replace(old,new))
           PY
-          git -C acore/modules/mod-playerbots diff --check
-          git -C acore/modules/mod-playerbots diff --name-only | sort > /tmp/actual.txt
-          printf '%s\n' 'src/Db/PlayerbotsDatabase.h' 'src/Util/LocaleColumns.h' | sort > /tmp/allowed.txt
+          git -C "$pb" diff --check
+          git -C "$pb" diff --name-only | sort > /tmp/actual.txt
+          printf '%s\\n' 'src/Util/LocaleColumns.h' | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/actual.txt
+          echo 'PASS: newest Core and Playerbots match CreateAsyncConnection; historic rename not applied'
       - name: Install compile dependencies on disposable runner only
         run: |
           sudo apt-get update
