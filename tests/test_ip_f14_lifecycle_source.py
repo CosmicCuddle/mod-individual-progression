@@ -91,7 +91,7 @@ class ConsumerIsBookkeepingOnly(unittest.TestCase):
                 # independently verifies this exclusive opt-in scope.
                 script = strip_comments(read(SCRIPT))
                 self.assertEqual(script.count("creature->UpdateObjectVisibility(true);"), 1)
-                update = script.split("void OnUnitUpdate(Unit* unit, uint32 /*diff*/) override", 1)[1]
+                update = script.split("void OnUnitUpdate(", 1)[1]  # strip_comments removes /*diff*/
                 update = update.split("\n    }", 1)[0]
                 self.assertIn("creature->UpdateObjectVisibility(true);", update)
                 self.assertLess(update.index("\n        }"), update.index("creature->UpdateObjectVisibility(true);"))
