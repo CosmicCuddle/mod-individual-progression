@@ -162,7 +162,7 @@ jobs:
           PY
           git -C "$pb" diff --check
           git -C "$pb" diff --name-only | sort > /tmp/actual.txt
-          printf '%s\\n' 'src/Util/LocaleColumns.h' | sort > /tmp/allowed.txt
+          printf '%s\n' 'src/Util/LocaleColumns.h' | sort > /tmp/allowed.txt
           diff -u /tmp/allowed.txt /tmp/actual.txt
           echo 'PASS: newest Core and Playerbots match CreateAsyncConnection; historic rename not applied'
       - name: Install compile dependencies on disposable runner only
