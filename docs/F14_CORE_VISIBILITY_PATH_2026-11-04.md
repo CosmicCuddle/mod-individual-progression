@@ -1,10 +1,10 @@
 # F14 — pinned Core viewer refresh and creature removal routing
 
-**Owner:** CosmicCuddle. **Maintainer:** Server-Side-Maintenance / CS01-IP.  
-**Scope:** SOURCE CONTRACTS ONLY; no new executable feature, no Core fork writes, no production installation.  
-**Pinned reference:** `Grimfeather/azerothcore-wotlk@0d754d1921261dfd939f91060ebc022eae280f71`.  
-**Parent draft:** [F14 Core after-pass observer #67](https://github.com/CosmicCuddle/mod-individual-progression/pull/67).  
-**Test:** `tests/test_ip_f14_core_refresh_delivery_path.py` in a read-only pinned checkout.
+- **Owner:** CosmicCuddle. **Maintainer:** Server-Side-Maintenance / CS01-IP.
+- **Scope:** SOURCE CONTRACTS ONLY; no new executable feature, no Core fork writes, no production installation.
+- **Pinned reference:** `Grimfeather/azerothcore-wotlk@0d754d1921261dfd939f91060ebc022eae280f71`.
+- **Parent draft:** [F14 Core after-pass observer #67](https://github.com/CosmicCuddle/mod-individual-progression/pull/67).
+- **Test:** `tests/test_ip_f14_core_refresh_delivery_path.py` in a read-only pinned checkout.
 
 ## Engine behaviour verified by source
 
