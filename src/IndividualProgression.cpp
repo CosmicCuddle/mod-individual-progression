@@ -4,6 +4,7 @@
 
 #include "IndividualProgression.h"
 #include "naxxramas_40.h"
+#include "Mail.h"
 #include "ReputationMgr.h"
 #include "PetDefines.h"
 
@@ -101,6 +102,8 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
         player->CompleteQuest(PROGRESSION_QUEST);
         player->RewardQuest(quest, 0, player, false, false);
     }
+
+    sIndividualProgression->GrantAttunements(player, newState);
 }
 
 void IndividualProgression::CheckAdjustments(Player* player) const
@@ -289,6 +292,93 @@ void IndividualProgression::UpdateGroupAttunement(Player* player, std::string lo
     }
 }
 
+// Grants the attunements of the raids that state has reached, for a bump only. Nothing is taken back when progression goes down.
+void IndividualProgression::GrantAttunements(Player* player, ProgressionState state)
+{
+    if (!enabled || !AutoAttune || !player || !player->IsInWorld() || isBotAccount(player))
+        return;
+
+    uint8 stage = state;
+    if (progressionLimit && stage > progressionLimit)
+        stage = progressionLimit;
+
+    auto giveItem = [player](uint32 itemId, uint32 otherItemId = 0)
+    {
+        if (player->HasItemCount(itemId, 1, true) || (otherItemId && player->HasItemCount(otherItemId, 1, true)))
+            return;
+
+        // An earlier grant may still be waiting in the mailbox
+        for (Mail const* mail : player->GetMails())
+            for (MailItemInfo const& info : mail->items)
+                if (info.item_template == itemId)
+                    return;
+
+        ItemPosCountVec dest;
+        InventoryResult const result = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, 1);
+        if (result == EQUIP_ERR_OK)
+        {
+            player->AddItem(itemId, 1);
+            return;
+        }
+
+        // Only a full bag is mailed: any other refusal, such as the unique check on an item in a trade window, would make a second copy
+        if (result != EQUIP_ERR_INVENTORY_FULL)
+            return;
+
+        constexpr uint32 NPC_SORIDORMI = 19935;
+        Item* item = Item::CreateItem(itemId, 1, player);
+        if (!item)
+            return;
+
+        CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+        MailDraft draft("Raid attunement", "Your bags were full when your progression granted you this attunement. Mail that is not collected is deleted when it expires, 30 days after it was sent.");
+        item->SaveToDB(transaction);
+        draft.AddItem(item);
+        draft.SendMailTo(transaction, MailReceiver(player, player->GetGUID().GetCounter()), MailSender(MAIL_CREATURE, NPC_SORIDORMI));
+        CharacterDatabase.CommitTransaction(transaction);
+    };
+
+    // Marked as rewarded without the quest's own rewards. A quest in the log leaves it the way an abandon does, slot included, or the next slot walk brings its status back.
+    auto giveQuest = [player](uint32 questId)
+    {
+        QuestStatus const status = player->GetQuestStatus(questId);
+        if (status == QUEST_STATUS_REWARDED)
+            return;
+
+        if (status != QUEST_STATUS_NONE)
+        {
+            uint16 const slot = player->FindQuestSlot(questId);
+            if (slot < MAX_QUEST_LOG_SIZE)
+                player->SetQuestSlot(slot, 0);
+
+            player->TakeQuestSourceItem(questId, false);
+            player->AbandonQuest(questId);
+            player->RemoveActiveQuest(questId);
+        }
+
+        player->SetRewardedQuest(questId);
+    };
+
+    if (stage >= PROGRESSION_MOLTEN_CORE)
+        giveItem(ITEM_DRAKEFIRE_AMULET);
+
+    if (stage >= PROGRESSION_AQ && !isAttuned(player))
+        giveQuest(NAXX40_ATTUNEMENT_1);
+
+    if (stage >= PROGRESSION_TBC_TIER_1)
+    {
+        giveItem(ITEM_TEMPEST_KEY);
+        giveQuest(TRIAL_MAGTHERIDON);
+        giveQuest(CUDGEL_OF_KARDESH);
+    }
+
+    if (stage >= PROGRESSION_TBC_TIER_2)
+    {
+        giveQuest(VIALS_OF_ETERNITY);
+        giveItem(ITEM_MEDALLION_OF_KARABOR, ITEM_BLESSED_MEDALLION_OF_KARABOR);
+    }
+}
+
 void IndividualProgression::RemovePlayerAchievement(ObjectGuid::LowType playerGUID, uint32 achievementId)
 {
 	if (!playerGUID || !achievementId)
@@ -369,15 +459,18 @@ IndividualProgression::AccountMatch IndividualProgression::GetAccountMatch(uint3
             return itr->second;
     }
 
-    // AccountMgr::GetName is a blocking login database query, so it runs without the lock held
+    // AccountMgr::GetName and GetSecurity are blocking login database queries, so they run without the lock held
     std::string accountName;
     if (!AccountMgr::GetName(accountId, accountName))
         return {};
+
+    uint32 const security = AccountMgr::GetSecurity(accountId);
 
     std::unique_lock<std::shared_mutex> lock(_accountMatchLock);
     AccountMatch match;
     match.excluded = std::regex_match(accountName, _excludedAccountsRegex);
     match.bot = std::regex_match(accountName, _botAccountsRegex);
+    match.gm = security >= SEC_GAMEMASTER;
     _accountMatchCache[accountId] = match;
     return match;
 }
@@ -393,6 +486,12 @@ bool IndividualProgression::isExcludedAccount(Player* player)
 bool IndividualProgression::isExcludedAccount(uint32 accountId)
 {
     return GetAccountMatch(accountId).excluded;
+}
+
+// By the account and not the session: a bot's session has player security, also on a GM's account.
+bool IndividualProgression::isGMAccount(Player* player)
+{
+    return player && GetAccountMatch(player->GetSession()->GetAccountId()).gm;
 }
 
 bool IndividualProgression::isBotAccount(const Player* player)
@@ -417,6 +516,65 @@ bool IndividualProgression::isNormalAccount(Player* player)
         return false;
 
     return true;
+}
+
+// True for gear from an expansion the character has not reached. The id alone would also lock the
+// Death Knight starting gear and heirlooms, which have high ids but a low or no level requirement.
+// A character above its cap, such as a GM's, is not locked: it was never held back by progression.
+bool IndividualProgression::isLockedExpansionGear(Player* player, ItemTemplate const* proto)
+{
+    if (!enabled || !LockLaterExpansionGear || !player || !proto || isExcludedAccount(player))
+        return false;
+
+    if (proto->Class != ITEM_CLASS_WEAPON && proto->Class != ITEM_CLASS_ARMOR)
+        return false;
+
+    uint8 cap;
+    if (isBotAccount(player))
+        cap = BotAccountsMaxLevel;
+    else if (!hasPassedProgression(player, PROGRESSION_PRE_TBC))
+        cap = 60;
+    else if (!hasPassedProgression(player, PROGRESSION_TBC_TIER_5))
+        cap = 70;
+    else
+        return false;
+
+    if (player->GetLevel() > cap)
+        return false;
+
+    if (cap <= 60)
+    {
+        // The Blood Elf and Draenei versions of the vanilla rank gear, sold by the vanilla vendors.
+        if (proto->ItemId >= 29594 && proto->ItemId <= 29617)
+            return false;
+
+        return proto->ItemId >= 23728 && (proto->RequiredLevel >= 57 || proto->ItemLevel > 92);
+    }
+
+    if (cap <= 70)
+    {
+        // TBC gear with WotLK ids: Sunwell jewelcrafting, a Sunwell drop and the last arena and honor rewards.
+        switch (proto->ItemId)
+        {
+            case 35693:
+            case 35694:
+            case 35700:
+            case 35702:
+            case 35703:
+            case 35733:
+            case 36737:
+            case 37739:
+            case 37740:
+            case 37927:
+            case 37928:
+            case 37929:
+                return false;
+        }
+
+        return proto->ItemId >= 35570 && (proto->RequiredLevel >= 67 || proto->ItemLevel > 164);
+    }
+
+    return false;
 }
 
 bool IndividualProgression::isPlayerInDungeonOrRaid(Player* player)
@@ -1122,6 +1280,10 @@ private:
         sIndividualProgression->LimitedSetRepCommand = sConfigMgr->GetOption<bool>("IndividualProgression.LimitedSetRepCommand", true);
         sIndividualProgression->sharedFactionIdsRegex = sConfigMgr->GetOption<std::string>("IndividualProgression.sharedFactionIdsRegex", "59|270|349|509|510|529|576|589|609|729|730|749|889|890|909");
         sIndividualProgression->BotAccountsMaxLevel = sConfigMgr->GetOption<uint8>("IndividualProgression.BotAccountsMaxLevel", 80);
+        sIndividualProgression->LockLaterExpansionGear = sConfigMgr->GetOption<bool>("IndividualProgression.LockLaterExpansionGear", false);
+        sIndividualProgression->ProfessionTierCap = sConfigMgr->GetOption<bool>("IndividualProgression.ProfessionTierCap", true);
+        sIndividualProgression->AllowVanillaRaidAccess = sConfigMgr->GetOption<bool>("IndividualProgression.AllowVanillaRaidAccess", false);
+        sIndividualProgression->AutoAttune = sConfigMgr->GetOption<bool>("IndividualProgression.AutoAttune", false);
     }
 
     static void LoadXpValues()

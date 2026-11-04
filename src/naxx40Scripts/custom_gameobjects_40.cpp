@@ -35,7 +35,9 @@ public:
         {
             bool allowed = true;
 
-            if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5)) // death knights
+            if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_WOTLK_TIER_5)) // progression 18
+                allowed = true;
+            else if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5)) // death knights
             {
                 handler.PSendSysMessage("Your progression level is too high.");
                 allowed = false;
@@ -52,6 +54,9 @@ public:
                 handler.PSendSysMessage("You are not attuned to Naxxramas.");
                 allowed = false;
             }
+
+            if (player->IsGameMaster())
+                allowed = true;
 
             if (!allowed)
                 return false;
@@ -78,15 +83,17 @@ public:
 
                     bool allowed = true;
 
-                    if (sIndividualProgression->requireNaxxStrath && member->GetQuestStatus(NAXX40_ENTRANCE_FLAG) != QUEST_STATUS_REWARDED)
+                    if (sIndividualProgression->hasPassedProgression(member, PROGRESSION_WOTLK_TIER_5)) // progression 18
+                        allowed = true;
+                    else if (sIndividualProgression->hasPassedProgression(member, PROGRESSION_TBC_TIER_5)) // death knights
                     {
-                        handler.PSendSysMessage("|cff00ffff{}|r needs to enter Naxxramas through Stratholme first.", member->GetName());
+                        handler.PSendSysMessage("|cff00ffff{}|r progression level is too high.", member->GetName());
                         allowed = false;
                     }
 
-                    if (sIndividualProgression->hasPassedProgression(member, PROGRESSION_TBC_TIER_5)) // death knights
+                    if (sIndividualProgression->requireNaxxStrath && member->GetQuestStatus(NAXX40_ENTRANCE_FLAG) != QUEST_STATUS_REWARDED)
                     {
-                        handler.PSendSysMessage("|cff00ffff{}|r progression level is too high.", member->GetName());
+                        handler.PSendSysMessage("|cff00ffff{}|r needs to enter Naxxramas through Stratholme first.", member->GetName());
                         allowed = false;
                     }
 
@@ -117,9 +124,41 @@ public:
             player->TeleportTo(533, 3005.51f, -3434.64f, 304.195f, 6.2831f);
             return true;
         }
-        else
+        else // level 71+
         {
-            handler.PSendSysMessage("You need to be level 70 or below to enter this version of Naxxramas.");
+            if (player->GetLevel() == 80)
+            {
+                bool allowed = false;
+
+                if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_WOTLK_TIER_5)) // progression 18
+                {
+                    allowed = true;
+                }
+                else // progression 0-17
+                {
+                    if (sIndividualProgression->AllowVanillaRaidAccess)
+                        allowed = true;
+                }
+
+                if (allowed)
+                {
+                    player->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC);
+
+                    if (group)
+                        group->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC);
+
+                    player->TeleportTo(533, 3005.51f, -3434.64f, 304.195f, 6.2831f);
+                    return true;
+                }
+                else
+                {
+                    handler.PSendSysMessage("You need progression 18 to enter the vanilla version of Naxxramas.");
+                }
+            }
+            else
+            {
+                handler.PSendSysMessage("You need to be level 80 to enter the vanilla version of Naxxramas.");
+            }
         }
 
         return false;
