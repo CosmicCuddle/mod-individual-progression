@@ -17,6 +17,12 @@
 #include "GameObject.h"
 #include "AreaDefines.h"
 #include "IWorld.h"
+#include "IndividualProgressionExpansionPolicy.h"
+#include "IndividualProgressionReceiptPolicy.h"
+
+// Lets dependent modules (e.g. Character Services) detect the paid expansion
+// API at compile time and keep building against an IP without it.
+#define COSMIC_IP_PAID_EXPANSION_API_VERSION 1
 #include <regex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -410,10 +416,22 @@ public:
     std::map<uint32, uint8> customProgressionMap;
     questXpMapType questXpMap;
     float vanillaPowerAdjustment, tbcPowerAdjustment, vanillaHealingAdjustment, tbcHealingAdjustment;
-    bool enabled, questXpFix, enforceGroupRules, EnableSetRepCommand, EnableAllSpellRanks, LimitedSetRepCommand, fishingFix, VanillaHunterPets, WarlockDemonTrainers, simpleConfigOverride, MaxMonsterSight, questMoneyAtLevelCap, repeatableVanillaQuestsXp, disableDefaultProgression, earlyDungeonSet2, earlyScourgeBosses, requireNaxxStrath, doableNaxx40Bosses_4H, doableNaxx40Bosses_Gluth, doableNaxx40Bosses_Patchwerk, doableNaxx40Bosses_Razuvious, DisableQuestMarkers, DisableRDF, VanillaPvpTitlesKeepPostVanilla, VanillaPvpTitlesEarnPostVanilla, VanillaPvpKeepAllEarnedTitles, BotAccountsEarnPvPTitles, BotOnlyAdjustments;
+    bool enabled, questXpFix, enforceGroupRules, f14PreserveVerifiedRandomBotStageOnLogin, EnableSetRepCommand, EnableAllSpellRanks, LimitedSetRepCommand, fishingFix, VanillaHunterPets, WarlockDemonTrainers, simpleConfigOverride, MaxMonsterSight, questMoneyAtLevelCap, repeatableVanillaQuestsXp, disableDefaultProgression, earlyDungeonSet2, earlyScourgeBosses, requireNaxxStrath, doableNaxx40Bosses_4H, doableNaxx40Bosses_Gluth, doableNaxx40Bosses_Patchwerk, doableNaxx40Bosses_Razuvious, DisableQuestMarkers, DisableRDF, VanillaPvpTitlesKeepPostVanilla, VanillaPvpTitlesEarnPostVanilla, VanillaPvpKeepAllEarnedTitles, BotAccountsEarnPvPTitles, BotOnlyAdjustments, LockLaterExpansionGear, AllowVanillaRaidAccess;
+    // Preserve owner characters by default; this upstream opt-in can delete ranks/achievements.
+    bool ProfessionTierCap = false;
     int progressionLimit, startingProgression, tbcRacesProgressionLevel, tbcRacesStartingProgression, deathKnightProgressionLevel, deathKnightStartingProgression, RequiredZulGurubProgression, RequiredZulAmanProgression, tbcArenaSeason, wotlkArenaSeason, BotAccountsMaxLevel;
     uint32 VanillaPvpKillRank1, VanillaPvpKillRank2, VanillaPvpKillRank3, VanillaPvpKillRank4, VanillaPvpKillRank5, VanillaPvpKillRank6, VanillaPvpKillRank7, VanillaPvpKillRank8, VanillaPvpKillRank9, VanillaPvpKillRank10, VanillaPvpKillRank11, VanillaPvpKillRank12, VanillaPvpKillRank13, VanillaPvpKillRank14;
     std::string excludedAccountsRegex, botAccountsRegex, sharedFactionIdsRegex;
+    bool AutoAttune = false;
+
+    // Paid expansion entitlement, default OFF (IndividualProgressionExpansionPolicy.h).
+    // An earned final milestone only makes a character eligible; buying from
+    // the expansion vendor opens the next era.
+    bool paidExpansionEnabled = false;
+    bool paidExpansionGrandfatherStage13 = false;
+    // Independent F14 group-time pilot; leave OFF until owner approval.
+    bool f14ProtectVerifiedRandomBotGroupFloor = false;
+    std::string paidExpansionVendorName;
 
     // progression is derived from rewarded hidden quests (IDs 66000 + progression)
     uint8 GetPlayerProgressionFromQuests(Player* player) const;
@@ -426,12 +444,18 @@ public:
     void CheckAdjustments(Player* player) const;
     bool hasCustomProgressionValue(uint32 creatureEntry);
     bool isExcludedAccount(Player* player);
+    bool isGMAccount(Player* player);
     bool isExcludedAccount(uint32 accountId);
     bool isBotAccount(const Player* player);
     bool isBotAccount(uint32 accountId);
     bool isNormalAccount(Player* player);
+    bool isLockedExpansionGear(Player* player, ItemTemplate const* proto);
     void LoadAccountRegexes();
     void SyncBotsProgressionToLeader(Group* group);
+    // F14: verified GUID is recorded only on the login thread; group workers never call Playerbots.
+    void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
+    void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
+    bool ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage);
     void checkHunterPetSpells(Player* player);
     void checkWarlockPetSpells(Player* player);
     bool isAttuned(Player* player);
@@ -440,8 +464,13 @@ public:
     void checkIPProgression(Player* player);
     void UpdateProgressionAchievements(Player* player, uint16 achievementID);
     void UpdateGroupAttunement(Player* player, std::string location);
+    void GrantAttunements(Player* player, ProgressionState state);
     void UpdateRNDbotSpells(Player* player);
     void TrainerRNDbotSpellsUnlock(Player const* player, uint32 spellId, Trainer::SpellState& state);
+    uint16 GetProfessionSkillCap(Player* player);
+    bool IsProfessionRankAboveCap(Player* player, uint32 spellId);
+    void CapProfessionSkills(Player* player);
+    void CapProfessionAchievements(Player* player);
     void checkKillProgression(Player* player, Creature* killed);
     bool checkCustomKillProgression(Player* killer, Creature* killed);
 	void UpdateAccountReputation(uint32 factionId, uint32 accountId, Player* player);
@@ -455,11 +484,30 @@ public:
     static float ComputeVanillaAdjustment(uint8 playerLevel, float configAdjustmentValue);
     static uint8 GetAccountProgression(uint32 accountId);
 
+    // Paid expansion entitlement API. Character Services (or any vendor) must
+    // call PurchaseExpansion instead of writing stage markers itself.
+    bool IsPaidExpansionActive() const;
+    uint8 GetEffectiveProgression(Player* player);
+    bool IsAutomaticGrantAllowed(Player* player, uint8 targetStage);
+    bool HasExpansionEntitlement(Player* player, IndividualProgressionExpansionPolicy::Era era);
+    // Refuse to consume a previously paid 10259 when DDP prevents stage 8.
+    bool MustHoldPaidTbcQuestReward(Player* player);
+    IndividualProgressionExpansionPolicy::PurchaseResult CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper);
+    IndividualProgressionExpansionPolicy::PurchaseResult PurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper);
+    uint8 GetMaxServiceGrantableStage(Player* player);
+    // Account maximum for unlock checks: identical to GetAccountProgression
+    // when the feature is OFF; an unpaid stage 13 counts as 12 when ON.
+    static uint8 GetAccountEffectiveProgression(uint32 accountId);
+    void LoadPaidExpansionEntitlement(Player* player);
+    void EvaluatePaidExpansionGrandfather(Player* player);
+    void SendPaidExpansionReminder(Player* player);
+
 private:
     struct AccountMatch
     {
         bool excluded = false;
         bool bot = false;
+        bool gm = false;
     };
 
     AccountMatch GetAccountMatch(uint32 accountId);
@@ -469,6 +517,22 @@ private:
     std::regex _excludedAccountsRegex, _botAccountsRegex;
     std::unordered_map<uint32, AccountMatch> _accountMatchCache;
     std::shared_mutex _accountMatchLock;
+
+    // Paid expansion purchase bits per character (low GUID -> PaidExpansionBit*).
+    // Refreshed on the login thread before the character enters a map, so the
+    // frequent access checks never touch the Core settings store.
+    IndividualProgressionExpansionPolicy::CharacterFacts GetExpansionFacts(Player* player);
+    uint8 GetConfiguredStartStage(Player* player) const;
+    void SetPaidExpansionFlag(Player* player, uint32 index, uint32 value);
+    std::unordered_map<uint32, uint8> _paidExpansionFlags;
+    // Missing or invalid RAW settings are unknown, never free purchases.
+    std::unordered_map<uint32, IndividualProgressionReceiptPolicy::Ledger> _paidExpansionLedgers;
+    std::shared_mutex _paidExpansionLock;
+
+    // F14 optional GroupSync containment; only positively verified headless
+    // Blood Elf / Draenei RandomBots are present, refreshed on each login.
+    std::unordered_map<uint32, bool> _f14VerifiedRandomBotGroupCache;
+    std::shared_mutex _f14GroupCacheLock;
 };
 
 #define sIndividualProgression IndividualProgression::instance()

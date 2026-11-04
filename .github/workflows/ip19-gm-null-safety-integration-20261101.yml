@@ -1,0 +1,68 @@
+name: IP combined PR19 + GM safety source integration (review only)
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ip19-gm-null-safety-integration-20261101.yml
+      - src/cs_individualProgression.cpp
+      - tests/test_ip_gm_command_null_safety.py
+      - tests/test_ip_combined_c3_f14_partial_login.py
+      - docs/IP_GM_COMPOSED_REVIEW_2026-11-01.md
+      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  composed-source-gate:
+    name: Only six reviewed paths; exact GM blob; original Hunter, C3 and F14 untouched
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact frozen PR19 parent, six paths, append-only register
+        # Frozen exact-path delta belongs to #20's own head only; the GM tests
+        # below still run on child PRs (same pattern as the #10/#11/#16 steps).
+        if: >-
+          (github.event_name == 'pull_request' && github.head_ref == 'integration/ip19-gm-null-safety-20261101') ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/integration/ip19-gm-null-safety-20261101')
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=d53eb71c39c35f2ed488f2315565f89d8be71aa7
+          git merge-base --is-ancestor "$BASE" HEAD
+          git diff --check "$BASE" HEAD
+          git diff --name-only "$BASE" HEAD | sort > /tmp/actual.txt
+          printf '%s\n' \
+            '.github/workflows/ip19-gm-null-safety-integration-20261101.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/IP_GM_COMPOSED_REVIEW_2026-11-01.md' \
+            'src/cs_individualProgression.cpp' \
+            'tests/test_ip_combined_c3_f14_partial_login.py' \
+            'tests/test_ip_gm_command_null_safety.py' | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/actual.txt
+          test "$(git rev-parse HEAD:src/cs_individualProgression.cpp)" = 654119d29e0519600d50b179ccd5a9c5df8695b0
+          for path in src/IndividualProgression.cpp src/IndividualProgressionPlayer.cpp src/IndividualProgressionSpells.cpp src/IndividualProgressionGroupPolicy.h src/IndividualProgression.h conf/individualProgression.conf.dist; do
+            test "$(git rev-parse "HEAD:$path")" = "$(git rev-parse "$BASE:$path")"
+          done
+          test -z "$(git diff --name-only "$BASE" HEAD -- data optional sql)"
+          git show "$BASE:docs/CUSTOM_MODIFICATIONS_REGISTER.md" > /tmp/register-parent
+          head -c "$(wc -c < /tmp/register-parent)" docs/CUSTOM_MODIFICATIONS_REGISTER.md | cmp - /tmp/register-parent
+          echo 'PASS: six scoped paths, reviewed #14 GM blob; Hunter, group, F14 and config unchanged'
+      - name: Run exact 15 GM command source regression tests
+        shell: bash
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_ip_gm_command_null_safety.py' -v
+      - name: Source-only gate; native link is in inherited PR19 workflow
+        run: |
+          echo 'GM tests do not establish runtime gameplay.'
+          echo 'The inherited ip-combined-c3-f14-partial-login workflow must separately compile/link the complete changed Worldserver.'
+          echo 'No owner host, SQL, character data, config changes, binary upload, deployment, or merge.'

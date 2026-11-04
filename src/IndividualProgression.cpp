@@ -3,8 +3,13 @@
 */
 
 #include "IndividualProgression.h"
+#include "IndividualProgressionGroupPolicy.h"
+#include "IndividualProgressionF14LoginPolicy.h"
 #include "naxxramas_40.h"
+#include "Mail.h"
+#include <mutex>
 #include "ReputationMgr.h"
+#include "WorldSession.h"
 #include "PetDefines.h"
 
 IndividualProgression* IndividualProgression::instance()
@@ -36,7 +41,9 @@ bool IndividualProgression::hasPassedProgression(Player* player, ProgressionStat
     if (progressionLimit && (state > progressionLimit))
         return false;
 
-    return sIndividualProgression->GetPlayerProgressionFromQuests(player) >= state;
+    // Same as the rewarded stage unless the paid expansion feature caps an
+    // unpaid Kil'jaeden (13) character to TBC access (12).
+    return sIndividualProgression->GetEffectiveProgression(player) >= state;
 }
 
 bool IndividualProgression::isBeforeProgression(Player* player, ProgressionState state)
@@ -44,7 +51,7 @@ bool IndividualProgression::isBeforeProgression(Player* player, ProgressionState
     if (!state || !player || !player->IsInWorld())
         return false;
 
-    return sIndividualProgression->GetPlayerProgressionFromQuests(player) < state;
+    return sIndividualProgression->GetEffectiveProgression(player) < state;
 }
 
 void IndividualProgression::UpdateProgressionState(Player* player, ProgressionState newState) const
@@ -53,6 +60,11 @@ void IndividualProgression::UpdateProgressionState(Player* player, ProgressionSt
         return;
 
     if (progressionLimit && newState > progressionLimit)
+        return;
+
+    // Paid expansion (default OFF): automatic progression may not open an era
+    // this character has not bought. The grant is refused, not partially applied.
+    if (!sIndividualProgression->IsAutomaticGrantAllowed(player, newState))
         return;
 
     uint8 currentState = GetPlayerProgressionFromQuests(player);
@@ -101,6 +113,8 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
         player->CompleteQuest(PROGRESSION_QUEST);
         player->RewardQuest(quest, 0, player, false, false);
     }
+
+    sIndividualProgression->GrantAttunements(player, newState);
 }
 
 void IndividualProgression::CheckAdjustments(Player* player) const
@@ -289,6 +303,93 @@ void IndividualProgression::UpdateGroupAttunement(Player* player, std::string lo
     }
 }
 
+// Grants the attunements of the raids that state has reached, for a bump only. Nothing is taken back when progression goes down.
+void IndividualProgression::GrantAttunements(Player* player, ProgressionState state)
+{
+    if (!enabled || !AutoAttune || !player || !player->IsInWorld() || isBotAccount(player))
+        return;
+
+    uint8 stage = state;
+    if (progressionLimit && stage > progressionLimit)
+        stage = progressionLimit;
+
+    auto giveItem = [player](uint32 itemId, uint32 otherItemId = 0)
+    {
+        if (player->HasItemCount(itemId, 1, true) || (otherItemId && player->HasItemCount(otherItemId, 1, true)))
+            return;
+
+        // An earlier grant may still be waiting in the mailbox
+        for (Mail const* mail : player->GetMails())
+            for (MailItemInfo const& info : mail->items)
+                if (info.item_template == itemId)
+                    return;
+
+        ItemPosCountVec dest;
+        InventoryResult const result = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, 1);
+        if (result == EQUIP_ERR_OK)
+        {
+            player->AddItem(itemId, 1);
+            return;
+        }
+
+        // Only a full bag is mailed: any other refusal, such as the unique check on an item in a trade window, would make a second copy
+        if (result != EQUIP_ERR_INVENTORY_FULL)
+            return;
+
+        constexpr uint32 NPC_SORIDORMI = 19935;
+        Item* item = Item::CreateItem(itemId, 1, player);
+        if (!item)
+            return;
+
+        CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+        MailDraft draft("Raid attunement", "Your bags were full when your progression granted you this attunement. Mail that is not collected is deleted when it expires, 30 days after it was sent.");
+        item->SaveToDB(transaction);
+        draft.AddItem(item);
+        draft.SendMailTo(transaction, MailReceiver(player, player->GetGUID().GetCounter()), MailSender(MAIL_CREATURE, NPC_SORIDORMI));
+        CharacterDatabase.CommitTransaction(transaction);
+    };
+
+    // Marked as rewarded without the quest's own rewards. A quest in the log leaves it the way an abandon does, slot included, or the next slot walk brings its status back.
+    auto giveQuest = [player](uint32 questId)
+    {
+        QuestStatus const status = player->GetQuestStatus(questId);
+        if (status == QUEST_STATUS_REWARDED)
+            return;
+
+        if (status != QUEST_STATUS_NONE)
+        {
+            uint16 const slot = player->FindQuestSlot(questId);
+            if (slot < MAX_QUEST_LOG_SIZE)
+                player->SetQuestSlot(slot, 0);
+
+            player->TakeQuestSourceItem(questId, false);
+            player->AbandonQuest(questId);
+            player->RemoveActiveQuest(questId);
+        }
+
+        player->SetRewardedQuest(questId);
+    };
+
+    if (stage >= PROGRESSION_MOLTEN_CORE)
+        giveItem(ITEM_DRAKEFIRE_AMULET);
+
+    if (stage >= PROGRESSION_AQ && !isAttuned(player))
+        giveQuest(NAXX40_ATTUNEMENT_1);
+
+    if (stage >= PROGRESSION_TBC_TIER_1)
+    {
+        giveItem(ITEM_TEMPEST_KEY);
+        giveQuest(TRIAL_MAGTHERIDON);
+        giveQuest(CUDGEL_OF_KARDESH);
+    }
+
+    if (stage >= PROGRESSION_TBC_TIER_2)
+    {
+        giveQuest(VIALS_OF_ETERNITY);
+        giveItem(ITEM_MEDALLION_OF_KARABOR, ITEM_BLESSED_MEDALLION_OF_KARABOR);
+    }
+}
+
 void IndividualProgression::RemovePlayerAchievement(ObjectGuid::LowType playerGUID, uint32 achievementId)
 {
 	if (!playerGUID || !achievementId)
@@ -369,15 +470,18 @@ IndividualProgression::AccountMatch IndividualProgression::GetAccountMatch(uint3
             return itr->second;
     }
 
-    // AccountMgr::GetName is a blocking login database query, so it runs without the lock held
+    // AccountMgr::GetName and GetSecurity are blocking login database queries, so they run without the lock held
     std::string accountName;
     if (!AccountMgr::GetName(accountId, accountName))
         return {};
+
+    uint32 const security = AccountMgr::GetSecurity(accountId);
 
     std::unique_lock<std::shared_mutex> lock(_accountMatchLock);
     AccountMatch match;
     match.excluded = std::regex_match(accountName, _excludedAccountsRegex);
     match.bot = std::regex_match(accountName, _botAccountsRegex);
+    match.gm = security >= SEC_GAMEMASTER;
     _accountMatchCache[accountId] = match;
     return match;
 }
@@ -393,6 +497,15 @@ bool IndividualProgression::isExcludedAccount(Player* player)
 bool IndividualProgression::isExcludedAccount(uint32 accountId)
 {
     return GetAccountMatch(accountId).excluded;
+}
+
+// By the account and not the session: a bot's session has player security, also on a GM's account.
+bool IndividualProgression::isGMAccount(Player* player)
+{
+    // Headless or disconnecting Playerbots may not have a session.
+    // Never dereference a missing session while computing optional tier caps.
+    return player && player->GetSession() &&
+        GetAccountMatch(player->GetSession()->GetAccountId()).gm;
 }
 
 bool IndividualProgression::isBotAccount(const Player* player)
@@ -419,6 +532,65 @@ bool IndividualProgression::isNormalAccount(Player* player)
     return true;
 }
 
+// True for gear from an expansion the character has not reached. The id alone would also lock the
+// Death Knight starting gear and heirlooms, which have high ids but a low or no level requirement.
+// A character above its cap, such as a GM's, is not locked: it was never held back by progression.
+bool IndividualProgression::isLockedExpansionGear(Player* player, ItemTemplate const* proto)
+{
+    if (!enabled || !LockLaterExpansionGear || !player || !proto || isExcludedAccount(player))
+        return false;
+
+    if (proto->Class != ITEM_CLASS_WEAPON && proto->Class != ITEM_CLASS_ARMOR)
+        return false;
+
+    uint8 cap;
+    if (isBotAccount(player))
+        cap = BotAccountsMaxLevel;
+    else if (!hasPassedProgression(player, PROGRESSION_PRE_TBC))
+        cap = 60;
+    else if (!hasPassedProgression(player, PROGRESSION_TBC_TIER_5))
+        cap = 70;
+    else
+        return false;
+
+    if (player->GetLevel() > cap)
+        return false;
+
+    if (cap <= 60)
+    {
+        // The Blood Elf and Draenei versions of the vanilla rank gear, sold by the vanilla vendors.
+        if (proto->ItemId >= 29594 && proto->ItemId <= 29617)
+            return false;
+
+        return proto->ItemId >= 23728 && (proto->RequiredLevel >= 57 || proto->ItemLevel > 92);
+    }
+
+    if (cap <= 70)
+    {
+        // TBC gear with WotLK ids: Sunwell jewelcrafting, a Sunwell drop and the last arena and honor rewards.
+        switch (proto->ItemId)
+        {
+            case 35693:
+            case 35694:
+            case 35700:
+            case 35702:
+            case 35703:
+            case 35733:
+            case 36737:
+            case 37739:
+            case 37740:
+            case 37927:
+            case 37928:
+            case 37929:
+                return false;
+        }
+
+        return proto->ItemId >= 35570 && (proto->RequiredLevel >= 67 || proto->ItemLevel > 164);
+    }
+
+    return false;
+}
+
 bool IndividualProgression::isPlayerInDungeonOrRaid(Player* player)
 {
     if (!player || !player->IsInWorld())
@@ -428,9 +600,48 @@ bool IndividualProgression::isPlayerInDungeonOrRaid(Player* player)
     return (map && (map->IsDungeon() || map->IsRaid()));
 }
 
+void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified)
+{
+    if (!player)
+        return;
+    std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    uint32 const guid = player->GetGUID().GetCounter();
+    // Refresh even when previous login verified and the next one did not.
+    if (verified)
+        _f14VerifiedRandomBotGroupCache[guid] = true;
+    else
+        _f14VerifiedRandomBotGroupCache.erase(guid);
+}
+
+void IndividualProgression::ForgetF14VerifiedRandomBotGroupIdentity(Player* player)
+{
+    RememberF14VerifiedRandomBotGroupIdentity(player, false);
+}
+
+bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage)
+{
+    // Preserve all historical behaviour unless this independent pilot is
+    // deliberately enabled. Group-policy ON already refuses cross-era joins.
+    if (!enabled || !f14ProtectVerifiedRandomBotGroupFloor || enforceGroupRules ||
+        !player || !player->IsInWorld() || !isBotAccount(player) ||
+        !player->GetSession() || !player->GetSession()->IsHeadless() ||
+        !IndividualProgressionGroupPolicy::IsExpansionRace(player->getRace()))
+        return false;
+
+    {
+        std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+        auto const it = _f14VerifiedRandomBotGroupCache.find(player->GetGUID().GetCounter());
+        if (it == _f14VerifiedRandomBotGroupCache.end() || !it->second)
+            return false;
+    }
+    return IndividualProgressionF14LoginPolicy::SkipVerifiedGroupDowngrade(
+        GetPlayerProgressionFromQuests(player), targetStage, player->GetLevel());
+}
+
 void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
 {
-    if (!group)
+    // Disabling Individual Progression must also disable its group-time quest writes.
+    if (!enabled || !group)
         return;
 
     ObjectGuid leaderGuid = group->GetLeaderGUID();
@@ -441,10 +652,23 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
     if (!leader || !isNormalAccount(leader))
         return;
 
-    uint8 refProgress = GetPlayerProgressionFromQuests(leader);
+    // With group enforcement ON the leader's era is the effective (paid) one;
+    // the established OFF sync keeps the raw stage.
+    uint8 refProgress = enforceGroupRules ? GetEffectiveProgression(leader) : GetPlayerProgressionFromQuests(leader);
 
-    if (!refProgress)
+    // Preserve the historical tier-0 skip with the switch OFF. When grouping
+    // enforcement is ON, Vanilla bots must also sync down to a stage-0 leader.
+    if (!refProgress && !enforceGroupRules)
         return;
+
+    int32 const limit = progressionLimit;
+    if (enforceGroupRules && (limit < 0 || limit > IndividualProgressionGroupPolicy::LastSupportedStage ||
+                              refProgress > IndividualProgressionGroupPolicy::LastSupportedStage ||
+                              (limit && refProgress > limit)))
+        return;
+    uint8 const permittedState = enforceGroupRules
+        ? IndividualProgressionGroupPolicy::EffectiveStage(refProgress, limit)
+        : refProgress;
 
     for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
     {
@@ -452,7 +676,29 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
         if (!member || isNormalAccount(member))
             continue;
 
-        ForceUpdateProgressionState(member, static_cast<ProgressionState>(refProgress));
+        // When group enforcement is enabled, never force a bot/excluded account
+        // across expansion boundaries or admit a TBC-race member to Vanilla.
+        // The global positive-RandomBot starting-floor rule is tracked
+        // separately under F14; do not implement it via account-regex guesses.
+        uint8 const memberStage = GetPlayerProgressionFromQuests(member);
+        if (enforceGroupRules)
+        {
+            if (!IndividualProgressionGroupPolicy::MayGroup(
+                    refProgress, leader->getRace(), memberStage, member->getRace(), limit))
+                continue;
+
+            // A no-op sync must not remove and re-add rewarded progression quests.
+            if (memberStage == permittedState)
+                continue;
+        }
+
+        // F14 default-OFF: no Playerbots identity access on group/map thread.
+        // When the login-verified TBC-race bot has earned its minimum stage,
+        // never downgrade it below the earned TBC floor 8 at any level.
+        if (ShouldSkipF14VerifiedRandomBotGroupDowngrade(member, permittedState))
+            continue;
+
+        ForceUpdateProgressionState(member, static_cast<ProgressionState>(permittedState));
     }
 }
 
@@ -1072,6 +1318,21 @@ private:
         sIndividualProgression->doableNaxx40Bosses_Patchwerk = sConfigMgr->GetOption<bool>("IndividualProgression.doableNaxx40Bosses_Patchwerk", false);
         sIndividualProgression->doableNaxx40Bosses_Razuvious = sConfigMgr->GetOption<bool>("IndividualProgression.doableNaxx40Bosses_Razuvious", false);
         sIndividualProgression->enforceGroupRules = sConfigMgr->GetOption<bool>("IndividualProgression.EnforceGroupRules", false);
+        sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = sConfigMgr->GetOption<bool>("IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin", false);
+        sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor", false);
+#if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
+        if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 saved-RandomBot login safeguard requested, but required Playerbots API header is missing: feature is NOT active; forcing OFF");
+            sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = false;
+        }
+        if (sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 verified RandomBot group floor requires Playerbots API header; forcing OFF");
+            sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = false;
+        }
+#endif
         sIndividualProgression->fishingFix = sConfigMgr->GetOption<bool>("IndividualProgression.FishingFix", true);
         sIndividualProgression->VanillaHunterPets = sConfigMgr->GetOption<bool>("IndividualProgression.VanillaHunterPets", true);
         sIndividualProgression->WarlockDemonTrainers = sConfigMgr->GetOption<bool>("IndividualProgression.WarlockDemonTrainers", true);
@@ -1122,6 +1383,13 @@ private:
         sIndividualProgression->LimitedSetRepCommand = sConfigMgr->GetOption<bool>("IndividualProgression.LimitedSetRepCommand", true);
         sIndividualProgression->sharedFactionIdsRegex = sConfigMgr->GetOption<std::string>("IndividualProgression.sharedFactionIdsRegex", "59|270|349|509|510|529|576|589|609|729|730|749|889|890|909");
         sIndividualProgression->BotAccountsMaxLevel = sConfigMgr->GetOption<uint8>("IndividualProgression.BotAccountsMaxLevel", 80);
+        sIndividualProgression->LockLaterExpansionGear = sConfigMgr->GetOption<bool>("IndividualProgression.LockLaterExpansionGear", false);
+        sIndividualProgression->ProfessionTierCap = sConfigMgr->GetOption<bool>("IndividualProgression.ProfessionTierCap", false);
+        sIndividualProgression->AllowVanillaRaidAccess = sConfigMgr->GetOption<bool>("IndividualProgression.AllowVanillaRaidAccess", false);
+        sIndividualProgression->AutoAttune = sConfigMgr->GetOption<bool>("IndividualProgression.AutoAttune", false);
+        sIndividualProgression->paidExpansionEnabled = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.Enable", false);
+        sIndividualProgression->paidExpansionGrandfatherStage13 = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.GrandfatherStage13", false);
+        sIndividualProgression->paidExpansionVendorName = sConfigMgr->GetOption<std::string>("IndividualProgression.PaidExpansion.VendorName", "Chronomancer Vezrath");
     }
 
     static void LoadXpValues()
@@ -1148,14 +1416,77 @@ private:
 public:
     IndividualPlayerProgression_WorldScript() : WorldScript("IndividualProgression_WorldScript") { }
 
-    void OnBeforeConfigLoad(bool /*reload*/) override
+    void OnBeforeConfigLoad(bool reload) override
     {
+        // The paid expansion switch is read at startup only: online characters'
+        // purchase flags are cached at login, so toggling it by .reload could
+        // briefly treat a paid character as unpaid.
+        bool const paidExpansionAtStartup = sIndividualProgression->paidExpansionEnabled;
+        bool const grandfatherAtStartup = sIndividualProgression->paidExpansionGrandfatherStage13;
         LoadConfig();
+        if (reload)
+        {
+            sIndividualProgression->paidExpansionEnabled = paidExpansionAtStartup;
+            sIndividualProgression->paidExpansionGrandfatherStage13 = grandfatherAtStartup;
+        }
         LoadXpValues();
     }
 
-    void OnAfterConfigLoad(bool /*reload*/) override
+    void OnAfterConfigLoad(bool reload) override
     {
+        // Paid expansion flags live in the Core character settings store.
+        // Startup: without it a purchase could not be remembered, so the
+        // feature stays OFF and established progression continues.
+        // Reload: keep the startup value. Turning the gate off here would make
+        // every unpaid stage 13 Wrath-owned; purchases are refused instead.
+        bool const requested = sIndividualProgression->paidExpansionEnabled;
+        bool const storeSaving = sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);
+        sIndividualProgression->paidExpansionEnabled =
+            IndividualProgressionExpansionPolicy::FeatureEnabledAfterConfigLoad(reload, requested, storeSaving);
+        if (requested && !storeSaving)
+        {
+            if (!reload)
+                LOG_ERROR("module", "IndividualProgression.PaidExpansion.Enable requires worldserver EnablePlayerSettings = 1: paid expansion feature is NOT active; forcing OFF");
+            else
+                LOG_ERROR("module", "IndividualProgression: EnablePlayerSettings was turned off by .reload while PaidExpansion is on: the paid gate stays on, purchases are refused, and characters who log in meanwhile read as unpaid (fail closed) until it is restored and the server restarted");
+        }
+
+        // Owner-configured starts and unlocks that hand out an era without a
+        // purchase. Warn only; historical start behaviour is not changed.
+        if (!reload && sIndividualProgression->paidExpansionEnabled)
+        {
+            auto const* ip = sIndividualProgression;
+            // An account gated at stage 13 cannot create a Death Knight while
+            // unpaid (effective stage 12). Warn only if the unlock threshold
+            // is absent or below Wrath access and the DK would start in Wrath.
+            if (ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage &&
+                (ip->deathKnightProgressionLevel == 0 ||
+                 ip->deathKnightProgressionLevel < IndividualProgressionExpansionPolicy::WrathAccessStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: DeathKnightStartingProgression = {} with DeathKnightUnlockProgression = {} may give Wrath without a purchase", ip->deathKnightStartingProgression, ip->deathKnightProgressionLevel);
+            // Check TBC independently: a DK starting at 8..12 can bypass a
+            // lower account creation threshold without owning TBC.
+            if (ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage &&
+                (ip->deathKnightProgressionLevel == 0 ||
+                 ip->deathKnightProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: DeathKnightStartingProgression = {} with DeathKnightUnlockProgression = {} may give TBC without a purchase", ip->deathKnightStartingProgression, ip->deathKnightProgressionLevel);
+            // With an account unlock threshold of stage 8, creation already
+            // requires TBC access. Only a lower/absent threshold bypasses it.
+            if (ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage &&
+                (ip->tbcRacesProgressionLevel == 0 ||
+                 ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: tbcRacesStartingProgression = {} with TbcRacesUnlockProgression = {} may give TBC without a purchase", ip->tbcRacesStartingProgression, ip->tbcRacesProgressionLevel);
+            // A TBC-only account can also create a character starting at 13
+            // unless the race unlock requires Wrath ownership independently.
+            if (ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage &&
+                (ip->tbcRacesProgressionLevel == 0 ||
+                 ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::WrathAccessStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: tbcRacesStartingProgression = {} with TbcRacesUnlockProgression = {} may give Wrath without a purchase", ip->tbcRacesStartingProgression, ip->tbcRacesProgressionLevel);
+            if (ip->startingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: StartingProgression = {} gives every new character an expansion without a purchase", ip->startingProgression);
+            if (ip->tbcRacesProgressionLevel > 0 && ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: TbcRacesUnlockProgression = {} lets an unpaid account unlock Blood Elf/Draenei creation; set it to 8 or higher to require a TBC purchase", ip->tbcRacesProgressionLevel);
+        }
+
         if (sIndividualProgression->simpleConfigOverride)
         {
             sWorld->setIntConfig(CONFIG_WATER_BREATH_TIMER, 60000);
@@ -1177,8 +1508,11 @@ public:
     }
 };
 
+void AddSC_ip_paid_expansion();
+
 // Add all scripts in one
 void AddSC_mod_individual_progression()
 {
     new IndividualPlayerProgression_WorldScript();
+    AddSC_ip_paid_expansion();
 }

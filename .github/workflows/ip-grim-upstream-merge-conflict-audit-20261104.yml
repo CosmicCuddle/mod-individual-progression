@@ -1,0 +1,80 @@
+# CosmicCuddle: audit frozen PRE-merge conflicts separately from integrated source.
+# Development-only GitHub runners. NO CORE/SQL/HOST/PRODUCTION CHANGES.
+name: IP Grim 20261104 historical conflict and postmerge source audit (NO HOST)
+on:
+  push:
+    branches: [integration/cs01-grim-upstream-into-ip46-20261104]
+    paths: [".github/workflows/ip-grim-upstream-merge-conflict-audit-20261104.yml"]
+  pull_request:
+    branches: [integration/cs01-grim-upstream-into-ip46-20261104]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  immutable-historical-conflicts:
+    name: Frozen original Cosmic IP46 vs Grim 42c9 merge-tree (HISTORICAL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/cs01-grim-upstream-into-ip46-20261104
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify original inputs and reproduce known conflicts without branch changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          custom=26d5b7a1de30ad92a595aaf251fc14754cf54f32
+          grim=42c9a32892740af55a40e076e6381cc879181396
+          test "$(git rev-parse "$custom")" = "$custom"
+          test "$(git rev-parse "$grim")" = "$grim"
+          git merge-base --is-ancestor dd96f2b77e3ebfa2a4726bf785525ba133f1ab61 "$custom"
+          git merge-base --is-ancestor dd96f2b77e3ebfa2a4726bf785525ba133f1ab61 "$grim"
+          # The original custom source and Grim upstream MUST remain immutable.
+          if git merge-tree --write-tree --messages "$custom" "$grim" >/tmp/historical-grim-conflicts.txt 2>&1; then
+            echo 'ERROR: immutable historical inputs unexpectedly merged cleanly'
+            exit 1
+          fi
+          if ! grep -Eq '^CONFLICT' /tmp/historical-grim-conflicts.txt; then
+            echo 'ERROR: historical merge-tree failed without recognizable conflict lines'
+            tail -50 /tmp/historical-grim-conflicts.txt
+            exit 1
+          fi
+          grep -E '^CONFLICT|^Auto-merging' /tmp/historical-grim-conflicts.txt | head -60 || true
+          test -z "$(git status --porcelain)"
+          echo 'PASS: old conflicts reproduced without merging or modifying any files.'
+  postmerge-reviewed-runtime:
+    name: Both ancestors + exact reviewed #59 runtime/SQL (NO HOST)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || 'integration/cs01-grim-upstream-into-ip46-20261104' }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert reviewed integration lineage and zero unreviewed runtime drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          custom=26d5b7a1de30ad92a595aaf251fc14754cf54f32
+          grim=42c9a32892740af55a40e076e6381cc879181396
+          reviewed=9b55f9609b82cf20d777f0cbf277f667c1a6092d
+          git merge-base --is-ancestor "$custom" HEAD
+          git merge-base --is-ancestor "$grim" HEAD
+          git merge-base --is-ancestor "$reviewed" HEAD
+          test "$(git rev-parse "$reviewed")" = "$reviewed"
+          # Any future feature source change must explicitly establish a
+          # newly reviewed baseline; never silently bypass this comparison.
+          git diff --name-only "$reviewed" HEAD -- src conf sql data optional >/tmp/runtime-changes.txt
+          if test -s /tmp/runtime-changes.txt; then
+            echo 'BLOCKED: runtime/config/SQL differs from reviewed #59:'
+            cat /tmp/runtime-changes.txt
+            exit 1
+          fi
+          grep -Fqx 'IndividualProgression.AutoAttune = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          test -s docs/CUSTOM_MODIFICATIONS_REGISTER.md
+          test -z "$(git status --porcelain)"
+          echo 'PASS: reviewed Grim+Cosmic history and unmodified integrated gameplay source.'
