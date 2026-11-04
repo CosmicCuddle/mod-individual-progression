@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BASE = "26d5b7a1de30ad92a595aaf251fc14754cf54f32"
 UPSTREAM = "42c9a32892740af55a40e076e6381cc879181396"
+COMMON_ANCESTOR = "dd96f2b77e3ebfa2a4726bf785525ba133f1ab61"
 
 UPSTREAM_ONLY = (
     "data/sql/world/base/av.sql",
@@ -83,6 +84,28 @@ def command_source(text, name, next_name):
 
 
 class ExactProvenance(unittest.TestCase):
+    def test_complete_upstream_27_path_inventory_has_an_explicit_disposition(self):
+        # Immutable upstream compared to the original common ancestor, not
+        # the existing Cosmic master or the custom PR branch. This catches an
+        # upstream path silently omitted from a merge resolution.
+        common = COMMON_ANCESTOR
+        changed = set(subprocess.check_output(
+            ["git", "diff", "--name-only", common, UPSTREAM],
+            cwd=ROOT, text=True,
+        ).splitlines())
+        expected = (set(UPSTREAM_ONLY) | set(SHARED)
+                    | {CUSTOM_UNCHANGED, LOADER_ADDITION}
+                    | set(CHROMAGGUS_PROTECTED))
+        self.assertEqual(len(expected), 27)
+        self.assertEqual(changed, expected)
+        # Shared paths are consciously reconciled rather than copied verbatim.
+        # GM command source is currently the protected Cosmic custom version;
+        # old GM / new upstream GM-tele differences remain a release-review item.
+        # Chromaggus removal is deliberately held for owner gameplay policy.
+        self.assertTrue(set(SHARED).isdisjoint(set(UPSTREAM_ONLY)))
+        self.assertTrue(set(CHROMAGGUS_PROTECTED).isdisjoint(set(UPSTREAM_ONLY)))
+        self.assertTrue(set(CHROMAGGUS_PROTECTED).isdisjoint(set(SHARED)))
+
     def test_custom_ancestor_is_retained(self):
         subprocess.run(
             ["git", "merge-base", "--is-ancestor", BASE, "HEAD"],
