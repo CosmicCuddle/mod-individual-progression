@@ -266,6 +266,29 @@ class PolicyPreservation(unittest.TestCase):
         self.assertIn("sIndividualProgression->CapProfessionSkills(player);", player_script)
         self.assertIn("sIndividualProgression->CapProfessionAchievements(player);", player_script)
 
+    def test_upstream_profession_hooks_are_fail_open_when_off_or_session_missing(self):
+        # Read-only source checks; an approved enabled-mode game test still
+        # needs verified bot/GM account identity and a restorable DB backup.
+        core = current("src/IndividualProgression.cpp")
+        spells = current("src/IndividualProgressionSpells.cpp")
+        player = current("src/IndividualProgressionPlayer.cpp")
+        self.assertIn("return player && player->GetSession() &&", core)
+        cap = spells.split("uint16 IndividualProgression::GetProfessionSkillCap(", 1)[1].split(
+            "bool IndividualProgression::IsProfessionRankAboveCap(", 1)[0]
+        self.assertIn("!player->GetSession() || isExcludedAccount(player)", cap)
+        ranks = spells.split("bool IndividualProgression::IsProfessionRankAboveCap(", 1)[1].split(
+            "void IndividualProgression::CapProfessionSkills(", 1)[0]
+        self.assertIn("if (!enabled || !ProfessionTierCap || !player", ranks)
+        self.assertIn("!player->GetSession()", ranks)
+        self.assertLess(ranks.index("if (!enabled || !ProfessionTierCap"),
+                        ranks.index("GetProfessionRank(spellId)"))
+        item = player.split("bool OnPlayerCanUseItem(", 1)[1].split(
+            "void OnPlayerEquip(", 1)[0]
+        self.assertIn("if (!player || !proto || !sIndividualProgression->enabled", item)
+        self.assertIn("!sIndividualProgression->ProfessionTierCap", item)
+        self.assertLess(item.index("if (!player || !proto"),
+                        item.index("proto->Spells"))
+
     def test_custom_hunter_and_paid_guards_still_present(self):
         spells = current("src/IndividualProgressionSpells.cpp")
         cs = current("src/cs_individualProgression.cpp")

@@ -502,7 +502,10 @@ bool IndividualProgression::isExcludedAccount(uint32 accountId)
 // By the account and not the session: a bot's session has player security, also on a GM's account.
 bool IndividualProgression::isGMAccount(Player* player)
 {
-    return player && GetAccountMatch(player->GetSession()->GetAccountId()).gm;
+    // Headless or disconnecting Playerbots may not have a session.
+    // Never dereference a missing session while computing optional tier caps.
+    return player && player->GetSession() &&
+        GetAccountMatch(player->GetSession()->GetAccountId()).gm;
 }
 
 bool IndividualProgression::isBotAccount(const Player* player)
