@@ -1,0 +1,23 @@
+diff --git a/src/Bot/Factory/PlayerbotFactory.cpp b/src/Bot/Factory/PlayerbotFactory.cpp
+--- a/src/Bot/Factory/PlayerbotFactory.cpp
++++ b/src/Bot/Factory/PlayerbotFactory.cpp
+@@ -1688,6 +1688,10 @@
+ {
+     // One policy snapshot for the whole reset, even across a config reload.
+     uint32 const preserveMask = sPlayerbotAIConfig.ResetQuestsPreserveMask.load(std::memory_order_acquire);
++    // Positive selected RandomBot identity only. Altbots and account-excluded
++    // humans never receive this opt-in; EMPTY mask keeps stock ResetQuests.
++    bool const preserveForVerifiedRandomBot =
++        preserveMask != 0 && sRandomPlayerbotMgr.IsRandomBot(bot);
+     for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
+     {
+         bot->SetQuestSlot(slot, 0);
+@@ -1703,7 +1707,7 @@
+ 
+         // Preserve only pre-existing rewarded markers explicitly selected
+         // at the start of this reset. Other quests still reset normally.
+-        if (entry >= 66001 && entry <= 66018 &&
++        if (preserveForVerifiedRandomBot && entry >= 66001 && entry <= 66018 &&
+             bot->GetQuestStatus(entry) == QUEST_STATUS_REWARDED &&
+             (preserveMask & (uint32(1) << (entry - 66001))) != 0)
+             continue;
