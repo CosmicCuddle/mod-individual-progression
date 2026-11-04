@@ -114,7 +114,7 @@ class CoreRouteContract(unittest.TestCase):
         self.assertIn("script->OnCreatureRemoveWorld(creature);", src)
 
     def test_map_removal_starts_with_remove_from_world(self):
-        src = section("map", "void Map::RemoveFromMap(T* obj, bool remove)", "template <>")
+        src = section("map", "void Map::RemoveFromMap(T* obj, bool remove)", "template<>")
         self.assertIn("obj->RemoveFromWorld();", src)
         self.assertIn("obj->RemoveFromGrid();", src)
         self.assertIn("obj->ResetMap();", src)
