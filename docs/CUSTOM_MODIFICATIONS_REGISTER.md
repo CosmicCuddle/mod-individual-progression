@@ -578,3 +578,38 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 **Safety gate:** `IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0` in dist config, absent-key fallback false, C++ initializer false. Even if ON in a config, forcibly disabled if Playerbots API unavailable or any required Core hook missing: `COSMIC_F14_OBSERVER_HOOK_VERSION`, `COSMIC_F14_WHO_FILTER_HOOK_VERSION`, `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION >= 1`. Only the first two exist in the current test-only default-ALLOW patches; **the real immediate refresh hook is ABSENT**. Therefore F14 visibility remains INERT, normal players and bots see original default behaviour even with these scripts compiled. The future bridge needs a complete, separately tested map-thread observer invalidation implementation, not a macro alone.
 
 **Affected existing paths:** `src/IndividualProgression.cpp`, `src/IndividualProgression.h`, `src/IndividualProgressionPlayer.cpp`, `conf/individualProgression.conf.dist`, plus this register, new contract tests and isolated build workflow. No SQL, DBC, Core/Playerbots/Naxx/Services source commits or host operations; no effective player/entity visibility change. Tests: source+portable tests and linked native Worldserver with original Core prototype patches required; real WHO packet, client redraw, visibility/tap/corpse/multi-attacker regression and owner approval not done. Production install/enable forbidden. Development rollback: close draft/discard child branch without changes to production. Future host deployment requires backups/rollback and explicit CosmicCuddle approval.
+
+## 4 November 2026 — F14 attack/corpse lifecycle registry (IP-side event consumer, separate review-only child)
+
+**Owner/gameplay intent:** later F14 work may need to know which positively verified headless Blood Elf/Draenei RandomBots are fighting which world creature, so that a creature fought only by such bots can eventually be handled consistently with the hidden bots. This entry adds **bookkeeping only**. It hides nothing, sends no visibility refresh, changes no stage, quest, loot, tap or database data, and does not repair Playerbots. Parent is draft #64 (`c2cc14bc`), which inherits #63, #62 and the protected Grim integration #59.
+
+**Source and exact changes:**
+- New pure header `src/IndividualProgressionF14LifecycleRegistry.h`: a bounded registry built on the unchanged `F14MultiAttackerPolicy`.
+  - Actor tokens are the existing monotonic per-login epochs; 0 means unverified.
+  - Creature tokens are issued monotonically and never reused. They are stamped in the live Creature's own `CustomData`, so a recycled GUID, instance id or Creature object cannot inherit an old roster.
+  - Only a verified begin creates an entry, seeded from the creature's complete current attacker set.
+  - Humans, Altbots, GMs, pets/minions, creatures or unknown participants only mark an entry uncertain.
+  - Retirement happens on corpse-ready, respawn, and evade with no verified attacker left. A same-key stale incarnation is dropped, never merged.
+  - Every overflow or impossible state poisons the whole registry (fail visible) until config reload.
+  - Event-built rosters never carry the complete participant/rights proof, so no entry is ever a concealment candidate.
+- New `src/IndividualProgressionF14LifecycleScript.cpp`: a `UnitScript` consumer for the three original default-ALLOW prototype hooks (attack target transition, corpse ready, respawned). It is compiled only when `COSMIC_F14_ATTACK_EVENT_HOOK_VERSION >= 1`. It converts callback pointers to value tokens under one mutex and never stores `Unit*`. Actor identity is read only from the login-thread cache; there are no Playerbots calls on map threads.
+- `src/IndividualProgression.cpp` / `.h`:
+  - Option `IndividualProgression.F14.ExperimentalAttackLifecycleRegistry`: member false, fallback false. It is forced OFF without the attack-event hook, the Playerbots API, or an enabled F14 identity source (`ProtectVerifiedRandomBotGroupFloor` or `ExperimentalRndbotPlayerVisibility`). The registry is reset on every config (re)load.
+  - Logout/relogin expires the previous login epoch after the identity lock is released. Lock order: registry mutex, then identity lock.
+  - Read-only `GetF14LifecycleStatus()`.
+  - The script is registered from `AddSC_mod_individual_progression()`, so the upstream Grim loader stays byte-identical.
+- `conf/individualProgression.conf.dist`: the new key `= 0`.
+
+**Known gaps (not invented around):**
+- The Core prototype has no creature-removed-from-world or instance-unload hook. Mitigations are bounded capacity with poison, same-key stale replacement, and per-object stamps.
+- There is no pet/minion owner-resolution contract, so bot pets mark creatures uncertain.
+- Threat-only participants (healers, DoTs without an attack target) are not audited. No tap, loot or quest rights are checked.
+- `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION` remains undefined, and every F14 visibility path stays inert.
+
+**Tests:**
+- `tests/f14_lifecycle_registry.cpp`: native GCC/Clang, C++17/20, with and without NDEBUG.
+- `tests/test_ip_f14_lifecycle_source.py`: source contracts.
+- A full native Worldserver link on newest Grim Core `0d754d19` with unmodified Playerbots `e88cc409`, Naxx #292, Services #16 and the original prototypes @ `6cf528c0`.
+- No in-game combat, corpse, logout, visibility or client test was done. Production install or enable is forbidden.
+
+**Rollback:** close the draft or discard the child branch. Nothing on any host, database, config, client or Core fork was changed. A future host deployment needs backups, rollback and explicit CosmicCuddle approval.
