@@ -4,6 +4,13 @@
 name: F14 pinned Core viewer refresh and creature remove source contracts (NO HOST)
 
 on:
+  push:
+    branches:
+      - ci/cs01-f14-engine-refresh-path-proof-20261104
+    paths:
+      - "tests/test_ip_f14_core_refresh_delivery_path.py"
+      - "docs/F14_CORE_VISIBILITY_PATH_2026-11-04.md"
+      - ".github/workflows/ip-f14-core-refresh-delivery-source-20261104.yml"
   pull_request:
     branches:
       - work/cs01-f14-core-reevaluation-observer-prototype-20261104
@@ -24,7 +31,7 @@ jobs:
       - name: Checkout exact submitted IP branch, no workspace credentials
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           path: ip
           persist-credentials: false
@@ -41,7 +48,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C ip rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git -C ip rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           git -C ip merge-base --is-ancestor 13c07373f7befca967b90885158d35d1fb57430b HEAD
           test "$(git -C pinned-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
           git -C ip diff --name-only 13c07373f7befca967b90885158d35d1fb57430b HEAD | sort > /tmp/changed
