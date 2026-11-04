@@ -40,7 +40,7 @@ diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/S
 diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
 --- a/src/server/game/Entities/Unit/Unit.cpp
 +++ b/src/server/game/Entities/Unit/Unit.cpp
-@@ -7085,3 +7085,21 @@
+@@ -7080,3 +7080,21 @@
      return my_faction->IsNeutralToAll();
  }
 +// Re-resolve GUIDs on the current map AFTER F14 script bookkeeping returns.
@@ -62,12 +62,12 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 +    target->UpdateObjectVisibility(true);
 +}
 @F14_BLANK_CONTEXT@
-@@ -7163,1 +7184,4 @@
+@@ -7169,1 +7187,4 @@
      Unit* const f14PreviousVictim = m_attacking;
 +    // Capture GUIDs BEFORE script calls may retire or remove their targets.
 +    ObjectGuid const f14PreviousGuid = f14PreviousVictim ? f14PreviousVictim->GetGUID() : ObjectGuid::Empty;
 +    ObjectGuid const f14CurrentGuid = victim->GetGUID();
-@@ -7179,2 +7200,7 @@
+@@ -7184,2 +7205,7 @@
      sScriptMgr->OnF14AttackTargetTransition(this, f14PreviousVictim, victim);
 +    // The observer hook has returned; re-resolve targets from GUIDs before
 +    // requesting any viewer pass. Old target must reappear on target switch.
@@ -75,11 +75,11 @@ diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/U
 +    if (f14PreviousGuid != f14CurrentGuid)
 +        F14MaybeRefreshCreatureVisibility(this, f14CurrentGuid);
 @F14_BLANK_CONTEXT@
-@@ -7243,1 +7275,3 @@
+@@ -7255,1 +7281,3 @@
      Unit* victim = m_attacking;
 +    // The F14 callback may invalidate target lifetime: keep GUID only.
 +    ObjectGuid const f14VictimGuid = victim->GetGUID();
-@@ -7261,2 +7288,4 @@
+@@ -7266,2 +7294,4 @@
      sScriptMgr->OnF14AttackTargetTransition(this, victim, nullptr);
 +    // Request visibility only AFTER the registry's attack-stop callback.
 +    F14MaybeRefreshCreatureVisibility(this, f14VictimGuid);
