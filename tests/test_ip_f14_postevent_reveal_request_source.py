@@ -27,7 +27,9 @@ class PostEventRefreshRequest(unittest.TestCase):
         self.assertIn("bool OnF14ShouldRefreshCreatureVisibility(Creature const* creature) override", s)
         self.assertNotIn("#define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION", s)
         self.assertNotIn("COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT = 1", s)
-        self.assertNotIn("UpdateObjectVisibility(", s)
+        # The new per-map UnitUpdate handoff may request one Core refresh.
+        # It remains forbidden inside the lifecycle callback under mutex.
+        self.assertEqual(s.count("creature->UpdateObjectVisibility(true);"), 1)
         self.assertNotIn("CanSeeOrDetect(", s)
 
     def test_stamped_value_survives_retirement(self):
