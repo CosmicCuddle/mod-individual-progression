@@ -661,3 +661,45 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 - **No in-game test was done.**
 
 **Rollback:** close the draft or discard the child branch. Nothing on any host, database, config or client was changed.
+
+## 4 November 2026 — F14 stage 3: verified-owner minion evidence (non-authoritative, separate review-only child)
+
+**Intent:** today every pet, guardian, totem or summon of a verified bot is "unknown", so a creature fought by a bot hunter or warlock always fails visible. This stage records separate, **weaker evidence** that such a minion belongs to a verified bot whose login is current, for a later complete rights audit to use. It is **bookkeeping only and never proof**. It hides nothing, sends no packets, requests no visibility refresh, writes no stage, quest, loot or tap data, adds no flags, and never calls Playerbots. Parent is draft #73 (`8a354e1`), approved by CS01 as a development-only task.
+
+**Source and exact changes:**
+- **`src/IndividualProgressionF14LifecycleRegistry.h`:**
+  - **`MinionLineage`** holds raw GUID values only, and every default fails. **`LineageMatchesSingleOwner`** is a pure rule. A unit counts only when all of these hold:
+    - it is a pet, guardian, totem or summon
+    - it is not a vehicle and not possessed
+    - its owner is a player
+    - its charmer is empty or equals the owner
+    - its creator is empty or equals the owner
+    - for a summon, summon data is available and the summoner is empty or equals the owner
+  - **`MinionOwnerEvidence`** returns the owner's **current** verified login epoch only if the lineage matched; otherwise 0.
+  - **`SnapshotCollector::AddMinion`** spends the same 64-visit budget before de-duplication. An unknown owner (0) stops the collector, and there are at most 16 distinct owner epochs; overflow stops it.
+  - **Separate storage:** minion owners are kept apart from participants, attackers and the roster, so a minion never becomes an eligible bot token.
+  - **Uncertainty is unchanged:** any minion presence still adds uncertainty. First-party `threatCombatAndAttackersObservedOnlyVerifiedBots` stays false when any minion is present. A new, separate evidence field (`observedOnlyVerifiedBotsOrVerifiedOwnerMinions`) and owner count are added.
+  - **Owner expiry:** `ExpireActor(epoch)` also invalidates entries whose minion evidence names that owner epoch, so the evidence goes stale and uncertain on owner logout.
+  - **Authoritative fields:** the five authoritative `CreatureSnapshot` fields and `IsConcealmentCandidate` stay hard false.
+- **`src/IndividualProgressionF14LifecycleScript.cpp`:**
+  - **`MinionOwnerEpochOf`** copies only GUID values (`GetOwnerGUID`, `GetCharmerGUID`, `GetCreatorGUID`, `TempSummon::GetSummonerGUID`) and possession and vehicle state into the pure lineage. It reads the owner's epoch from the login-thread cache under `LifecycleLock`, only after the lineage matched. There is no owner, charmer or summoner dereference.
+  - **`VisitUnit`** tries a first-party verified bot, then a verified-owner minion, then unknown, in that order. All three bounded loops still `break` immediately.
+
+**Unchanged:** the config, `IndividualProgression.cpp` and `.h`, `IndividualProgressionPlayer.cpp`, the loader, the four pure policy headers, #69 and #73 workflows, Core, Playerbots and SQL.
+
+**Open needs:** these remain before any hiding:
+- a complete participant census
+- loot-group membership
+- quest, skin and kill credit
+- hostility
+- the observer half and the Core refresh bridge
+- a thread-ownership API
+- an in-game rights audit
+
+**Tests:**
+- **Native registry tests:** 293 checks on GCC and Clang, C++17 and C++20, with and without NDEBUG. They cover every lineage mismatch, a disconnected or unverified owner, evidence kept separate from proof, an unknown owner stopping the collector, minion flooding against the visit budget, owner overflow, and stale evidence after owner logout.
+- **Source contracts:** 27, with deliberate breakages verified.
+- **CI:** an exact 6-path scope against `8a354e1`, and the same full native Worldserver link and 10-hook `nm` check.
+- **No in-game test was done.**
+
+**Rollback:** close the draft or discard the child branch. Nothing on any host, database, config or client was changed.
