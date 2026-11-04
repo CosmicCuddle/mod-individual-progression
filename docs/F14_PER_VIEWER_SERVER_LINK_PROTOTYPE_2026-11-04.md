@@ -17,7 +17,7 @@ This event is called at **actual server-side viewer/target link transitions** in
 
 Only actual transitions with `HaveAtClient(target)` changed are reported; no-change checks emit nothing. Only Player objects or **non-pet creatures** are observed. Pet-removal callbacks may destroy pet objects during visibility cleanup, so this prototype explicitly excludes them rather than risking a stale pointer. The callback is synchronous, holds no target pointer afterwards, and must never re-enter the visibility scanner or alter a target.
 
-This supplies **per-viewer server-side bookkeeping evidence**, not a network/client acknowledgement. No packet acknowledgement or client rendering is verified. A hook listener cannot treat `nowLinked` as a guarantee that WoW 3.3.5a has displayed or removed an object.
+This supplies **per-viewer server-side bookkeeping evidence**, not a network/client acknowledgement. No packet acknowledgement or client rendering is verified. Until a separate independent safe deny rule exists, the effective Core behaviour remains **default ALLOW**. A hook listener cannot treat `nowLinked` as a guarantee that WoW 3.3.5a has displayed or removed an object.
 
 ## Still absent
 
