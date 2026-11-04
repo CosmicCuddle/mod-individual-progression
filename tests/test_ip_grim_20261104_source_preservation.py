@@ -41,8 +41,10 @@ SHARED = (
     "src/IndividualProgression.h",
     "src/IndividualProgressionPlayer.cpp",
     "src/IndividualProgressionSpells.cpp",
-    "src/cs_individualProgression.cpp",
 )
+# The overlapping GM commands were reconciled by retaining Cosmic's exact
+# source blob; there is deliberately NO net diff in that protected path.
+CUSTOM_UNCHANGED = "src/cs_individualProgression.cpp"
 CHROMAGGUS_PROTECTED = (
     "src/vanillaScripts/boss_chromaggus.cpp",
     "src/IndividualProgression_loader.cpp",
@@ -143,6 +145,9 @@ class PolicyPreservation(unittest.TestCase):
         )
 
     def test_custom_gm_command_bodies_exactly_preserved(self):
+        # The correct merge resolution is the complete custom source blob,
+        # including group raid-difficulty and GM/console protections.
+        self.assertEqual(current(CUSTOM_UNCHANGED), historical(BASE, CUSTOM_UNCHANGED))
         before = historical(BASE, "src/cs_individualProgression.cpp")
         after = current("src/cs_individualProgression.cpp")
         pairs = (
