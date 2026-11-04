@@ -112,22 +112,19 @@ class ExactProvenance(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(current(path), historical(BASE, path))
         loader = current(LOADER_ADDITION)
-        # This loader is NOT a copy of either side: preserve every Cosmic
-        # registration and import ONLY Grim's new Borean Tundra entry.
+        # Keep Cosmic's Chromaggus registration while importing exactly the
+        # two required Borean Tundra registration lines from Grim upstream.
         original = historical(BASE, LOADER_ADDITION)
-        declaration = "void AddSC_ipp_zone_nagrand();\\n"
-        call = "    AddSC_ipp_zone_nagrand();\\n"
-        # Use actual newlines in the expected loader source.
-        declaration = declaration.replace("\\\\n", "\\n")
-        call = call.replace("\\\\n", "\\n")
+        declaration = "void AddSC_ipp_zone_nagrand();" + chr(10)
+        call = "    AddSC_ipp_zone_nagrand();" + chr(10)
         self.assertEqual(original.count(declaration), 1)
         self.assertEqual(original.count(call), 1)
         expected = original.replace(
             declaration,
-            declaration + "void AddSC_ipp_zone_borean_tundra();\\n".replace("\\\\n", "\\n"),
+            declaration + "void AddSC_ipp_zone_borean_tundra();" + chr(10),
         ).replace(
             call,
-            call + "    AddSC_ipp_zone_borean_tundra();\\n".replace("\\\\n", "\\n"),
+            call + "    AddSC_ipp_zone_borean_tundra();" + chr(10),
         )
         self.assertEqual(loader, expected)
         self.assertEqual(loader.count("AddSC_boss_chromaggus_60_2_A();"), 2)
