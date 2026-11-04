@@ -25,7 +25,7 @@ class CoreF14ReevaluationPrototype(unittest.TestCase):
             "src/server/game/Entities/Object/Object.cpp",
             "src/server/game/Entities/Player/PlayerUpdates.cpp",
         })
-        self.assertEqual(len(paths), 6)  # two isolated hunks in the script header
+        self.assertEqual(len(paths), 5)  # two hunks in the same script-header patch
         self.assertNotIn("src/server/game/Handlers/MiscHandler.cpp", paths)
         self.assertNotIn("src/server/game/Entities/Creature/Creature.cpp", paths)
 
