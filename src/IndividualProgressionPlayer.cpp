@@ -187,6 +187,12 @@ public:
     // A book casts the rank, and that steps the skill without learnSpell, so it is refused before the cast.
     bool OnPlayerCanUseItem(Player* player, ItemTemplate const* proto, InventoryResult& result) override
     {
+        // This hook runs for ordinary items too; disabled tier caps should
+        // not scan every item spell or dereference a missing ItemTemplate.
+        if (!player || !proto || !sIndividualProgression->enabled ||
+            !sIndividualProgression->ProfessionTierCap)
+            return true;
+
         for (auto const& spell : proto->Spells)
         {
             if (spell.SpellId > 0 && sIndividualProgression->IsProfessionRankAboveCap(player, spell.SpellId))
