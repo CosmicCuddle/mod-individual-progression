@@ -84,6 +84,9 @@ class RefreshRequestContract(unittest.TestCase):
         for line in PATCH.splitlines():
             self.assertFalse(line.endswith((" ", "\t")), repr(line))
         self.assertEqual(PATCH.count("diff --git a/"), 5)
+        # Encoded empty diff contexts are restored by CI BEFORE git apply.
+        self.assertEqual(PATCH.count("@F14_BLANK_CONTEXT@"), 4)
+        self.assertNotIn("\\n-\\n+\\n", PATCH)
 
 if __name__ == "__main__":
     unittest.main()
