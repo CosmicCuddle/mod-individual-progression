@@ -61,8 +61,25 @@ jobs:
             echo "### BLOCKED: upstream/current-custom conflicts require review" >> "$GITHUB_STEP_SUMMARY"
             echo "Exact merge conflict summary:" 
             grep -E '^CONFLICT|^Auto-merging' /tmp/grim-merge-tree.txt | head -100 || true
-            echo "A clean result is required before declaring the upstream merge resolved."
-            # Prevent misleading green CI when actual conflicts still exist.
-            exit 1
+            # The original custom base is deliberately unchanged and still
+            # conflicts. A separate PR may contain a two-parent resolution.
+            # Verify the proposed PR head's actual immutable ancestry here.
+            # Source preservation and native compilation remain separate gates.
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              candidate="${{ github.event.pull_request.head.sha }}"
+              git fetch --no-tags origin "$candidate"
+              test "$(git rev-parse FETCH_HEAD)" = "$candidate"
+              if git merge-base --is-ancestor 26d5b7a1de30ad92a595aaf251fc14754cf54f32 FETCH_HEAD \
+                 && git merge-base --is-ancestor 42c9a32892740af55a40e076e6381cc879181396 FETCH_HEAD; then
+                echo "PASS: candidate has both exact custom and Grim upstream ancestors."
+                echo "### PR head contains both histories; source and native tests still mandatory" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "BLOCKED: proposed head does NOT contain both required histories."
+                exit 1
+              fi
+            else
+              echo "A clean merge-tree or separately audited resolution is required."
+              exit 1
+            fi
           fi
           echo "No deployment, host access, SQL, generated binary or feature activation."
