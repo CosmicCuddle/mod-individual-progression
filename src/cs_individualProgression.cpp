@@ -721,29 +721,33 @@ public:
             return false;
 
         bool const naxx = location == "naxx" || location == "naxx40";
-        bool const hasAttunement = naxx
-            ? sIndividualProgression->isAttuned(target)
-            : target->HasItemCount(ITEM_DRAKEFIRE_AMULET);
         uint32 const rawStage = sIndividualProgression->GetPlayerProgressionFromQuests(target);
-        bool const allowed = IndividualProgressionGmTeleportPolicy::CanTeleport(
+        // Preserve Cosmic's existing rejection order: a forbidden era/level
+        // must receive the "not allowed" response even without attunement.
+        // Here 'true' means only test level/stage eligibility. Actual
+        // attunement is checked below, before any difficulty/teleport writes.
+        bool const eligible = IndividualProgressionGmTeleportPolicy::CanTeleport(
             target->GetLevel(), rawStage, PROGRESSION_TBC_TIER_5,
             sIndividualProgression->isExcludedAccount(target),
             sIndividualProgression->hasPassedProgression(target, PROGRESSION_WOTLK_TIER_5),
-            sIndividualProgression->AllowVanillaRaidAccess, hasAttunement);
+            sIndividualProgression->AllowVanillaRaidAccess, true);
         std::string const playername = target->GetName();
 
+        if (!eligible)
+        {
+            handler->PSendSysMessage("|cff00ffff{}|r is not allowed to teleport to |cff00ffff{}|r.", playername, location);
+            return false;
+        }
+
+        bool const hasAttunement = naxx
+            ? sIndividualProgression->isAttuned(target)
+            : target->HasItemCount(ITEM_DRAKEFIRE_AMULET);
         if (!hasAttunement)
         {
             if (naxx)
                 handler->PSendSysMessage("|cff00ffff{}|r has not completed the Naxxramas attunement quest.", playername);
             else
                 handler->PSendSysMessage("|cff00ffff{}|r does not have a Drakefire Amulet.", playername);
-            return false;
-        }
-
-        if (!allowed)
-        {
-            handler->PSendSysMessage("|cff00ffff{}|r is not allowed to teleport to |cff00ffff{}|r.", playername, location);
             return false;
         }
 

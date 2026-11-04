@@ -228,6 +228,17 @@ class PolicyPreservation(unittest.TestCase):
         # including all non-set/tele commands, parser and audit rules.
         self.assertEqual(after.replace(inc, "").replace(new_tele, old_tele).replace(new_set, old_set), before)
         self.assertIn("handler->HasLowerSecurity(target)", new_tele)
+        # The original Cosmic GM command rejects wrong era/level *before*
+        # checking the attunement, so it must not leak different error
+        # messages or query attunements for already-ineligible characters.
+        self.assertIn("bool const eligible = IndividualProgressionGmTeleportPolicy::CanTeleport(", new_tele)
+        self.assertIn("AllowVanillaRaidAccess, true);", new_tele)
+        self.assertLess(new_tele.index("if (!eligible)"),
+                        new_tele.index("if (!hasAttunement)"))
+        self.assertLess(new_tele.index("if (!eligible)"),
+                        new_tele.index("sIndividualProgression->isAttuned(target)"))
+        self.assertLess(new_tele.index("if (!hasAttunement)"),
+                        new_tele.index("group->SetRaidDifficulty("))
         self.assertIn("IndividualProgressionGmTeleportPolicy::CanTeleport(", new_tele)
         self.assertIn("Group* group = target->GetGroup();", new_tele)
         self.assertIn("group->SetRaidDifficulty(RAID_DIFFICULTY_10MAN_HEROIC)", new_tele)
