@@ -76,7 +76,7 @@ jobs:
           grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
           grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
           echo 'PASS: exact scope, OFF defaults, upstream loader and pure policies untouched'
-      - name: Source contracts (new lifecycle + parent #64 observer contracts)
+      - name: "Source contracts (new lifecycle + parent #64 observer contracts)"
         shell: bash
         run: |
           set -euo pipefail
