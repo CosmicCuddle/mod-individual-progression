@@ -51,7 +51,7 @@ class ViewerLinkPrototype(unittest.TestCase):
 
     def test_changed_link_only_no_packet_ack(self):
         self.assertIn("This is not proof a WoW 3.3.5a client rendered the packet.", PATCH)
-        self.assertIn("only QUEUES", PATCH)
+        self.assertIn("Batched visibility link bookkeeping precedes actual packet building.", PATCH)
         self.assertIn("No verified permission to hide", DOC)
         self.assertIn("client acknowledgement", DOC)
         self.assertIn("default ALLOW", DOC)
