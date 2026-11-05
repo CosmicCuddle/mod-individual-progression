@@ -60,7 +60,7 @@ class Contracts(unittest.TestCase):
         self.assertEqual(git("rev-parse", "HEAD:tests/core_patches/apply_f14_direct_interaction_veto.py"),
                          "98ca29d14fd702cb4f961177de16d905eaf567e3")
         self.assertEqual(git("rev-parse", "HEAD:tests/core_patches/apply_f14_core_group_aura_veto.py"),
-                         "PARENT_100_PATCHER_BLOB")
+                         "28a9c1efe2bd61a71f3f3b3948e6a14dfd3bd805")
 
     def test_real_previous_core_helper_is_extended_only_at_tail(self):
         original = parent_source()
