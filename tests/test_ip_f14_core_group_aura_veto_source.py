@@ -90,6 +90,10 @@ class SourceContracts(unittest.TestCase):
         self.assertIn("viewer->GetPet()", helper)
         self.assertIn("creature->GetLootRecipientGroupGUID() != 0", helper)
         self.assertIn("viewer->GetGroup()", helper)
+        self.assertIn("viewer->GetCharm()", helper)
+        self.assertIn("viewer->GetGuardianPet()", helper)
+        self.assertIn("creature->GetVictim() == controlled", helper)
+        self.assertIn("creature->GetVictim() == guardian", helper)
         self.assertIn("creature->GetAppliedAuras()", helper)
         self.assertIn("f14Auras.size() > 64", helper)
         self.assertIn("if (!app || !app->GetBase())", helper)
@@ -99,13 +103,15 @@ class SourceContracts(unittest.TestCase):
         self.assertNotIn("SendDirectMessage", helper)
         self.assertNotIn("SetPhaseMask", helper)
         self.assertLess(helper.index("creature->GetLootRecipientGroupGUID()"),
+                        helper.index("viewer->GetCharm()"))
+        self.assertLess(helper.index("viewer->GetGuardianPet()"),
                         helper.index("viewer->GetGroup()"))
         self.assertEqual(helper.count("return false;"), 1)
         # Original helper is a prefix through the original return statement.
         self.assertEqual(original.split("static bool F14ViewerHasDirectInteractionVeto(", 1)[1]
                          .split("    return false;\n}", 1)[0],
                          helper.split("static bool F14ViewerHasDirectInteractionVeto(", 1)[1]
-                         .split("    // Without a complete audited", 1)[0])
+                         .split("    // Charmed units and guardians", 1)[0])
 
     def test_missing_parent_and_repatch_always_refuse(self):
         module = patch_module()
