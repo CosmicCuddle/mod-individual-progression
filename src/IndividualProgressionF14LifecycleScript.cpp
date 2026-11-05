@@ -41,6 +41,8 @@
 #include "ScriptMgr.h"
 #if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
 #include "WorldObjectScript.h"
+#include "WorldSession.h"
+#include "IndividualProgressionF14HumanViewerEpoch.h"
 #include <atomic>
 #endif
 #include "TemporarySummon.h"
@@ -739,6 +741,79 @@ public:
 // The original #103 pure bridge remains UNWIRED until full identity and
 // map-owner proof exist. No packet, suppression, client ACK or ledger clear.
 #if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
+namespace
+{
+    namespace ViewerEpoch = IndividualProgressionF14HumanViewerEpoch;
+    constexpr char const* ViewerEpochStampKey = "IndividualProgression.F14.HumanViewerLoginEpoch";
+
+    struct HumanViewerSessionStamp final : public DataMap::Base
+    {
+        ViewerEpoch::Stamp stamp{};
+    };
+
+    ViewerEpoch::Issuer& ViewerLoginEpochIssuer()
+    {
+        static ViewerEpoch::Issuer issuer;
+        return issuer;
+    }
+
+    // Read current Player-object-stored provenance; never infer a login
+    // epoch from a GUID alone or from the bot-only actor epoch registry.
+    // This fact is NOT an owning-map proof or prior-hidden creature proof.
+    std::uint64_t CurrentHumanViewerEpoch(Player const* viewer)
+    {
+        if (!viewer || !viewer->IsInWorld() || !viewer->GetSession() ||
+            viewer->GetSession()->IsHeadless() || !viewer->GetGUID().IsPlayer())
+            return 0;
+        HumanViewerSessionStamp const* state =
+            viewer->CustomData.Get<HumanViewerSessionStamp>(ViewerEpochStampKey);
+        return state && state->stamp.Matches(viewer->GetGUID().GetRawValue(),
+                                            state->stamp.loginEpoch)
+            ? state->stamp.loginEpoch : 0;
+    }
+}
+
+// All humans (not bots or Altbots) get a fresh non-reused epoch at login.
+// This separate opt-in PlayerScript runs independently of the original
+// IndividualPlayerProgression enabled flag; no unrelated gameplay changes.
+class IndividualProgressionF14HumanViewerEpochScript final : public PlayerScript
+{
+public:
+    IndividualProgressionF14HumanViewerEpochScript()
+        : PlayerScript("IndividualProgression_F14HumanViewerEpoch") { }
+
+    void OnPlayerLogin(Player* player) override
+    {
+        if (!player)
+            return;
+        // Existing stamp, if any, is revoked before examining new identity.
+        if (HumanViewerSessionStamp* old =
+                player->CustomData.Get<HumanViewerSessionStamp>(ViewerEpochStampKey))
+            old->stamp.Clear();
+        if (!player->GetSession() || player->GetSession()->IsHeadless() ||
+            !player->GetGUID().IsPlayer())
+            return;
+
+        std::uint64_t const epoch = ViewerLoginEpochIssuer().Issue();
+        if (!epoch)
+        {
+            LOG_ERROR("module", "IP F14 observer viewer epoch issuer exhausted; GUID events cannot be accepted");
+            return;
+        }
+        HumanViewerSessionStamp* current =
+            player->CustomData.GetDefault<HumanViewerSessionStamp>(ViewerEpochStampKey);
+        current->stamp.Bind(player->GetGUID().GetRawValue(), epoch);
+    }
+
+    void OnPlayerLogout(Player* player) override
+    {
+        if (player)
+            if (HumanViewerSessionStamp* state =
+                    player->CustomData.Get<HumanViewerSessionStamp>(ViewerEpochStampKey))
+                state->stamp.Clear();
+    }
+};
+
 class IndividualProgressionF14TaggedGuidObserverScript final : public WorldObjectScript
 {
 public:
@@ -783,7 +858,8 @@ private:
         char const* direction)
     {
         if (!viewer || !viewer->IsInWorld() || !viewer->GetMap() ||
-            guid.IsEmpty() || !guid.IsCreature())
+            guid.IsEmpty() || !guid.IsCreature() ||
+            CurrentHumanViewerEpoch(viewer) == 0)
         {
             if (invalidCount.fetch_add(1, std::memory_order_relaxed) == 0)
                 LOG_ERROR("module", "IP F14 observer rejected invalid GUID send-call metadata; all concealment stays OFF");
@@ -804,6 +880,7 @@ void AddSC_mod_individual_progression_f14_lifecycle()
     new IndividualProgressionF14LifecycleScript();
     new IndividualProgressionF14LifecycleRemovalScript();
 #if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
+    new IndividualProgressionF14HumanViewerEpochScript();
     new IndividualProgressionF14TaggedGuidObserverScript();
 #endif
 #endif
