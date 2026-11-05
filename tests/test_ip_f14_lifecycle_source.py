@@ -221,11 +221,12 @@ class IndependentVerifiedLogin(unittest.TestCase):
         cond = block[block.index("if ((") : block.index("{")]
         for flag in ("f14ProtectVerifiedRandomBotGroupFloor",
                      "f14ExperimentalRndbotPlayerVisibility",
-                     "f14ExperimentalAttackLifecycleRegistry"):
+                     "f14ExperimentalAttackLifecycleRegistry",
+                     "f14ProtectVerifiedRandomBotStageFloor"):
             self.assertIn("sIndividualProgression->" + flag, cond)
-        # The three reasons are OR-ed; every identity gate is still AND-ed.
+        # All four independent reasons are OR-ed, but identity gates remain AND-ed.
         reasons = cond[cond.index("((") + 2 : cond.index(") &&")]
-        self.assertEqual(reasons.count("||"), 2)
+        self.assertEqual(reasons.count("||"), 3)
         self.assertNotIn("&&", reasons)
         for gate in ("sIndividualProgression->isBotAccount(player)",
                      "(player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF)",
