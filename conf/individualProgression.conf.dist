@@ -115,6 +115,21 @@ IndividualProgression.F14.ExperimentalAttackLifecycleRegistry = 0
 #
 IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0
 
+# IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor
+#
+#        DEVELOPMENT ONLY / OFF by default. Refuses any IP-owned progression
+#        reset (login level write, group sync, .ip set, .ip setbot) that would
+#        push a positively VERIFIED headless Blood Elf/Draenei RandomBot below
+#        an already EARNED TBC stage (8+). The current stage is kept as is.
+#        It never creates or grants a stage and never lowers a higher stage
+#        to 8. ProgressionLimit still applies to new grants; an earned stage
+#        above a later-lowered limit is kept untouched (never deleted). It
+#        never affects humans, Altbots, GMs, excluded or unverified
+#        characters. Playerbots' own ResetQuests is outside IP: NOT covered.
+#        FORCED OFF without the Playerbots API. Owner approval required.
+#
+IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor = 0
+
 # IndividualProgression.PaidExpansion.Enable
 #
 #        DRAFT - paid expansion entitlement. Read at server start only.
