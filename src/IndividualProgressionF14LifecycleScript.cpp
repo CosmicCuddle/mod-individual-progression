@@ -763,7 +763,8 @@ namespace
     std::uint64_t CurrentHumanViewerEpoch(Player const* viewer)
     {
         if (!viewer || !viewer->IsInWorld() || !viewer->GetSession() ||
-            viewer->GetSession()->IsHeadless() || !viewer->GetGUID().IsPlayer())
+            viewer->GetSession()->IsHeadless() || !viewer->GetGUID().IsPlayer() ||
+            !sIndividualProgression->isNormalAccount(const_cast<Player*>(viewer)))
             return 0;
         HumanViewerSessionStamp const* state =
             viewer->CustomData.Get<HumanViewerSessionStamp>(ViewerEpochStampKey);
@@ -791,7 +792,8 @@ public:
                 player->CustomData.Get<HumanViewerSessionStamp>(ViewerEpochStampKey))
             old->stamp.Clear();
         if (!player->GetSession() || player->GetSession()->IsHeadless() ||
-            !player->GetGUID().IsPlayer())
+            !player->GetGUID().IsPlayer() ||
+            !sIndividualProgression->isNormalAccount(player))
             return;
 
         std::uint64_t const epoch = ViewerLoginEpochIssuer().Issue();
