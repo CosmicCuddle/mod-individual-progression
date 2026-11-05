@@ -703,3 +703,40 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 - **No in-game test was done.**
 
 **Rollback:** close the draft or discard the child branch. Nothing on any host, database, config or client was changed.
+
+## 4 November 2026 — F14 verified RandomBot stage-8 floor durability (IP-only, default OFF, separate review-only child)
+
+**Owner intent:** a positively verified headless Blood Elf/Draenei RandomBot that has **already earned** a TBC stage (8+) must not be pushed back into Vanilla by an IP-owned progression reset. Human Blood Elves and Draenei, Altbots, GMs, excluded and unverified characters keep historical behaviour. This change only **refuses** such writes. It never creates or grants stage 8 and never lowers a higher stage to 8. Per CS01 review (6644343493, 6644617347), a positive `ProgressionLimit` is **not** an input to this preservation rule. Refusing a destructive write is a no-op, not a grant, so the cap still governs new grants through `UpdateProgressionState`. An earned stage above a later-lowered cap is kept untouched (quarantined), logged as "preserved historic over-cap stage", and never silently deleted. Any reconciliation needs a separate owner-approved feature. Era bands: Vanilla 0–7, TBC 8–12, Wrath 13–18. Parent is draft #78 (`4bb8a8e`), approved by CS01 as a development-only task.
+
+**Route inventory:** every IP-owned route that can lower a stage goes through `ForceUpdateProgressionState`. That covers the login level write (non-normal accounts forced to 0, 8 or 13), group-accept sync, `SyncBotsProgressionToLeader`, `.ip set` and `.ip setbot`. `UpdateProgressionState`, boss kills, quest milestones and paid purchase only ever raise the stage.
+
+**Source and exact changes:**
+- **New `src/IndividualProgressionF14StageFloorPolicy.h`:** a pure rule, `BlocksVerifiedFloorDowngrade(on, verified, current, requested)`. It is true only when all of these hold:
+  - the option is ON and the identity is verified
+  - `8 <= current <= 18` and `requested < 8`
+
+  The cap is not an input. A separate `IsHistoricOverCapStage` is used for diagnostics only.
+- **`src/IndividualProgression.cpp` / `.h`:**
+  - Option `IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor`: member false, fallback false, and forced OFF without the Playerbots header.
+  - `BlocksF14VerifiedStageFloorDowngrade` requires the login-thread **verified epoch** (`HasF14VerifiedRandomBotIdentity`) AND a bot account AND BE/Draenei race AND a headless session. Race, account regex, headless or level are never proof on their own.
+  - **One guard as the first statement after the null check in `ForceUpdateProgressionState`:** a refused write is a no-op, logged at info level. No marker is removed or re-granted.
+- **`src/IndividualProgressionPlayer.cpp`:** one line. The option is added as another OR-reason in the existing positive identity gate, so the epoch exists. The `COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION` creation floor (#62) is untouched.
+- **`src/cs_individualProgression.cpp`:**
+  - `.ip set` refuses a blocked downgrade **before** `CheckProgressionAchievements` and the marker reset, so nothing is half-applied, with a clear GM message.
+  - `.ip setbot` skips blocked members and reports how many were skipped.
+- **`conf/individualProgression.conf.dist`:** the key `= 0`.
+- **`tests/test_ip_f14_lifecycle_source.py`:** one assertion updated, because the login identity gate now has four OR-reasons.
+- **New `tests/test_ip_f14_stage_floor_gm_successor.py`:** the successor GM source gate. Removing exactly the four reviewed allowlisted insertions must reproduce the reviewed parent `4bb8a8e` GM file byte-for-byte, so permissions, console and session safety, the paid audit and every other command are unchanged. It also checks that the insertions sit in the right functions, in order (refusal before achievement cleanup; skip before write).
+
+**Known intersections and blockers:**
+- **Protected GM bodies:** two prior-frozen byte-exact GM-file pins report the intended `.ip set`/`.ip setbot` change. They are `test_ip_grim_20261104_source_preservation.test_custom_gm_command_bodies_exactly_preserved` (#59) and `test_ip_combined_c3_f14_partial_login.test_gm_source_is_exactly_the_previously_reviewed_fix`. Both are recorded as invariants that don't directly apply to this candidate, and neither is edited or relaxed. They are superseded for this candidate by the explicit allowlisted successor gate above, as CS01 directed.
+- **Playerbots reset:** Playerbots `ResetQuests` removes markers directly, outside IP. It is **not covered**; see #49/#74, which are OFF.
+- **Saved stage 0–7:** a bot whose saved stage is 0–7 is never raised by this change. Creation remains #62, behind the Core refresh macro.
+
+**Tests:**
+- **Native policy tests:** 262,267 checks on GCC and Clang, C++17 and C++20, with and without NDEBUG. They are exhaustive over flag × identity × every 8-bit current × every 8-bit requested stage. They also include CS01's cap witnesses: (12,3,cap 8), (8,0,cap 7) and (18,7,cap 12) all block when ON and verified, and stay historical when OFF or unverified. Named owner cases and the over-cap diagnostic are covered too.
+- **Source contracts:** 8 stage-floor contracts (the cap is not in the decision signature or body), 3 successor-gate contracts, and the updated lifecycle contracts. Deliberate breakages were verified: the guard removed, the epoch not required, the achievement cleanup moved before the refusal, a changed console permission, and a removed paid-audit warning.
+- **CI:** an exact 12-path scope against `4bb8a8e`, plus a full native Worldserver link.
+- **No in-game test was done.**
+
+**Rollback:** close the draft or discard the child branch. With the option OFF (the default), every route is byte-for-byte historical. Nothing on any host, database, config or client was changed.
