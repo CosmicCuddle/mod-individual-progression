@@ -135,6 +135,8 @@ static void TestWrongOwnerEpochIncarnationGuidAndMap()
     CHECK(A::ObserveExactTaggedBatchAttempt(p, {}, creature, incarnation,
         A::Direction::OutOfRange, f) == A::Outcome::StaleOrCrossMapViewerCreature);
     CHECK(p.Find(viewer, creature).suppressPacket == P::PacketStage::ImpliedPendingBatchFlush);
+    CHECK(A::ObserveExactTaggedBatchAttempt(p, viewer, creature, incarnation,
+        static_cast<A::Direction>(255), SyntheticTaggedAttempt()) == A::Outcome::InvalidDirection);
 }
 static void TestSourceTaggedOutAndDuplicates()
 {
@@ -204,7 +206,8 @@ static void TestConfigurationAndViewerInvalidationsStillNeverClear()
     CHECK(p.NeedsRestore(viewer, creature));
     auto f = SyntheticTaggedAttempt();
     CHECK(A::ObserveExactTaggedBatchAttempt(p, viewer, creature, incarnation,
-        A::Direction::OutOfRange, f) == A::Outcome::ExactTaggedServerSendCallOnly);
+        A::Direction::OutOfRange, f) == A::Outcome::FrozenGlobalRestore);
+    CHECK(p.Find(viewer, creature).suppressPacket == P::PacketStage::ImpliedPendingBatchFlush);
     CHECK(p.NeedsRestore(viewer, creature));
     CHECK(p.GlobalRestoreRequired());
     CHECK(p.LedgerView().PendingRestores() == 1);
