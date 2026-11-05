@@ -39,6 +39,10 @@
 #include "Log.h"
 #include "Player.h"
 #include "ScriptMgr.h"
+#if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
+#include "WorldObjectScript.h"
+#include <atomic>
+#endif
 #include "TemporarySummon.h"
 #include <array>
 #include <mutex>
@@ -724,6 +728,74 @@ public:
         LogPoisonOnce();
     }
 };
+// This is real Core -> IP event wiring, but STRICTLY OBSERVER-ONLY.
+// It is compiled and registered only on an explicitly opted-in CI build
+// with the #93 OUT + #95 CREATE source-attributed Core hook prototypes.
+// The default build has neither hook dependency nor runtime registration.
+//
+// Neither callback can identify the retired creature incarnation for an
+// OUT event. Only count the source-attributed call attempts, NEVER pass
+// fabricated session/incarnation authority into Claude's #94 protocol.
+// The original #103 pure bridge remains UNWIRED until full identity and
+// map-owner proof exist. No packet, suppression, client ACK or ledger clear.
+#if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
+class IndividualProgressionF14TaggedGuidObserverScript final : public WorldObjectScript
+{
+public:
+    IndividualProgressionF14TaggedGuidObserverScript()
+        : WorldObjectScript("IndividualProgression_F14TaggedGuidObserver",
+            {WORLDOBJECTHOOK_ON_F14_BATCH_OUT_OF_RANGE_ATTEMPT,
+             WORLDOBJECTHOOK_ON_F14_BATCH_CREATE_ATTRIBUTION_QUERY,
+             WORLDOBJECTHOOK_ON_F14_BATCH_CREATE_ATTEMPT}) { }
+
+    // Negative-only: this script NEVER nominates a CREATE for F14.
+    // In particular, a generic Core CREATE is not prior-hidden proof.
+    bool OnF14ShouldAttributeCreatureCreateAttempt(
+        Player const* /*viewer*/, WorldObject const* /*creature*/) override
+    {
+        return false;
+    }
+
+    void OnF14VisibilityBatchOutOfRangeAttempt(
+        Player const* viewer, ObjectGuid const& creatureGuid) override
+    {
+        RecordServerCall(viewer, creatureGuid, _outAttempts, _invalidAttempts,
+                         "OUT-OF-RANGE");
+    }
+
+    void OnF14VisibilityBatchCreateAttempt(
+        Player const* viewer, ObjectGuid const& creatureGuid) override
+    {
+        RecordServerCall(viewer, creatureGuid, _createAttempts, _invalidAttempts,
+                         "CREATE");
+    }
+
+private:
+    // Per-script aggregate counters only: no GUID, Player*, Map* or login
+    // epoch is retained. These are send-CALL observations, not client ACKs.
+    std::atomic<std::uint64_t> _outAttempts{0};
+    std::atomic<std::uint64_t> _createAttempts{0};
+    std::atomic<std::uint64_t> _invalidAttempts{0};
+
+    static void RecordServerCall(Player const* viewer, ObjectGuid const& guid,
+        std::atomic<std::uint64_t>& count,
+        std::atomic<std::uint64_t>& invalidCount,
+        char const* direction)
+    {
+        if (!viewer || !viewer->IsInWorld() || !viewer->GetMap() ||
+            guid.IsEmpty() || !guid.IsCreature())
+        {
+            if (invalidCount.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_ERROR("module", "IP F14 observer rejected invalid GUID send-call metadata; all concealment stays OFF");
+            return;
+        }
+
+        // First occurrence only; no chatty per-GUID logging or player data.
+        if (count.fetch_add(1, std::memory_order_relaxed) == 0)
+            LOG_INFO("module", "IP F14 observer saw its first tagged {} server send-call; this is NOT client receipt or restoration", direction);
+    }
+};
+#endif
 #endif
 
 void AddSC_mod_individual_progression_f14_lifecycle()
@@ -731,5 +803,8 @@ void AddSC_mod_individual_progression_f14_lifecycle()
 #if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION) && COSMIC_F14_ATTACK_EVENT_HOOK_VERSION >= 1
     new IndividualProgressionF14LifecycleScript();
     new IndividualProgressionF14LifecycleRemovalScript();
+#if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
+    new IndividualProgressionF14TaggedGuidObserverScript();
+#endif
 #endif
 }
