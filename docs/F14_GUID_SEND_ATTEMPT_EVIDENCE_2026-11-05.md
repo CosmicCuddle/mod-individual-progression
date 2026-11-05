@@ -14,6 +14,7 @@ The adapter accepts a future caller's **independently verified F14 source tag, a
 - **OUT-OF-RANGE:** only an original F14-linked/unlinked *batched* suppression may upgrade `ImpliedPendingBatchFlush` to `HandedToSessionBatched`.
 - **CREATE:** only an exact previously F14-hidden pair with a **pending restore obligation** and a prior same-session/incarnation **relink** may upgrade the batched restore-send attempt. Generic Core creations cannot be called restores.
 - A wrong GUID, relogged viewer, wrong map/instance, recycled creature, wrong direction/stage, duplicate attempt, an untagged Core update, missing send-call evidence and an unknown prior record all refuse.
+- **Delayed OUT after stop, death, viewer logout or a rights/era change is refused** whenever the exact pair already owes restoration. A late outgoing packet cannot upgrade old suppression evidence once reappearance is required, even if the global restore flag is not frozen.
 - **Global restore already required** (config disabled, failed source proof or overflow) freezes evidence upgrades, so late packets cannot silently appear to resolve a full restore requirement.
 
 It calls only the original `ObserveProposedBatchFlush` after validating everything. **It NEVER clears any prior-hidden ledger state** and cannot grant a positive hide. Both `HasIndependentlyVerifiedClientPresentation()` and `IsRuntimeF14ConcealmentAuthorized()` return hardcoded `false`.
