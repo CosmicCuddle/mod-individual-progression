@@ -1,0 +1,100 @@
+# F14 default-OFF negative Core group/active-aura guard only. NO HOST/CLIENT.
+# C++ stubs exercise the EXACT transformed #99 Core helper; not real gameplay.
+name: F14 bounded group aura direct Core veto original-helper model (OFF)
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-core-group-aura-veto-20261105
+  pull_request:
+    branches:
+      - research/cs01-f14-core-direct-interest-veto-20261105
+    paths:
+      - "tests/core_patches/apply_f14_core_group_aura_veto.py"
+      - "tests/f14_core_group_aura_veto_model.cpp"
+      - "tests/test_ip_f14_core_group_aura_veto_source.py"
+      - ".github/workflows/ip-f14-core-group-aura-veto-model-20261105.yml"
+      - "docs/F14_CORE_GROUP_AURA_VETO_2026-11-05.md"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+
+permissions:
+  contents: read
+
+jobs:
+  core-guard-source-model:
+    name: Six-path #99 helper and Grim Core API, eight C++ configs (NO HOST)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout exact pinned Grim Core API read only
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: pinned-grim-core
+          persist-credentials: false
+      - name: Assert six-path scope, preserved blobs, real Core APIs and flags OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=0856c31fb43731821f45405ce6be8f8bebc7d4bc
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort > /tmp/f14-actual
+          printf '%s\n' \
+            'tests/core_patches/apply_f14_core_group_aura_veto.py' \
+            'tests/f14_core_group_aura_veto_model.cpp' \
+            'tests/test_ip_f14_core_group_aura_veto_source.py' \
+            '.github/workflows/ip-f14-core-group-aura-veto-model-20261105.yml' \
+            'docs/F14_CORE_GROUP_AURA_VETO_2026-11-05.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/f14-expected
+          diff -u /tmp/f14-expected /tmp/f14-actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src conf sql data optional)"
+          test "$(git rev-parse HEAD:tests/core_patches/apply_f14_direct_interaction_veto.py)" = 98ca29d14fd702cb4f961177de16d905eaf567e3
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14LifecycleRegistry.h)" = 2d6bf7fb473ae118be35a0c9f98276b8bed1e2e8
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14ViewerRestoreProtocol.h)" = f520356a8152d98580751604f4649fe1b564f072
+          test "$(git -C pinned-grim-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          grep -Fq 'GetGroup() const' pinned-grim-core/src/server/game/Entities/Player/Player.h
+          grep -Fq 'GetAppliedAuras() const' pinned-grim-core/src/server/game/Entities/Unit/Unit.h
+          grep -Fq 'Aura* GetBase() const' pinned-grim-core/src/server/game/Spells/Auras/SpellAuras.h
+          grep -Fq 'GetCasterGUID() const' pinned-grim-core/src/server/game/Spells/Auras/SpellAuras.h
+          grep -Fq '#include "SpellAuraEffects.h"' pinned-grim-core/src/server/game/Entities/Player/PlayerUpdates.cpp
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_core_group_aura_veto_source.py' -v
+          echo 'PASS: six-path preserved source, pinned Core API, all flags OFF'
+      - name: Compile and run EXACT transformed helper on stubbed interaction cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path("tests").resolve()))
+          from test_ip_f14_core_group_aura_veto_source import transformed_synthetic, extract_helper
+          transformed = transformed_synthetic()
+          header = extract_helper(transformed)
+          assert header.startswith("static bool F14ViewerHasDirectInteractionVeto(")
+          assert header.count("if (viewer->GetGroup())") == 1
+          assert header.count("creature->GetAppliedAuras()") == 1
+          assert header.count("return false;") == 1
+          Path("/tmp/f14_core_group_aura_veto.h").write_text(header, encoding="utf-8")
+          print("PASS: helper extracted from original #99 patcher + #100 exact overlay")
+          PY
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2  "${flags[@]}"  \
+                  -I/tmp tests/f14_core_group_aura_veto_model.cpp -o /tmp/f14-exact-core-negative-model
+                /tmp/f14-exact-core-negative-model
+              done
+            done
+          done
+          echo 'PASS: exact Core helper model in eight compiler configurations; NOT native Worldserver/3.3.5a gameplay'
