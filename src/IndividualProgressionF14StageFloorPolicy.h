@@ -7,8 +7,13 @@
  * refused because it would push a positively verified headless Blood
  * Elf/Draenei RandomBot below an ALREADY EARNED TBC stage (8+).
  *
- * It never creates stage 8, never lowers a higher earned stage to 8, and
- * never bypasses a positive ProgressionLimit. The caller must prove identity
+ * It never creates stage 8 and never lowers a higher earned stage to 8.
+ * A positive ProgressionLimit is NOT consulted: refusing a destructive
+ * write is a no-op, not a grant, so it cannot bypass the cap for new
+ * grants (UpdateProgressionState still enforces it). An earned stage above
+ * a later-lowered cap is preserved untouched (quarantined), never silently
+ * deleted; any reconciliation needs a separate owner-approved feature.
+ * The caller must prove identity
  * separately (login-thread verified epoch, bot account, headless session,
  * BE/Draenei race); race, account regex, headless or level alone are never
  * positive proof. Era bands: Vanilla 0-7, TBC 8-12, Wrath 13-18.
@@ -28,8 +33,7 @@ namespace IndividualProgressionF14StageFloorPolicy
     constexpr bool BlocksVerifiedFloorDowngrade(bool optionEnabled,
                                                 bool identityPositivelyVerified,
                                                 std::uint8_t currentStage,
-                                                std::uint8_t requestedStage,
-                                                std::int32_t progressionLimit)
+                                                std::uint8_t requestedStage)
     {
         if (!optionEnabled || !identityPositivelyVerified)
             return false;
@@ -38,14 +42,15 @@ namespace IndividualProgressionF14StageFloorPolicy
             return false;
         // Only a write that would land in Vanilla is a floor violation; a
         // same-era or higher write is left to the established route.
-        if (requestedStage >= FirstTbcStage)
-            return false;
-        // Limit 0 (or negative) = unlimited. A positive limit is never
-        // bypassed: if the current stage already exceeds it, keeping it
-        // would preserve an over-cap stage, so the write is not refused.
-        if (progressionLimit > 0 && currentStage > progressionLimit)
-            return false;
-        return true;
+        return requestedStage < FirstTbcStage;
+    }
+
+    // Diagnostic only (never a decision input): the preserved earned stage
+    // is above a positive ProgressionLimit, i.e. a historic over-cap record
+    // kept untouched pending a separately approved reconciliation.
+    constexpr bool IsHistoricOverCapStage(std::uint8_t currentStage, std::int32_t progressionLimit)
+    {
+        return progressionLimit > 0 && currentStage > progressionLimit;
     }
 }
 

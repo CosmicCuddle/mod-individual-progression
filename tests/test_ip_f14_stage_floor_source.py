@@ -48,9 +48,15 @@ class PurePolicy(unittest.TestCase):
         fn = body_of(src, "constexpr bool BlocksVerifiedFloorDowngrade(", "\n    }\n")
         for token in ("if (!optionEnabled || !identityPositivelyVerified)",
                       "currentStage < FirstTbcStage || currentStage > LastSupportedStage",
-                      "if (requestedStage >= FirstTbcStage)",
-                      "progressionLimit > 0 && currentStage > progressionLimit"):
+                      "return requestedStage < FirstTbcStage;"):
             self.assertIn(token, fn)
+        # CS01 HIGH (6644343493/6644617347): the cap is NOT a decision input.
+        # An earned stage above a positive cap is preserved, never deleted.
+        sig = src.split("constexpr bool BlocksVerifiedFloorDowngrade(", 1)[1].split(")", 1)[0]
+        self.assertNotIn("Limit", sig)
+        self.assertNotIn("imit", fn)
+        diag = body_of(src, "constexpr bool IsHistoricOverCapStage(", "\n    }\n")
+        self.assertIn("progressionLimit > 0 && currentStage > progressionLimit", diag)
         self.assertIn("constexpr std::uint8_t FirstTbcStage = 8;", src)
         self.assertIn("constexpr std::uint8_t LastSupportedStage = 18;", src)
 
@@ -67,6 +73,9 @@ class CentralGuard(unittest.TestCase):
             "if (sIndividualProgression->BlocksF14VerifiedStageFloorDowngrade(player, static_cast<uint8>(newState)))"))
         guard = fn[fn.index("BlocksF14VerifiedStageFloorDowngrade"):]
         guard = guard[:guard.index("return;") + len("return;")]
+        # Over-cap is a diagnostic only, inside the refusal branch.
+        self.assertIn("IsHistoricOverCapStage(keptStage, sIndividualProgression->progressionLimit)", guard)
+        self.assertIn("preserved historic over-cap stage", read("src/IndividualProgression.cpp"))
         self.assertNotIn("RemoveRewardedQuest", guard)
         self.assertNotIn("RewardQuest", guard)
         self.assertLess(fn.index("BlocksF14VerifiedStageFloorDowngrade"), fn.index("RemoveRewardedQuest"))
@@ -79,8 +88,10 @@ class CentralGuard(unittest.TestCase):
         for token in ("isBotAccount(player)", "RACE_DRAENEI", "RACE_BLOODELF", "IsHeadless()",
                       "HasF14VerifiedRandomBotIdentity(player)",
                       "IndividualProgressionF14StageFloorPolicy::BlocksVerifiedFloorDowngrade(",
-                      "GetPlayerProgressionFromQuests(player)", "progressionLimit"):
+                      "GetPlayerProgressionFromQuests(player), requestedStage);"):
             self.assertIn(token, fn)
+        # The cap never decides whether an earned stage may be destroyed.
+        self.assertNotIn("progressionLimit", fn)
         # Race/regex/headless/level are requirements AND-ed with the epoch,
         # never proof on their own; no Playerbots or stage writes here.
         ident = fn[fn.index("bool const identity ="):fn.index(";", fn.index("bool const identity ="))]

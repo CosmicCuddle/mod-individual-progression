@@ -97,8 +97,13 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
     // no-op: the current earned stage stays exactly as it is.
     if (sIndividualProgression->BlocksF14VerifiedStageFloorDowngrade(player, static_cast<uint8>(newState)))
     {
-        LOG_INFO("module", "IndividualProgression F14: refused progression write {} for verified RandomBot guid {} (earned TBC stage kept)",
-            static_cast<uint32>(newState), player->GetGUID().GetCounter());
+        uint8 const keptStage = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+        if (IndividualProgressionF14StageFloorPolicy::IsHistoricOverCapStage(keptStage, sIndividualProgression->progressionLimit))
+            LOG_INFO("module", "IndividualProgression F14: refused progression write {} for verified RandomBot guid {}; preserved historic over-cap stage {} (limit {}) untouched",
+                static_cast<uint32>(newState), player->GetGUID().GetCounter(), static_cast<uint32>(keptStage), sIndividualProgression->progressionLimit);
+        else
+            LOG_INFO("module", "IndividualProgression F14: refused progression write {} for verified RandomBot guid {} (earned TBC stage {} kept)",
+                static_cast<uint32>(newState), player->GetGUID().GetCounter(), static_cast<uint32>(keptStage));
         return;
     }
 
@@ -713,8 +718,9 @@ bool IndividualProgression::BlocksF14VerifiedStageFloorDowngrade(Player* player,
         (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
         player->GetSession() && player->GetSession()->IsHeadless() &&
         HasF14VerifiedRandomBotIdentity(player);
+    // The cap is deliberately NOT an input: refusing is a no-op, never a grant.
     return IndividualProgressionF14StageFloorPolicy::BlocksVerifiedFloorDowngrade(
-        true, identity, GetPlayerProgressionFromQuests(player), requestedStage, progressionLimit);
+        true, identity, GetPlayerProgressionFromQuests(player), requestedStage);
 }
 
 bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage)

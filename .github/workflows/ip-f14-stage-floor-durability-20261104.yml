@@ -13,6 +13,7 @@ on:
       - "tests/f14_lifecycle_registry.cpp"
       - "tests/f14_stage_floor_policy.cpp"
       - "tests/test_ip_f14_stage_floor_source.py"
+      - "tests/test_ip_f14_stage_floor_gm_successor.py"
       - "tests/test_ip_f14_lifecycle_source.py"
       - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
       - ".github/workflows/ip-f14-stage-floor-durability-20261104.yml"
@@ -37,7 +38,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: "Verify #78 ancestry and EXACT eleven-path child scope"
+      - name: "Verify #78 ancestry and EXACT twelve-path child scope"
         shell: bash
         run: |
           set -euo pipefail
@@ -57,6 +58,7 @@ jobs:
             'src/cs_individualProgression.cpp' \
             'tests/f14_stage_floor_policy.cpp' \
             'tests/test_ip_f14_lifecycle_source.py' \
+            'tests/test_ip_f14_stage_floor_gm_successor.py' \
             'tests/test_ip_f14_stage_floor_source.py' | sort > /tmp/allowed
           diff -u /tmp/allowed /tmp/actual
           git diff --check "$parent" HEAD
@@ -92,6 +94,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_stage_floor_source.py' -v
+          # Successor GM gate: the frozen byte-exact GM pins are not edited;
+          # this proves the GM file is the reviewed parent plus ONLY the
+          # allowlisted #80 insertions (needs full history: fetch-depth 0).
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_stage_floor_gm_successor.py' -v
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_lifecycle_source.py' -v
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_grim_player_who_observer_source.py' -v
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_verified_rndbot_tbc_floor.py' -v
