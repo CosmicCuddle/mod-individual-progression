@@ -1,0 +1,76 @@
+# PURE model/CI only — NO live or paid/F14 switch-on.
+name: F14 conservative human rights and prior-hidden restore joint gate (OFF)
+
+on:
+  push:
+    branches:
+      - integration/cs01-f14-viewer-rights-gate-20261105
+  pull_request:
+    branches:
+      - integration/cs01-f14-pure-viewer-protocol-on-ip92-20261105
+    paths:
+      - "src/IndividualProgressionF14ViewerRightsGate.h"
+      - "tests/f14_viewer_rights_gate.cpp"
+      - "tests/test_ip_f14_viewer_rights_gate_source.py"
+      - ".github/workflows/ip-f14-joint-rights-gate-source-20261105.yml"
+      - "docs/F14_JOINT_VIEWER_RIGHTS_GATE_2026-11-05.md"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+
+permissions:
+  contents: read
+
+jobs:
+  joint-rights-source:
+    name: Actual combined #97 pure viewer gate and full-rights fail-closed model (NO HOST)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exactly six additive paths and immutable #92 / Claude #94 parents
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=d8aa20cb4f59df7caceab7842247f38d003867d5
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort > /tmp/f14-actual
+          printf '%s\n' \
+            'src/IndividualProgressionF14ViewerRightsGate.h' \
+            'tests/f14_viewer_rights_gate.cpp' \
+            'tests/test_ip_f14_viewer_rights_gate_source.py' \
+            '.github/workflows/ip-f14-joint-rights-gate-source-20261105.yml' \
+            'docs/F14_JOINT_VIEWER_RIGHTS_GATE_2026-11-05.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/f14-expected
+          diff -u /tmp/f14-expected /tmp/f14-actual
+          test -z "$(git diff --name-only "$parent" HEAD -- conf sql data optional)"
+          test -z "$(git diff --name-only "$parent" HEAD -- src/IndividualProgression.cpp src/IndividualProgressionPlayer.cpp src/IndividualProgressionF14LifecycleScript.cpp src/IndividualProgressionF14LifecycleRegistry.h src/IndividualProgressionF14ViewerRestoreProtocol.h src/IndividualProgressionF14PriorHiddenLedger.h)"
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14LifecycleRegistry.h)" = 2d6bf7fb473ae118be35a0c9f98276b8bed1e2e8
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14ViewerRestoreProtocol.h)" = f520356a8152d98580751604f4649fe1b564f072
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14PriorHiddenLedger.h)" = 2250bae56bb09a810d337927f738bd3cbcf5fddd
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_viewer_rights_gate_source.py' -v
+          echo 'PASS: additive model only, no positive runtime listener or full-ready macro'
+      - name: Compile pure joint gate model on GCC/Clang C++17/20 and NDEBUG
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  -Isrc tests/f14_viewer_rights_gate.cpp \
+                  -o /tmp/cosmic-f14-joint-viewer-gate
+                /tmp/cosmic-f14-joint-viewer-gate
+              done
+            done
+          done
+          # Preserve previously-integrated #94 original model.
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -O2 -Isrc \
+            tests/f14_viewer_restore_protocol.cpp -o /tmp/cosmic-f14-prior-protocol
+          /tmp/cosmic-f14-prior-protocol
+          echo 'PASS: source-only joint viewer gate; synthetic positives are not live permission or client ACK'
