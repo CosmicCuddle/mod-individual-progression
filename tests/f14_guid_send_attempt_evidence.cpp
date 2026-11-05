@@ -164,6 +164,13 @@ static void TestRestoreOnlyAfterRealPriorHideAndRelink()
         A::Direction::Create, f) == A::Outcome::WrongDirectionOrServerStage);
     suppressed.ObserveCreatureRetired(creature); // stop/death/corpse
     CHECK(suppressed.NeedsRestore(viewer, creature));
+    // The OUT notification may reach this observer only after the source
+    // has already been retired. It must NOT be upgraded as fresh hide proof.
+    CHECK(A::ObserveExactTaggedBatchAttempt(suppressed, viewer, creature, incarnation,
+        A::Direction::OutOfRange, f) == A::Outcome::WrongDirectionOrServerStage);
+    CHECK(suppressed.Find(viewer, creature).suppressPacket ==
+          P::PacketStage::ImpliedPendingBatchFlush);
+    CHECK(suppressed.LedgerView().PendingRestores() == 1);
     CHECK(A::ObserveExactTaggedBatchAttempt(suppressed, viewer, creature, incarnation,
         A::Direction::Create, f) == A::Outcome::WrongDirectionOrServerStage);
     CHECK(suppressed.ObserveLinkTransition(viewer, creature, incarnation, true,
