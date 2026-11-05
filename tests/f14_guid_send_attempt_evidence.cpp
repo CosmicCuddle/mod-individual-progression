@@ -127,7 +127,7 @@ static void TestWrongOwnerEpochIncarnationGuidAndMap()
     CHECK(A::ObserveExactTaggedBatchAttempt(p, viewer, wrongInstance, incarnation,
         A::Direction::OutOfRange, f) == A::Outcome::StaleOrCrossMapViewerCreature);
     CHECK(A::ObserveExactTaggedBatchAttempt(p, viewer, otherCreature, incarnation,
-        A::Direction::OutOfRange, f) == A::Outcome::StaleOrCrossMapViewerCreature);
+        A::Direction::OutOfRange, f) == A::Outcome::MissingMatchingPriorF14Suppression);
     CHECK(A::ObserveExactTaggedBatchAttempt(p, viewer, creature, incarnation + 1,
         A::Direction::OutOfRange, f) == A::Outcome::StaleOrCrossMapViewerCreature);
     CHECK(A::ObserveExactTaggedBatchAttempt(p, viewer, creature, 0,
