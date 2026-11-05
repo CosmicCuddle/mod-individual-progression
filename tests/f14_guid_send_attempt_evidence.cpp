@@ -203,6 +203,29 @@ static void TestWrongPathOrDirectionNeverUpgrade()
         A::Direction::Create, f) == A::Outcome::NotPendingSameDirectionBatch);
     CHECK(direct.NeedsRestore(viewer, creature));
 }
+static void TestViewerRightsChangeRejectsDelayedOut()
+{
+    Protocol p = SyntheticPriorHide();
+    // Rights changed before the matching per-GUID send attempt was delivered
+    // to this observer; the original prior-hidden record now owes restore.
+    p.ObserveViewerEraOrRightsChanged(viewer.guidRaw);
+    CHECK(p.NeedsRestore(viewer, creature));
+    CHECK(!p.GlobalRestoreRequired());
+    auto f = SyntheticTaggedAttempt();
+    CHECK(A::ObserveExactTaggedBatchAttempt(p, viewer, creature, incarnation,
+        A::Direction::OutOfRange, f) == A::Outcome::WrongDirectionOrServerStage);
+    CHECK(p.Find(viewer, creature).suppressPacket == P::PacketStage::ImpliedPendingBatchFlush);
+    CHECK(p.LedgerView().PendingRestores() == 1);
+    CHECK(!p.MayAnswerPositiveSuppression(viewer, creature, incarnation, SyntheticApproved()));
+
+    // A viewer session end is likewise a revocation, never confirmation.
+    Protocol q = SyntheticPriorHide();
+    q.ObserveViewerSessionEnded(viewer.guidRaw);
+    CHECK(q.NeedsRestore(viewer, creature));
+    CHECK(A::ObserveExactTaggedBatchAttempt(q, viewer, creature, incarnation,
+        A::Direction::OutOfRange, f) == A::Outcome::WrongDirectionOrServerStage);
+    CHECK(q.Find(viewer, creature).suppressPacket == P::PacketStage::ImpliedPendingBatchFlush);
+}
 static void TestConfigurationAndViewerInvalidationsStillNeverClear()
 {
     Protocol p = SyntheticPriorHide();
@@ -228,6 +251,7 @@ int main()
     TestSourceTaggedOutAndDuplicates();
     TestRestoreOnlyAfterRealPriorHideAndRelink();
     TestWrongPathOrDirectionNeverUpgrade();
+    TestViewerRightsChangeRejectsDelayedOut();
     TestConfigurationAndViewerInvalidationsStillNeverClear();
     std::printf("F14 tagged server-call evidence model: %u passed, %u failed\n", passed, failed);
     return failed ? 1 : 0;
