@@ -91,9 +91,17 @@ namespace
     }
 #endif
 
-    // Must be called with LifecycleLock() held.
+    // Must be called with LifecycleLock() held. Queue failure is independent
+    // of registry poison and can originate from human damage/HoT/assist fanout.
     void LogPoisonOnce()
     {
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        if (PendingLogoutRefresh().IsPoisoned() && !LogoutRefreshOverflowLogged())
+        {
+            LogoutRefreshOverflowLogged() = true;
+            LOG_ERROR("module", "IndividualProgression F14 experimental map-thread refresh queue exhausted; no further requests accepted, concealment must remain disabled");
+        }
+#endif
         Registry::Registry const& registry = LifecycleRegistry();
         if (!registry.IsPoisoned() || PoisonLogged())
             return;
@@ -133,11 +141,7 @@ void IndividualProgression::ExpireF14LifecycleActor(std::uint64_t loginEpoch)
             pending.Remember(key, stamp);
         });
     HasPendingLogoutRefresh().store(pending.HasPending(), std::memory_order_release);
-    if (pending.IsPoisoned() && !LogoutRefreshOverflowLogged())
-    {
-        LogoutRefreshOverflowLogged() = true;
-        LOG_ERROR("module", "IndividualProgression F14 experimental map-thread refresh queue exhausted; no further requests accepted, concealment must remain disabled");
-    }
+    LogPoisonOnce();
 #else
     std::size_t const affected = LifecycleRegistry().ExpireActor(loginEpoch);
 #endif
@@ -152,6 +156,11 @@ IndividualProgression::F14LifecycleStatus IndividualProgression::GetF14Lifecycle
     F14LifecycleStatus status;
     status.enabled = f14ExperimentalAttackLifecycleRegistry;
     status.poisoned = registry.IsPoisoned();
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    // A poisoned refresh queue cannot satisfy future viewer restores even if
+    // the combat registry itself is healthy. Surface this as unhealthy.
+    status.poisoned = status.poisoned || PendingLogoutRefresh().IsPoisoned();
+#endif
     status.trackedCreatures = registry.Size();
     status.capacity = registry.Capacity();
     Registry::Counters const& c = registry.GetCounters();
