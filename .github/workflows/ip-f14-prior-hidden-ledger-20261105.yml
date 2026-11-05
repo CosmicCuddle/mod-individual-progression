@@ -1,0 +1,46 @@
+# Source/pure-model ONLY. Existing source and all F14 features remain OFF.
+name: F14 explicit prior-hidden viewer restoration ledger pure model (NO HOST)
+on:
+  push:
+    branches:
+      - research/cs01-f14-prior-hidden-ledger-20261105
+  pull_request:
+    branches:
+      - research/cs01-f14-logout-mapthread-refresh-20261104
+permissions:
+  contents: read
+jobs:
+  pure-model:
+    name: F14 per-viewer ledger C++17/C++20 and source safety (NO HOST)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact five-file child and preserve runtime source
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=1f71b99c2cfff79b2ad42019769da539c89ec61b
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            '.github/workflows/ip-f14-prior-hidden-ledger-20261105.yml' \
+            'src/IndividualProgressionF14PriorHiddenLedger.h' \
+            'tests/f14_prior_hidden_ledger.cpp' \
+            'tests/test_ip_f14_prior_hidden_ledger_source.py' \
+            'docs/F14_PRIOR_HIDDEN_LEDGER_2026-11-05.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          git diff --check "$parent"
+          test -z "$(git diff --name-only "$parent" HEAD -- src/IndividualProgressionF14LifecycleScript.cpp src/IndividualProgression.cpp conf sql data optional)"
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_prior_hidden_ledger_source.py' -v
+          for std in c++17 c++20; do
+            for cxx in g++ clang++; do
+              "$cxx" -std="$std" -Wall -Wextra -Werror -pedantic -O2 -Isrc tests/f14_prior_hidden_ledger.cpp -o /tmp/f14-ledger-test
+              /tmp/f14-ledger-test
+            done
+          done
+          echo 'PASS: pure per-viewer ledger only; nothing installed, no hiding or client receipt'
