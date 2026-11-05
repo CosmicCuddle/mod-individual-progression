@@ -1,0 +1,526 @@
+# IP F14 logout identity -> owned-map refresh handoff, experimental, default OFF.
+# Child of #82, includes Core #77 event hook and verified #78 minion evidence.
+# Bounded key+incarnation queue, NO Unit* across threads and no hide or rights.
+name: F14 #88 rights + #80 floor + RNDBOT PB + F14 Core full native (NO HOST)
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-rights-floor-pb-full-native-20261105
+  pull_request:
+    branches:
+      - research/cs01-f14-floor-pb-core-native-20261105
+    paths:
+      - ".github/workflows/ip-f14-rights-floor-pb-native-20261105.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  rights-one-file-source:
+    name: Exact CI-only child of previously green #87 (NO HOST)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate single workflow change and preserve runtime source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor f6ae0bb29f68107ca341993d553b5a82981bf6f7 HEAD
+          git diff --name-only f6ae0bb29f68107ca341993d553b5a82981bf6f7 HEAD | sort > /tmp/actual
+          printf '%s\n' '.github/workflows/ip-f14-rights-floor-pb-native-20261105.yml' > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          git diff --check f6ae0bb29f68107ca341993d553b5a82981bf6f7
+          test -z "$(git diff --name-only f6ae0bb29f68107ca341993d553b5a82981bf6f7 HEAD -- src conf sql data optional tests docs)"
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_viewer_suppression_attribution.py' -v
+          echo 'PASS: exact #87 source preserved, one CI-only child'
+
+  native-worldserver-link:
+    name: "Native Worldserver #88 rights + Claude floor + selected PB + Naxx/Services (NO LAUNCH)"
+    runs-on: ubuntu-24.04
+    needs: [rights-one-file-source]
+    timeout-minutes: 170
+    steps:
+      - name: Checkout Grim Core newer 0d754
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: acore
+          persist-credentials: false
+      - name: Checkout historical pinned Playerbots
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: acore/modules/mod-playerbots
+          persist-credentials: false
+      - name: Checkout exact PR head IP source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: acore/modules/mod-individual-progression
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Checkout exact Claude IP #80 corrected stage-floor rev2 (READ ONLY)
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: c64c6f7ef496419d6fa82c054035892f1ab91864
+          path: claude-stagefloor
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Checkout exact #88 rights-change C++/source evidence (READ ONLY)
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: c6cd97366f080b78a2712238b853025b20584d0a
+          path: rights-mapthread
+          persist-credentials: false
+          fetch-depth: 0
+      - name: "Checkout untouched Naxx first test candidate #292"
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/Mod-Naxxramas-Core
+          ref: 51d0611476358286505aed3ca806ea250f644f66
+          path: acore/modules/mod-naxxramas-core
+          persist-credentials: false
+      - name: "Checkout untouched Character Services first test #16"
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-character-services
+          ref: b5d372eda5cd08b6a650c78a5faeb01ee1c3702d
+          path: acore/modules/mod-character-services
+          persist-credentials: false
+      - name: "Checkout ORIGINAL tested F14 #56 prototype patches as read-only source"
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: 6cf528c0f1728ed3ec8fdd11e020f07ec23f3af5
+          path: f14-original
+          persist-credentials: false
+
+      - name: Checkout exact already-green #67 + #70 observer sources (reference only)
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: 11fd5d64eb2408ff0fe464c72d31ab283e3d51e5
+          path: f14-observer
+          persist-credentials: false
+
+      - name: Checkout exact #76/#77 Core patch artifacts as read-only input
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: 6182893d18e0ab2bb1d581900910346c1c0819b2
+          path: f14-core-refresh
+          persist-credentials: false
+
+      - name: Checkout exact selected-RNDBOT Playerbots patch layers #49/#74 (READ ONLY)
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: feb616e88fe4435edf9b8cb1e140272e5c644112
+          path: pb-refinement
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify exact pins and OFF defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          ip=acore/modules/mod-individual-progression
+          test "$(git -C acore rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          test "$(git -C acore/modules/mod-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          test "$(git -C "$ip" rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          git -C "$ip" merge-base --is-ancestor c2cc14bc9c18a3e60c984c491370e7da787a388a HEAD
+          # Preserve all reviewed #83/#86 IP C++ and optional Core pilot code;
+          # only ONE additional CI file may differ.
+          git -C "$ip" merge-base --is-ancestor 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD
+          git -C "$ip" diff --name-only 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD | sort > /tmp/source-actual
+          printf '%s\n' \
+            '.github/workflows/ip-f14-logout-mapthread-refresh-native-20261104.yml' \
+            'src/IndividualProgressionF14LogoutRefreshQueue.h' \
+            'src/IndividualProgressionF14LifecycleRegistry.h' \
+            'src/IndividualProgressionF14LifecycleScript.cpp' \
+            'tests/f14_logout_refresh_queue.cpp' \
+            'tests/test_ip_f14_logout_mapthread_source.py' \
+            'tests/test_ip_f14_postevent_reveal_request_source.py' \
+            'tests/test_ip_f14_lifecycle_source.py' \
+            'docs/F14_LOGOUT_MAPTHREAD_REFRESH_2026-11-04.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            '.github/workflows/ip-f14-viewer-suppression-attribution-native-20261105.yml' \
+            'tests/core_patches/apply_f14_viewer_suppression_attribution.py' \
+            'tests/test_ip_f14_viewer_suppression_attribution.py' \
+            'docs/F14_VIEWER_SUPPRESSION_ATTRIBUTION_2026-11-05.md' \
+            '.github/workflows/ip-f14-stagefloor-pb-core-native-20261105.yml' \
+            '.github/workflows/ip-f14-rights-floor-pb-native-20261105.yml' | sort > /tmp/source-allowed
+          diff -u /tmp/source-allowed /tmp/source-actual
+          git -C "$ip" diff --check 2df1eadb1c3f3aa12f76eaa357e17487792f8077
+          test -z "$(git -C "$ip" diff --name-only 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD -- conf sql data optional)"
+          test -s "$ip/src/IndividualProgressionF14LogoutRefreshQueue.h"
+          test -s "$ip/tests/f14_logout_refresh_queue.cpp"
+          test -s f14-core-refresh/tests/core_patches/f14_event_visibility_refresh_request_prototype.patch
+          test "$(git -C acore/modules/mod-naxxramas-core rev-parse HEAD)" = 51d0611476358286505aed3ca806ea250f644f66
+          test "$(git -C acore/modules/mod-character-services rev-parse HEAD)" = b5d372eda5cd08b6a650c78a5faeb01ee1c3702d
+          test "$(git -C f14-original rev-parse HEAD)" = 6cf528c0f1728ed3ec8fdd11e020f07ec23f3af5
+          test "$(git -C f14-observer rev-parse HEAD)" = 11fd5d64eb2408ff0fe464c72d31ab283e3d51e5
+          test -s f14-observer/tests/core_patches/f14_visibility_pass_observed_prototype.patch
+          test -s f14-observer/tests/test_ip_f14_core_visibility_pass_prototype_source.py
+          test -s f14-observer/tests/test_ip_f14_core_refresh_delivery_path.py
+          test "$(git -C f14-core-refresh rev-parse HEAD)" = 6182893d18e0ab2bb1d581900910346c1c0819b2
+          test "$(git -C claude-stagefloor rev-parse HEAD)" = c64c6f7ef496419d6fa82c054035892f1ab91864
+          test "$(git -C pb-refinement rev-parse HEAD)" = feb616e88fe4435edf9b8cb1e140272e5c644112
+          test "$(git -C pb-refinement rev-parse HEAD:tests/pb_patches/reset_earned_ip_markers_prototype.patch)" = baa179588397461ff8838371b6fdebd874940132
+          for key in AutoAttune PaidExpansion.Enable F14.ProtectVerifiedRandomBotGroupFloor \
+                     F14.PreserveVerifiedRandomBotStageOnLogin F14.ForceVerifiedRandomBotTbcFloorOnLogin \
+                     F14.ExperimentalRndbotPlayerVisibility F14.ExperimentalAttackLifecycleRegistry; do
+            grep -Fqx "IndividualProgression.$key = 0" "$ip/conf/individualProgression.conf.dist"
+          done
+          grep -Fqx 'CharacterServices.ExpansionUnlock.Enable = 0' acore/modules/mod-character-services/conf/character_services.conf.dist
+          echo 'PASS: exact pins; every paid/F14 option OFF'
+
+      - name: Test live-module source tree (stage-3 + guarded one-shot requester)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ip=acore/modules/mod-individual-progression
+          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_lifecycle_source.py' -v
+          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_postevent_reveal_request_source.py' -v
+          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_logout_mapthread_source.py' -v
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -O2 -I"$ip/src" \
+            "$ip/tests/f14_logout_refresh_queue.cpp" -o /tmp/f14-logout-native-model
+          /tmp/f14-logout-native-model
+          grep -Fq 'bool OnF14ShouldRefreshCreatureVisibility(Creature const* creature) override' "$ip/src/IndividualProgressionF14LifecycleScript.cpp"
+          echo 'PASS: real IP C++ source guarded; no Runtime/DB feature enabled'
+
+      - name: Overlay #88 source-pinned threat/assist refresh and run exact source+C++ tests (CI ONLY)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ip=acore/modules/mod-individual-progression
+          test "$(git -C rights-mapthread rev-parse HEAD)" = c6cd97366f080b78a2712238b853025b20584d0a
+          test "$(git -C rights-mapthread rev-parse HEAD:src/IndividualProgressionF14LifecycleRegistry.h)" = 2d6bf7fb473ae118be35a0c9f98276b8bed1e2e8
+          cp "rights-mapthread/src/IndividualProgressionF14LifecycleRegistry.h" "$ip/src/IndividualProgressionF14LifecycleRegistry.h"
+          test "$(git -C rights-mapthread rev-parse HEAD:src/IndividualProgressionF14LifecycleScript.cpp)" = cfe229719c7c182d84d3c0ee50c5f436be284b02
+          cp "rights-mapthread/src/IndividualProgressionF14LifecycleScript.cpp" "$ip/src/IndividualProgressionF14LifecycleScript.cpp"
+          test "$(git -C rights-mapthread rev-parse HEAD:tests/test_ip_f14_lifecycle_source.py)" = 8a681e3fe45744dc2f50b06fa140882c48141c51
+          cp "rights-mapthread/tests/test_ip_f14_lifecycle_source.py" "$ip/tests/test_ip_f14_lifecycle_source.py"
+          test "$(git -C rights-mapthread rev-parse HEAD:tests/test_ip_f14_rights_refresh_source.py)" = fbc301849db0ea84c42a6418d92bf343ea9cb1f0
+          cp "rights-mapthread/tests/test_ip_f14_rights_refresh_source.py" "$ip/tests/test_ip_f14_rights_refresh_source.py"
+          test "$(git -C rights-mapthread rev-parse HEAD:tests/f14_rights_refresh_handoff.cpp)" = bc759e9eaa8f428a3b0d7ac2a53676038f518395
+          cp "rights-mapthread/tests/f14_rights_refresh_handoff.cpp" "$ip/tests/f14_rights_refresh_handoff.cpp"
+          for test_file in test_ip_f14_rights_refresh_source.py test_ip_f14_lifecycle_source.py test_ip_f14_logout_mapthread_source.py test_ip_f14_postevent_reveal_request_source.py; do
+            python3 -B -m unittest discover -s "$ip/tests" -p "$test_file" -v
+          done
+          for std in c++17 c++20; do
+            for compiler in g++ clang++; do
+              "$compiler" -std="$std" -Wall -Wextra -Werror -pedantic -O2 -I"$ip/src" \
+                "$ip/tests/f14_rights_refresh_handoff.cpp" -o /tmp/f14-rights-candidate
+              /tmp/f14-rights-candidate
+            done
+          done
+          echo 'PASS: exact #88 rights invalidation source/model on #87 pre-stagefloor IP tree, no hide'
+
+      - name: Overlay exact nine Claude #80 rev2 files in disposable IP checkout ONLY
+        shell: bash
+        run: |
+          set -euo pipefail
+          ip=acore/modules/mod-individual-progression
+          test "$(git -C claude-stagefloor rev-parse HEAD)" = c64c6f7ef496419d6fa82c054035892f1ab91864
+          # Disjoint from #83 logout and #86 Core patch source; never modify protected branch.
+          test "$(git -C claude-stagefloor rev-parse HEAD:src/IndividualProgression.cpp)" = a8fcf1ba7f50233e460ba897c51447c9a05e0149
+          mkdir -p "$ip/$(dirname 'src/IndividualProgression.cpp')"
+          cp "claude-stagefloor/src/IndividualProgression.cpp" "$ip/src/IndividualProgression.cpp"
+          test "$(git -C claude-stagefloor rev-parse HEAD:src/IndividualProgression.h)" = 73392659647c51dc18b7c7124bf2d32f4cfde92f
+          mkdir -p "$ip/$(dirname 'src/IndividualProgression.h')"
+          cp "claude-stagefloor/src/IndividualProgression.h" "$ip/src/IndividualProgression.h"
+          test "$(git -C claude-stagefloor rev-parse HEAD:src/IndividualProgressionF14StageFloorPolicy.h)" = bca72e9b0addca276ec77f9c8d4c5e530dabcb17
+          mkdir -p "$ip/$(dirname 'src/IndividualProgressionF14StageFloorPolicy.h')"
+          cp "claude-stagefloor/src/IndividualProgressionF14StageFloorPolicy.h" "$ip/src/IndividualProgressionF14StageFloorPolicy.h"
+          test "$(git -C claude-stagefloor rev-parse HEAD:src/IndividualProgressionPlayer.cpp)" = cf5df36791d03ef0138306683892d0c312987330
+          mkdir -p "$ip/$(dirname 'src/IndividualProgressionPlayer.cpp')"
+          cp "claude-stagefloor/src/IndividualProgressionPlayer.cpp" "$ip/src/IndividualProgressionPlayer.cpp"
+          test "$(git -C claude-stagefloor rev-parse HEAD:src/cs_individualProgression.cpp)" = dce8e36d5133c0bac5e8b0f269675781dd2776ba
+          mkdir -p "$ip/$(dirname 'src/cs_individualProgression.cpp')"
+          cp "claude-stagefloor/src/cs_individualProgression.cpp" "$ip/src/cs_individualProgression.cpp"
+          test "$(git -C claude-stagefloor rev-parse HEAD:conf/individualProgression.conf.dist)" = 66d36a2701367a208cb28163288b77c2d7b267d6
+          mkdir -p "$ip/$(dirname 'conf/individualProgression.conf.dist')"
+          cp "claude-stagefloor/conf/individualProgression.conf.dist" "$ip/conf/individualProgression.conf.dist"
+          test "$(git -C claude-stagefloor rev-parse HEAD:tests/f14_stage_floor_policy.cpp)" = b531e9a500addf1c89d8787f950561d2dd8c968d
+          mkdir -p "$ip/$(dirname 'tests/f14_stage_floor_policy.cpp')"
+          cp "claude-stagefloor/tests/f14_stage_floor_policy.cpp" "$ip/tests/f14_stage_floor_policy.cpp"
+          test "$(git -C claude-stagefloor rev-parse HEAD:tests/test_ip_f14_stage_floor_source.py)" = 225e9b5c83aa487910df62131589d76596622b92
+          mkdir -p "$ip/$(dirname 'tests/test_ip_f14_stage_floor_source.py')"
+          cp "claude-stagefloor/tests/test_ip_f14_stage_floor_source.py" "$ip/tests/test_ip_f14_stage_floor_source.py"
+          test "$(git -C claude-stagefloor rev-parse HEAD:tests/test_ip_f14_stage_floor_gm_successor.py)" = ee7349c3c6af37ee4030519b160ffa8ade5c9d89
+          mkdir -p "$ip/$(dirname 'tests/test_ip_f14_stage_floor_gm_successor.py')"
+          cp "claude-stagefloor/tests/test_ip_f14_stage_floor_gm_successor.py" "$ip/tests/test_ip_f14_stage_floor_gm_successor.py"
+          grep -Fqx 'IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor = 0' "$ip/conf/individualProgression.conf.dist"
+          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_stage_floor_source.py' -v
+          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_stage_floor_gm_successor.py' -v
+          for std in c++17 c++20; do
+            for cxx in g++ clang++; do
+              "$cxx" -std="$std" -Wall -Wextra -Werror -pedantic -O2 -I"$ip/src" \
+                "$ip/tests/f14_stage_floor_policy.cpp" -o /tmp/cosmic-stagefloor-model
+              /tmp/cosmic-stagefloor-model
+            done
+          done
+          echo 'PASS: exact #80 rev2 protection-only overlay, GM successor source, OFF and no stage grant'
+      - name: Apply exact two-file Core paid-row safety patch (disposable runner)
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch=modules/mod-individual-progression/tests/core_patches/preserve_paid_receipt_row.patch
+          test "$(git -C acore rev-parse HEAD:src/server/game/Entities/Player/PlayerSettings.cpp)" = f1eb86367ce69111867ef7187125f5fe456c5367
+          test "$(git -C acore rev-parse HEAD:src/server/game/Entities/Player/Player.h)" = 5a29ac7b40ade7a11f1fcf36623dc7530ea39595
+          git -C acore apply --check "$patch"
+          git -C acore apply "$patch"
+
+      - name: Apply original F14 observer/WHO/attack-corpse Core prototypes (CI ONLY)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for patch in \
+            f14_observer_visibility_default_allow_prototype.patch \
+            f14_who_cached_entry_prototype.patch \
+            f14_attack_corpse_event_bridge_prototype.patch; do
+            original="f14-original/tests/core_patches/$patch"
+            test -s "$original"
+            patchfile="../$original"
+            if [[ "$patch" == f14_attack_corpse_event_bridge_prototype.patch ]]; then
+              # Same trailing-context-only adaptation as the parent #64 workflow.
+              grep -Fq 'void Unit::CombatStop(bool includingCast, bool mutualPvP, bool keepPvPForOthers)' acore/src/server/game/Entities/Unit/Unit.cpp
+              patchfile="$RUNNER_TEMP/f14-newer-grim-attack-context.patch"
+              python3 - "$original" "$patchfile" <<'PY'
+          import sys
+          from pathlib import Path
+          src=Path(sys.argv[1]).read_text()
+          old=" void Unit::CombatStop(bool includingCast, bool mutualPvP)\n"
+          new=" void Unit::CombatStop(bool includingCast, bool mutualPvP, bool keepPvPForOthers)\n"
+          assert src.count(old)==1 and new not in src
+          Path(sys.argv[2]).write_text(src.replace(old,new))
+          PY
+            fi
+            git -C acore apply --check "$patchfile"
+            git -C acore apply "$patchfile"
+          done
+          git -C acore diff --check
+          git -C acore diff --name-only | sort > /tmp/actual-core
+          printf '%s\n' \
+            'src/server/game/Scripting/ScriptMgr.h' \
+            'src/server/game/Scripting/ScriptDefines/WorldObjectScript.h' \
+            'src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp' \
+            'src/server/game/Scripting/ScriptDefines/UnitScript.h' \
+            'src/server/game/Scripting/ScriptDefines/UnitScript.cpp' \
+            'src/server/game/Entities/Object/Object.cpp' \
+            'src/server/game/Entities/Player/Player.cpp' \
+            'src/server/game/Entities/Player/Player.h' \
+            'src/server/game/Entities/Player/PlayerSettings.cpp' \
+            'src/server/game/Entities/Unit/Unit.cpp' \
+            'src/server/game/Entities/Creature/Creature.cpp' \
+            'src/server/game/Handlers/MiscHandler.cpp' | sort > /tmp/allowed-core
+          diff -u /tmp/allowed-core /tmp/actual-core
+          grep -Fq '#define COSMIC_F14_ATTACK_EVENT_HOOK_VERSION 1' acore/src/server/game/Scripting/ScriptDefines/UnitScript.h
+          # Existing (unpatched) Core removal hook used for retirement: exact
+          # signature, dispatched FIRST in Creature::RemoveFromWorld.
+          grep -Fq 'virtual void OnCreatureRemoveWorld(Creature* /*creature*/) { }' acore/src/server/game/Scripting/ScriptDefines/AllCreatureScript.h
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path('acore/src/server/game/Entities/Creature/Creature.cpp').read_text()
+          body=src.split('void Creature::RemoveFromWorld()',1)[1]
+          body=body[:body.index('\n}\n')]
+          hook=body.index('sScriptMgr->OnCreatureRemoveWorld(this);')
+          assert hook < body.index('Unit::RemoveFromWorld();'), 'removal hook must precede Unit::RemoveFromWorld'
+          assert hook < body.index('GetMap()->GetObjectsStore().Remove<Creature>(GetGUID());')
+          print('PASS: OnCreatureRemoveWorld fires before the creature leaves its map')
+          PY
+          ! grep -Rq 'define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION' acore/src/server/game
+          echo 'PASS: original default-ALLOW prototypes applied; refresh bridge still absent'
+
+      - name: Apply #67 real server-side after-pass notifier + validate pinned Core routes (NO CLIENT ACK)
+        shell: bash
+        run: |
+          set -euo pipefail
+          patchfile=../f14-observer/tests/core_patches/f14_visibility_pass_observed_prototype.patch
+          # The older three default-ALLOW F14 prototype patches and paid-row
+          # protection have already applied and passed their exact-path gate.
+          git -C acore apply --check "$patchfile"
+          git -C acore apply "$patchfile"
+          git -C acore diff --check
+          python3 -B -m unittest discover -s f14-observer/tests \
+            -p 'test_ip_f14_core_visibility_pass_prototype_source.py' -v
+          COSMIC_F14_PINNED_CORE_ROOT="$PWD/acore" python3 -B -m unittest discover -s f14-observer/tests \
+            -p 'test_ip_f14_core_refresh_delivery_path.py' -v
+          grep -Fq 'OnF14VisibilityReevaluationProcessed(this, true)' acore/src/server/game/Entities/Player/PlayerUpdates.cpp
+          grep -Fq 'OnF14VisibilityReevaluationProcessed(this, false)' acore/src/server/game/Entities/Object/Object.cpp
+          grep -Fq 'WORLDOBJECTHOOK_ON_F14_VISIBILITY_REEVALUATION_PROCESSED' acore/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+          ! grep -Rq 'define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION' acore/src/server/game
+          git -C acore diff --name-only | sort > /tmp/joint-core-actual
+          { cat /tmp/allowed-core; printf '%s\n' 'src/server/game/Entities/Player/PlayerUpdates.cpp'; } | sort > /tmp/joint-core-allowed
+          diff -u /tmp/joint-core-allowed /tmp/joint-core-actual
+          test -z "$(git -C acore/modules/mod-playerbots status --porcelain)"
+          echo 'PASS: exact #69 lifecycle and #67 after-pass coexist on disposable pinned Core; no client ACK/feature activation'
+
+      - name: Apply per-viewer Core server-link transition callback AFTER #67; NO CLIENT ACK
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="$PWD/f14-core-refresh/tests/core_patches/f14_per_viewer_server_link_observed_prototype.patch"
+          git -C acore apply --check "$file"
+          git -C acore apply "$file"
+          git -C acore diff --check
+          git -C acore diff --name-only | sort > /tmp/per-viewer-core-actual
+          diff -u /tmp/joint-core-allowed /tmp/per-viewer-core-actual
+          grep -Fq 'void ScriptMgr::OnF14ViewerTargetLinkChanged(' acore/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
+          grep -Fq 'WORLDOBJECTHOOK_ON_F14_VIEWER_TARGET_LINK_CHANGED' acore/src/server/game/Scripting/ScriptDefines/WorldObjectScript.h
+          grep -Fq 'OnF14ViewerTargetLinkChanged(this, target, HaveAtClient(target), true)' acore/src/server/game/Entities/Player/PlayerUpdates.cpp
+          grep -Fq 'OnF14ViewerTargetLinkChanged(this, target, HaveAtClient(target), false)' acore/src/server/game/Entities/Player/PlayerUpdates.cpp
+          ! grep -Rq '#define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION' acore/src/server/game
+          python3 -B -m unittest discover -s f14-core-refresh/tests \
+            -p 'test_ip_f14_per_viewer_link_source.py' -v
+          echo 'PASS: exact per-viewer link callbacks added in disposable Core; NO packet/client ACK, deny or refresh permission'
+
+      - name: Apply default-false Core target refresh request after lifecycle+viewer observer hooks
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$PWD/f14-core-refresh/tests/core_patches/f14_event_visibility_refresh_request_prototype.patch"
+          # Five deliberately encoded empty diff-context lines avoid trailing
+          # whitespace in the immutable patch ASSET. Decode only for git apply.
+          test "$(grep -c '^@F14_BLANK_CONTEXT@$' "$patch")" = 5
+          normalized="$RUNNER_TEMP/f14-event-refresh-normalized.patch"
+          sed 's/^@F14_BLANK_CONTEXT@$/ /' "$patch" > "$normalized"
+          ! grep -q '^@F14_BLANK_CONTEXT@' "$normalized"
+          # Strict exact-source patch validation. No fuzz or live-server edits.
+          git -C acore apply --check --verbose "$normalized"
+          git -C acore apply "$normalized"
+          git -C acore diff --check
+          git -C acore diff --name-only | sort > /tmp/event-refresh-core-actual
+          diff -u /tmp/joint-core-allowed /tmp/event-refresh-core-actual
+          grep -Fq 'CALL_ENABLED_BOOLEAN_HOOKS_WITH_DEFAULT_FALSE(UnitScript, UNITHOOK_ON_F14_CREATURE_VISIBILITY_REFRESH_REQUEST,' acore/src/server/game/Scripting/ScriptDefines/UnitScript.cpp
+          grep -Fq 'OnF14ShouldRefreshCreatureVisibility(Creature const* /*creature*/) { return false; }' acore/src/server/game/Scripting/ScriptDefines/UnitScript.h
+          grep -Fq 'F14MaybeRefreshCreatureVisibility(this, f14PreviousGuid);' acore/src/server/game/Entities/Unit/Unit.cpp
+          grep -Fq 'F14MaybeRefreshCreatureVisibility(this, f14VictimGuid);' acore/src/server/game/Entities/Unit/Unit.cpp
+          grep -Fq 'OnF14CreatureCorpseReady(this);' acore/src/server/game/Entities/Creature/Creature.cpp
+          ! grep -Rq '#define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION' acore/src/server/game
+          python3 -B -m unittest discover -s f14-core-refresh/tests \
+            -p 'test_ip_f14_event_refresh_request_source.py' -v
+          echo 'PASS: default-false post-event Core refresh route composes without enabling concealment or client ACK'
+
+      - name: Apply source-attributed F14 per-viewer Core seam (NO ACTIVE HIDE)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ip=acore/modules/mod-individual-progression
+          python3 -B "$ip/tests/core_patches/apply_f14_viewer_suppression_attribution.py" acore
+          COSMIC_F14_PINNED_CORE_ROOT="$PWD/acore" \
+            python3 -B -m unittest discover -s "$ip/tests" \
+              -p 'test_ip_f14_viewer_suppression_attribution.py' -v
+          git -C acore diff --check
+          grep -Fq 'CALL_ENABLED_BOOLEAN_HOOKS_WITH_DEFAULT_FALSE(WorldObjectScript' \
+            acore/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
+          ! grep -Rq '#define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION' acore/src/server/game
+          echo 'PASS: both visibility paths source-attributed; callback default FALSE, no active IP consumer'
+
+      - name: Assert newest Core matches UNMODIFIED pinned Playerbots API
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'virtual MySQLConnection* CreateAsyncConnection(ProducerConsumerQueue<SQLOperation*>* queue,' acore/src/server/database/Database/ModuleDatabasePool.h
+          grep -Fq 'inline bool IsLocaleRegistered(LocaleConstant locale)' acore/src/common/Common.h
+          test -z "$(git -C acore/modules/mod-playerbots status --porcelain)"
+      - name: Layer immutable #49/#74 RNDBOT-only earned quest preservation (CI ONLY)
+        shell: bash
+        run: |
+          set -euo pipefail
+          pb=acore/modules/mod-playerbots
+          original=../../../pb-refinement/tests/pb_patches/reset_earned_ip_markers_prototype.patch
+          refinement=../../../pb-refinement/tests/pb_patches/reset_earned_ip_markers_rndbot_only_refinement.patch
+          git -C "$pb" apply --check "$original"
+          git -C "$pb" apply "$original"
+          COSMIC_PB_PATCHED_ROOT="$PWD/$pb" python3 -B -m unittest discover \
+            -s pb-refinement/tests -p 'test_ip_pb_keep_list_prototype.py' -v
+          git -C "$pb" apply --check "$refinement"
+          git -C "$pb" apply "$refinement"
+          COSMIC_PB_RNDBOT_ONLY_ROOT="$PWD/$pb" python3 -B -m unittest discover \
+            -s pb-refinement/tests -p 'test_ip_pb_rndbot_only_keep_list.py' -v
+          git -C "$pb" diff --check
+          grep -Fqx 'Playerbots.ResetQuestsPreserveQuestIds =' "$pb/conf/playerbots.conf.dist"
+          grep -Fq 'preserveMask != 0 && sRandomPlayerbotMgr.IsRandomBot(bot)' \
+            "$pb/src/Bot/Factory/PlayerbotFactory.cpp"
+          echo 'PASS: only selected RNDBOT earned markers may be preserved IF explicitly enabled; option EMPTY/OFF here'
+      - name: Install compile dependencies on disposable runner only
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git cmake ninja-build g++ make pkg-config file binutils \
+            libmysqlclient-dev libssl-dev libbz2-dev \
+            libreadline-dev libncurses-dev libboost-all-dev
+      - name: Generate static module compile database (NO SERVER START)
+        run: |
+          cmake -S acore -B acore-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_CXX_FLAGS="-DCOSMIC_IP_F14_REQUIRE_PLAYERBOTS -DCOSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT=1" \
+            -DMODULES=static -DSCRIPTS=static \
+            -DAPPS_BUILD=world-only -DTOOLS_BUILD=none \
+            -DUSE_COREPCH=ON -DUSE_SCRIPTPCH=ON
+      - name: Assert lifecycle consumer and sibling modules are real compilation units
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          cc=json.loads(Path('acore-build/compile_commands.json').read_text())
+          for module,file in [
+            ('mod-individual-progression','IndividualProgressionF14LifecycleScript.cpp'),
+            ('mod-individual-progression','IndividualProgression.cpp'),
+            ('mod-character-services','CharacterServices.cpp'),
+            ('mod-naxxramas-core','Systems/MasterLootQuestGive.cpp')
+          ]:
+            hits=[e for e in cc if e.get('file','').replace('\\','/').endswith('/'+module+'/src/'+file)]
+            assert len(hits)==1,(module,file,len(hits))
+            print('PASS: real compilation unit present',module,file)
+          PY
+      - name: Compile AND link actual combined Worldserver (do not execute)
+        run: cmake --build acore-build --target worldserver --parallel 2
+      - name: Verify hook consumer was compiled in (not preprocessed away) and binary exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          obj=$(find acore-build -name 'IndividualProgressionF14LifecycleScript.cpp.o' | head -n1)
+          test -s "$obj"
+          # Render once to a file: `nm | grep -q` can SIGPIPE under pipefail.
+          nm -C "$obj" > /tmp/f14-lifecycle-symbols.txt
+          grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14AttackTargetTransition(Unit*, Unit*, Unit*)' /tmp/f14-lifecycle-symbols.txt
+          grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14CreatureCorpseReady(Creature*)' /tmp/f14-lifecycle-symbols.txt
+          grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14CreatureRespawned(Creature*)' /tmp/f14-lifecycle-symbols.txt
+          grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14ShouldRefreshCreatureVisibility(Creature const*)' /tmp/f14-lifecycle-symbols.txt
+          grep -Fq 'IndividualProgressionF14LifecycleScript::OnUnitUpdate(Unit*,' /tmp/f14-lifecycle-symbols.txt
+          grep -Fq 'IndividualProgressionF14LifecycleRemovalScript::OnCreatureRemoveWorld(Creature*)' /tmp/f14-lifecycle-symbols.txt
+          test -x acore-build/src/server/apps/worldserver
+          obj=$(find acore-build -name 'WorldObjectScript.cpp.o' | head -n1)
+          test -s "$obj"
+          nm -C "$obj" > /tmp/f14-visibility-scriptmgr-symbols.txt
+          grep -Fq 'ScriptMgr::ShouldF14SuppressCreatureForViewer(Player const*, WorldObject const*)' /tmp/f14-visibility-scriptmgr-symbols.txt
+          grep -Fq 'ScriptMgr::OnF14CreatureSuppressionDecision(Player const*, WorldObject const*, bool, bool)' /tmp/f14-visibility-scriptmgr-symbols.txt
+          stage=$(find acore-build -name 'IndividualProgression.cpp.o' | head -n1)
+          test -s "$stage"
+          nm -C "$stage" > /tmp/f14-stagefloor-module-symbols.txt
+          grep -Fq 'IndividualProgression::BlocksF14VerifiedStageFloorDowngrade(Player*, unsigned char)' /tmp/f14-stagefloor-module-symbols.txt
+          echo 'PASS: newest Grim + #88 rights map-thread refresh + #86 Core viewer seam + #80 corrected floor + selected PB and Naxx/Services linked; NO LAUNCH'
+      - name: Safety and confidence boundary
+        if: always()
+        run: |
+          echo 'Development-only compile/link. The worldserver was NOT started; no DB, host, account, config or deployment touched.'
+          echo 'A native PASS does not prove in-game combat, corpse, logout or visibility behaviour. Feature stays OFF.'
+          echo 'After-pass is observer-only: no creature/client redraw acknowledgement, threat/tap/loot/quest proof, stage8 or concealment enablement.'
+          echo 'Viewer link callback records server-side link decisions only (batched=queued), NOT client packet receipt.'
+          echo 'Experimental IP hook requests a Core pass on pending tracked creature or owner logout; no creature visibility DENY/hide.'
+          echo 'Logout queue bounded, map-thread consumed, no cross-thread Unit*; not a client ACK or rights proof; full-ready macro absent.'
+          echo 'The F14 viewer query is default FALSE and UNWIRED. No rights-complete concealment, WHO or positive client proof.'
+          echo 'Claude #80 stage-floor option OFF; Playerbots #49/#74 keep-list EMPTY/OFF. No earned marker modifications on any real character.'
+          echo 'New #88 threat/assist request is not full human rights proof, real client restore or a positive hide.'
