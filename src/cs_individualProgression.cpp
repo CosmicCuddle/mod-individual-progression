@@ -198,6 +198,17 @@ public:
         bool const beforeWrath = paidAudit && sIndividualProgression->HasExpansionEntitlement(
             target, IndividualProgressionExpansionPolicy::Era::Wrath);
 
+        // F14 stage-8 floor durability (default OFF): refuse BEFORE any
+        // achievement cleanup or marker reset, so nothing is half-applied.
+        if (progressionLevel <= PROGRESSION_WOTLK_TIER_5 &&
+            sIndividualProgression->BlocksF14VerifiedStageFloorDowngrade(target, static_cast<uint8>(progressionLevel)))
+        {
+            handler->PSendSysMessage("Refused: |cff00ffff{}|r is a verified RandomBot with earned TBC stage {}; "
+                "IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor blocks lowering it below 8.",
+                playername, currentState);
+            return false;
+        }
+
         if (progressionLevel < currentState)
         {
             CheckProgressionAchievements(target, currentState, progressionLevel);
@@ -262,11 +273,20 @@ public:
             return false;
         }
 
+        uint32 floorSkipped = 0;
         for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
         {
             Player* member = itr->GetSource();
             if (!member || sIndividualProgression->isNormalAccount(member))
                 continue;
+
+            // F14 stage-8 floor durability (default OFF): leave a verified
+            // RandomBot's earned TBC stage untouched instead of lowering it.
+            if (sIndividualProgression->BlocksF14VerifiedStageFloorDowngrade(member, static_cast<uint8>(currentState)))
+            {
+                ++floorSkipped;
+                continue;
+            }
 
             sIndividualProgression->ForceUpdateProgressionState(member, static_cast<ProgressionState>(currentState));
             sIndividualProgression->CheckAdjustments(member);
@@ -274,6 +294,8 @@ public:
         }
 
         handler->PSendSysMessage("Updated Progression Level for all RND bots = |cff00ffff{}|r", currentState);
+        if (floorSkipped)
+            handler->PSendSysMessage("Skipped {} verified RandomBot(s) with an earned TBC stage (F14 stage floor ON).", floorSkipped);
         return true;
     }
 
