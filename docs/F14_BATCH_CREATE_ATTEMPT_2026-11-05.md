@@ -1,6 +1,6 @@
 # F14 per-GUID batched CREATE send-attempt evidence — CS01 development prototype
 
-**Owner:** CosmicCuddle. **Date:** 5 November 2026. **Status:** DRAFT, default FALSE/OFF, CI-only.  
+**Owner:** CosmicCuddle. **Date:** 5 November 2026. **Status:** DRAFT, default FALSE/OFF, CI-only.
 **Parent:** [F14 #93](https://github.com/CosmicCuddle/mod-individual-progression/pull/93) exact `98ddffb98a91012d2d96b532c3ec82275d5eed53`. Prior [#86](https://github.com/CosmicCuddle/mod-individual-progression/pull/86) per-viewer source-attributed suppression remains default FALSE.
 
 ## What this actually changes
