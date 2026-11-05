@@ -61,6 +61,8 @@ class Contracts(unittest.TestCase):
             "ExactTaggedServerSendCallOnly",
             "protocol.Find(viewer, creature)",
             "protocol.NeedsRestore(viewer, creature)",
+            "if (protocol.NeedsRestore(viewer, creature))",
+            "if (!protocol.NeedsRestore(viewer, creature) ||",
             "protocol.GlobalRestoreRequired()",
             "protocol.ObserveProposedBatchFlush(",
             "constexpr bool HasIndependentlyVerifiedClientPresentation() { return false; }",
