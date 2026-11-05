@@ -440,6 +440,10 @@ public:
     bool f14ExperimentalAttackLifecycleRegistry = false;
     // Independent F14 group-time pilot; leave OFF until owner approval.
     bool f14ProtectVerifiedRandomBotGroupFloor = false;
+    // F14 stage-8 floor durability: refuse IP-owned destructive writes that
+    // would push a positively verified headless BE/Draenei RandomBot below an
+    // already earned stage 8+. Default OFF; never creates or grants a stage.
+    bool f14ProtectVerifiedRandomBotStageFloor = false;
     std::string paidExpansionVendorName;
 
     // progression is derived from rewarded hidden quests (IDs 66000 + progression)
@@ -467,6 +471,8 @@ public:
     // Read-only current verified incarnation; no Playerbots access on
     // observer/WHO threads. Missing or stale means ALLOW visibility.
     bool HasF14VerifiedRandomBotIdentity(Player const* player);
+    // True => ForceUpdateProgressionState(player, requested) must not run.
+    bool BlocksF14VerifiedStageFloorDowngrade(Player* player, uint8 requestedStage);
     bool HasF14VerifiedRandomBotGuid(ObjectGuid const& guid);
     std::uint64_t GetF14VerifiedRandomBotLoginEpoch(ObjectGuid const& guid);
     // F14 attack/corpse lifecycle registry (IndividualProgressionF14LifecycleScript.cpp).
