@@ -88,6 +88,8 @@ class Contracts(unittest.TestCase):
         self.assertIn("viewer->GetSession()->IsHeadless()", code)
         self.assertIn("player->GetSession()->IsHeadless()", code)
         self.assertIn("!player->GetGUID().IsPlayer()", code)
+        self.assertIn("!sIndividualProgression->isNormalAccount(player)", code)
+        self.assertIn("!sIndividualProgression->isNormalAccount(const_cast<Player*>(viewer))", code)
         self.assertIn("if (!viewer || !viewer->IsInWorld()", code)
         self.assertIn("compare_exchange_weak", header)
         self.assertIn("if (current == std::numeric_limits<std::uint64_t>::max())", header)
