@@ -43,6 +43,7 @@
 #include "WorldObjectScript.h"
 #include "WorldSession.h"
 #include "IndividualProgressionF14HumanViewerEpoch.h"
+#include "IndividualProgressionF14SuppressionDecisionIdentity.h"
 #include <atomic>
 #endif
 #include "TemporarySummon.h"
@@ -823,7 +824,8 @@ public:
         : WorldObjectScript("IndividualProgression_F14TaggedGuidObserver",
             {WORLDOBJECTHOOK_ON_F14_BATCH_OUT_OF_RANGE_ATTEMPT,
              WORLDOBJECTHOOK_ON_F14_BATCH_CREATE_ATTRIBUTION_QUERY,
-             WORLDOBJECTHOOK_ON_F14_BATCH_CREATE_ATTEMPT}) { }
+             WORLDOBJECTHOOK_ON_F14_BATCH_CREATE_ATTEMPT,
+             WORLDOBJECTHOOK_ON_F14_VIEWER_CREATURE_SUPPRESSION_DECIDED}) { }
 
     // Negative-only: this script NEVER nominates a CREATE for F14.
     // In particular, a generic Core CREATE is not prior-hidden proof.
@@ -831,6 +833,76 @@ public:
         Player const* /*viewer*/, WorldObject const* /*creature*/) override
     {
         return false;
+    }
+
+    // Called ONLY for the Core's explicitly F14-attributed positive
+    // suppression decision, never for generic Core visibility transitions.
+    // The current source still has NO positive F14 hide script, so this is
+    // dormant even in a disposable build with observer diagnostics enabled.
+    // WorldObjects are used synchronously and NEVER retained after callback.
+    void OnF14CreatureSuppressionDecision(Player const* viewer,
+        WorldObject const* target, bool /*wasLinked*/, bool /*batched*/) override
+    {
+        namespace Decision = IndividualProgressionF14SuppressionDecisionIdentity;
+        Decision::Facts facts{};
+        facts.explicitlySourceAttributedF14Decision = true;
+
+        if (viewer)
+        {
+            facts.viewerInWorld = viewer->IsInWorld();
+            facts.viewerFullGuid = viewer->GetGUID().GetRawValue();
+            facts.viewerLoginEpoch = CurrentHumanViewerEpoch(viewer);
+            facts.currentViewerIsHumanNormalAccount = facts.viewerLoginEpoch != 0;
+            facts.viewerMapId = viewer->GetMapId();
+            facts.viewerInstanceId = viewer->GetInstanceId();
+        }
+
+        Creature const* creature = target ? target->ToCreature() : nullptr;
+        if (creature)
+        {
+            facts.creatureInWorld = creature->IsInWorld();
+            facts.creatureIsWorldNpc = !creature->IsPet() && !creature->IsTotem() &&
+                !creature->IsControlledByPlayer();
+            facts.creatureFullGuid = creature->GetGUID().GetRawValue();
+            facts.creatureMapId = creature->GetMapId();
+            facts.creatureInstanceId = creature->GetInstanceId();
+        }
+
+        facts.sameLiveCoreMapPointer = viewer && creature &&
+            viewer->IsInWorld() && creature->IsInWorld() &&
+            viewer->GetMap() && viewer->GetMap() == creature->GetMap();
+
+        // Try instead of blocking in a Core visibility script; a concurrent
+        // or recursive lifecycle operation cannot deadlock this diagnostic.
+        // Matching map pointer does NOT independently prove map-owner thread.
+        if (facts.sameLiveCoreMapPointer)
+        {
+            std::unique_lock<std::mutex> guard(LifecycleLock(), std::try_to_lock);
+            if (guard.owns_lock())
+            {
+                facts.creatureIncarnationStamp = StampOf(const_cast<Creature*>(creature));
+                Registry::Entry entry{};
+                if (LifecycleRegistry().Lookup(facts.creatureIncarnationStamp, entry))
+                {
+                    facts.registryNotPoisonedAndMatched = true;
+                    facts.registryCreatureFullGuid = entry.key.guidRaw;
+                    facts.registryIncarnationStamp = entry.token;
+                    facts.registryMapId = entry.key.mapId;
+                    facts.registryInstanceId = entry.key.instanceId;
+                }
+            }
+        }
+
+        // This classification is only a per-call diagnostic: no per-pair
+        // record, protocol state, original Claude ledger or network effect.
+        if (Decision::Validate(facts) ==
+            Decision::Result::CurrentSourceDecisionIdentitySnapshotOnly)
+        {
+            if (_sourceDecisionSnapshots.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_INFO("module", "IP F14 first matching source-decision viewer/creature snapshot observed; NOT owner-thread, rights, packet or client proof");
+        }
+        else if (_rejectedDecisionSnapshots.fetch_add(1, std::memory_order_relaxed) == 0)
+            LOG_ERROR("module", "IP F14 source-decision identity snapshot rejected; all hiding remains OFF");
     }
 
     void OnF14VisibilityBatchOutOfRangeAttempt(
@@ -853,6 +925,8 @@ private:
     std::atomic<std::uint64_t> _outAttempts{0};
     std::atomic<std::uint64_t> _createAttempts{0};
     std::atomic<std::uint64_t> _invalidAttempts{0};
+    std::atomic<std::uint64_t> _sourceDecisionSnapshots{0};
+    std::atomic<std::uint64_t> _rejectedDecisionSnapshots{0};
 
     static void RecordServerCall(Player const* viewer, ObjectGuid const& guid,
         std::atomic<std::uint64_t>& count,
