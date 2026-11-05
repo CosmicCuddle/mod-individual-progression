@@ -368,12 +368,12 @@ jobs:
           set -euo pipefail
           ip=acore/modules/mod-individual-progression
           python3 -B "$ip/tests/core_patches/apply_f14_batched_guid_create_attempt.py" acore
+          # The original #93 single-direction cap source assertion runs in
+          # its unchanged earlier step. It is intentionally not re-run after
+          # #95 expands the cap into one shared two-direction 512-GUID limit.
           COSMIC_F14_PINNED_CORE_ROOT="$PWD/acore" \
             python3 -B -m unittest discover -s "$ip/tests" \
               -p 'test_ip_f14_batched_guid_create_attempt_source.py' -v
-          COSMIC_F14_PINNED_CORE_ROOT="$PWD/acore" \
-            python3 -B -m unittest discover -s "$ip/tests" \
-              -p 'test_ip_f14_batched_guid_send_attempt_source.py' -v
           git -C acore diff --check
           ! grep -Rq '#define COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION' acore/src/server/game
           echo 'PASS: F14-only CREATE/send-attempt metadata after #93, shared cap and OFF by default'
