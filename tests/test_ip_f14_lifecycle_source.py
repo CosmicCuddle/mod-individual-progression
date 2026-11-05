@@ -277,7 +277,7 @@ class Stage2ParticipantSnapshot(unittest.TestCase):
         self.assertTrue(body.split("{", 1)[1].lstrip().startswith("if (!LifecycleEnabled() || !target)"))
         self.assertIn("bool evidenceChanged = registry.OnParticipantEvidence(key, stamp, sourceToken);", body)
         self.assertIn("if (!evidenceChanged && registry.NeedsSnapshot(key, stamp))", body)
-        self.assertIn("evidenceChanged = true; // a new conservative snapshot can revoke old rights.", body)
+        self.assertIn("evidenceChanged = true;", body)  # strip_comments() already removed source comment
         self.assertIn("if (evidenceChanged)", body)
         self.assertIn("pending.Remember(key, stamp);", body)
         self.assertIn("OnAssistOfActor(receiver, ActorTokenOf(source),", body)
