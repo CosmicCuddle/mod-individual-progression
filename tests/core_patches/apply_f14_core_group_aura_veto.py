@@ -17,7 +17,22 @@ HELPER_BEGIN = "static bool F14ViewerHasDirectInteractionVeto("
 HELPER_END = "\ntemplate <class T>\nvoid Player::UpdateVisibilityOf(T* target, UpdateData& data,"
 
 ANCHOR = "    return false;\n}\n"
-EXTENSION = """    // Without a complete audited group quest/loot/kill-credit census,
+EXTENSION = """    // Charmed units and guardians can be a real viewer's combat agents,
+    // even when the named primary pet has no direct current interaction.
+    // A missing reliable complete owner/assist census is NOT inferred safe.
+    if (Unit const* controlled = viewer->GetCharm())
+        if (controlled->GetTarget() == creatureGuid ||
+            controlled->GetVictim() == creature ||
+            creature->GetVictim() == controlled)
+            return true;
+
+    if (Guardian const* guardian = viewer->GetGuardianPet())
+        if (guardian->GetTarget() == creatureGuid ||
+            guardian->GetVictim() == creature ||
+            creature->GetVictim() == guardian)
+            return true;
+
+    // Without a complete audited group quest/loot/kill-credit census,
     // grouped real viewers must always retain ordinary creature visibility.
     if (viewer->GetGroup())
         return true;
