@@ -102,8 +102,10 @@ class SourceContracts(unittest.TestCase):
                         helper.index("viewer->GetGroup()"))
         self.assertEqual(helper.count("return false;"), 1)
         # Original helper is a prefix through the original return statement.
-        self.assertEqual(original.split("    return false;\n}", 1)[0],
-                         helper.split("    // Without a complete audited", 1)[0])
+        self.assertEqual(original.split("static bool F14ViewerHasDirectInteractionVeto(", 1)[1]
+                         .split("    return false;\n}", 1)[0],
+                         helper.split("static bool F14ViewerHasDirectInteractionVeto(", 1)[1]
+                         .split("    // Without a complete audited", 1)[0])
 
     def test_missing_parent_and_repatch_always_refuse(self):
         module = patch_module()
