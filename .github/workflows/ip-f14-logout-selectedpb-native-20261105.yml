@@ -128,8 +128,8 @@ jobs:
           test "$(git -C acore/modules/mod-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
           test "$(git -C "$ip" rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           git -C "$ip" merge-base --is-ancestor c2cc14bc9c18a3e60c984c491370e7da787a388a HEAD
-          # Frozen #82 is the exact source parent. Only the new queue, hook
-          # delivery, three guarded source/model tests, docs and CI may differ.
+          # Frozen #82 source plus exact #83 ten-file child are unchanged;
+          # only this one additional combined-CI workflow may differ.
           git -C "$ip" merge-base --is-ancestor 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD
           git -C "$ip" diff --name-only 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD | sort > /tmp/source-actual
           printf '%s\n' \
@@ -142,7 +142,8 @@ jobs:
             'tests/test_ip_f14_postevent_reveal_request_source.py' \
             'tests/test_ip_f14_lifecycle_source.py' \
             'docs/F14_LOGOUT_MAPTHREAD_REFRESH_2026-11-04.md' \
-            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/source-allowed
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            '.github/workflows/ip-f14-logout-selectedpb-native-20261105.yml' | sort > /tmp/source-allowed
           diff -u /tmp/source-allowed /tmp/source-actual
           git -C "$ip" diff --check 2df1eadb1c3f3aa12f76eaa357e17487792f8077
           test -z "$(git -C "$ip" diff --name-only 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD -- conf sql data optional)"
