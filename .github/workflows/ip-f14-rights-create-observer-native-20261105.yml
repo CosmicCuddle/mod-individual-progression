@@ -220,9 +220,9 @@ jobs:
           test "$(git -C f14-core-refresh rev-parse HEAD)" = 6182893d18e0ab2bb1d581900910346c1c0819b2
           test "$(git -C pb-refinement rev-parse HEAD)" = feb616e88fe4435edf9b8cb1e140272e5c644112
           test "$(git -C f14-create-ref rev-parse HEAD)" = 31198448171b8d8a07c432d6361cd57c6c7ba821
-          test "$(git -C f14-create-ref rev-parse HEAD:tests/core_patches/apply_f14_batched_guid_send_attempt.py)" = "$(git -C f14-create-ref rev-parse HEAD:tests/core_patches/apply_f14_batched_guid_send_attempt.py)"
-          test -s f14-create-ref/tests/core_patches/apply_f14_batched_guid_create_attempt.py
-          test -s f14-create-ref/tests/test_ip_f14_batched_guid_create_attempt_source.py
+          test "$(git -C f14-create-ref rev-parse HEAD:tests/core_patches/apply_f14_batched_guid_send_attempt.py)" = 170e624a84cb9d271bd80056dfcaa77ecdaa0324
+          test "$(git -C f14-create-ref rev-parse HEAD:tests/core_patches/apply_f14_batched_guid_create_attempt.py)" = dfaf7e6d17a876809570678bbdf6a8891e7441ba
+          test "$(git -C f14-create-ref rev-parse HEAD:tests/test_ip_f14_batched_guid_create_attempt_source.py)" = ea09d9f056dcc8bf108e838eaa6f14febb41fbb7
           test "$(git -C pb-refinement rev-parse HEAD:tests/pb_patches/reset_earned_ip_markers_prototype.patch)" = baa179588397461ff8838371b6fdebd874940132
           for key in AutoAttune PaidExpansion.Enable F14.ProtectVerifiedRandomBotStageFloor F14.ProtectVerifiedRandomBotGroupFloor \
                      F14.PreserveVerifiedRandomBotStageOnLogin F14.ForceVerifiedRandomBotTbcFloorOnLogin \
