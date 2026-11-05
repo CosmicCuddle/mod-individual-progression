@@ -30,6 +30,7 @@ struct Unit
     Unit const* GetVictim() const { return victim; }
 };
 struct Pet : Unit {};
+struct Guardian : Unit {};
 
 struct Aura
 {
@@ -64,6 +65,8 @@ struct Player : Unit
     WorldMap* map = nullptr;
     ObjectGuid guid{6, true};
     Pet* pet = nullptr;
+    Guardian* guardian = nullptr;
+    Unit* charm = nullptr;
     Group* group = nullptr;
     bool inWorld = true;
     bool gm = false;
@@ -73,6 +76,8 @@ struct Player : Unit
     WorldMap* GetMap() const { return map; }
     ObjectGuid GetGUID() const { return guid; }
     Pet* GetPet() const { return pet; }
+    Guardian* GetGuardianPet() const { return guardian; }
+    Unit* GetCharm() const { return charm; }
     Group* GetGroup() const { return group; }
 };
 
@@ -92,6 +97,8 @@ int main()
     viewer.map = &map;
     creature.map = &map;
     Pet pet;
+    Guardian guardian;
+    Unit charmed;
     Group group;
     Aura npcAura{{4, false}};
     Aura playerAura{{5, true}};
@@ -152,6 +159,32 @@ int main()
     CHECK(F14ViewerHasDirectInteractionVeto(&viewer, &creature));
     creature.victim = nullptr;
     viewer.pet = nullptr;
+
+    viewer.charm = &charmed;
+    charmed.selection = creature.guid;
+    CHECK(F14ViewerHasDirectInteractionVeto(&viewer, &creature));
+    charmed.selection = {};
+    charmed.victim = &creature;
+    CHECK(F14ViewerHasDirectInteractionVeto(&viewer, &creature));
+    charmed.victim = nullptr;
+    creature.victim = &charmed;
+    CHECK(F14ViewerHasDirectInteractionVeto(&viewer, &creature));
+    creature.victim = nullptr;
+    viewer.charm = nullptr;
+    CHECK(!F14ViewerHasDirectInteractionVeto(&viewer, &creature));
+
+    viewer.guardian = &guardian;
+    guardian.selection = creature.guid;
+    CHECK(F14ViewerHasDirectInteractionVeto(&viewer, &creature));
+    guardian.selection = {};
+    guardian.victim = &creature;
+    CHECK(F14ViewerHasDirectInteractionVeto(&viewer, &creature));
+    guardian.victim = nullptr;
+    creature.victim = &guardian;
+    CHECK(F14ViewerHasDirectInteractionVeto(&viewer, &creature));
+    creature.victim = nullptr;
+    viewer.guardian = nullptr;
+    CHECK(!F14ViewerHasDirectInteractionVeto(&viewer, &creature));
 
     viewer.group = &group;
     CHECK(F14ViewerHasDirectInteractionVeto(&viewer, &creature));
