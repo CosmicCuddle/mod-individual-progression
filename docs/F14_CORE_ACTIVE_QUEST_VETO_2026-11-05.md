@@ -1,8 +1,8 @@
 # F14 active human NPC / kill-credit quest objective veto
 
-**Owner:** CosmicCuddle  
-**Developer:** CS01 Maintenance, covering active development while Claude is on owner-confirmed break  
-**Date:** 5 November 2026  
+**Owner:** CosmicCuddle
+**Developer:** CS01 Maintenance, covering active development while Claude is on owner-confirmed break
+**Date:** 5 November 2026
 **Status:** isolated DRAFT, negative-only, default F14 OFF, no host/DB/client change
 
 ## What is actually implemented
