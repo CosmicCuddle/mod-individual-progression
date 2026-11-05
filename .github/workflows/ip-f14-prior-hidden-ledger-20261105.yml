@@ -31,7 +31,8 @@ jobs:
             'src/IndividualProgressionF14PriorHiddenLedger.h' \
             'tests/f14_prior_hidden_ledger.cpp' \
             'tests/test_ip_f14_prior_hidden_ledger_source.py' \
-            'docs/F14_PRIOR_HIDDEN_LEDGER_2026-11-05.md' | sort > /tmp/allowed
+            'docs/F14_PRIOR_HIDDEN_LEDGER_2026-11-05.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/allowed
           diff -u /tmp/allowed /tmp/actual
           git diff --check "$parent"
           test -z "$(git diff --name-only "$parent" HEAD -- src/IndividualProgressionF14LifecycleScript.cpp src/IndividualProgression.cpp conf sql data optional)"
