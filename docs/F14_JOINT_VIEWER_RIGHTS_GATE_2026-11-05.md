@@ -1,8 +1,8 @@
 # F14 viewer rights + restoration joint safety gate (PURE, OFF)
 
-**Owner:** CosmicCuddle  
-**Developer:** CS01 Maintenance during Claude's owner-confirmed break  
-**Date:** 5 November 2026  
+**Owner:** CosmicCuddle
+**Developer:** CS01 Maintenance during Claude's owner-confirmed break
+**Date:** 5 November 2026
 **Status:** Isolated DRAFT, no runtime consumer, no positive concealment, no server/client/DB changes.
 
 ## Actual implementation
