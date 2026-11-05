@@ -29,7 +29,7 @@ class SourceOnly(unittest.TestCase):
         self.assertIn("missing exact #95 Core CREATE provenance prerequisite", SOURCE)
         self.assertIn("missing exact #93 Core OUT provenance prerequisite", SOURCE)
         self.assertIn("veto must execute only following positive F14", SOURCE)
-        self.assertIn('if "#include \\"Pet.h\\"" not in s:', SOURCE.replace("'", '"'))
+        self.assertIn("Pinned Core must already include Pet.h", SOURCE)
         self.assertNotIn("SetPhaseMask(", SOURCE)
         self.assertNotIn("SendDirectMessage(&", SOURCE)
         self.assertNotIn("CompleteRestoreOnlyWithClientProof(", SOURCE)
