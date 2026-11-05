@@ -1,0 +1,179 @@
+# F14 per-viewer source-attributed restore EVIDENCE protocol: pure model only.
+# Child of #85 (6bbd4542). No runtime source, Core, config, SQL, DB, DBC or client change.
+# Disposable GitHub runner ONLY; no worldserver launch, database, host or deployment.
+name: F14 viewer restore protocol pure model (OFF, NO HOST)
+on:
+  pull_request:
+    branches:
+      - research/cs01-f14-prior-hidden-ledger-20261105
+    paths:
+      - "src/**"
+      - "conf/**"
+      - "tests/f14_viewer_restore_protocol.cpp"
+      - "tests/test_ip_f14_viewer_restore_protocol_source.py"
+      - "docs/F14_VIEWER_RESTORE_PROTOCOL_2026-11-05.md"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+      - ".github/workflows/ip-f14-viewer-restore-protocol-20261105.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pure-model:
+    name: "Restore protocol model + source contracts (${{ matrix.cxx }} ${{ matrix.std }})"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: "Verify #85 ancestry and EXACT six-path child scope"
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=6bbd4542e8b8b992c51d21955a341c1f988658c6
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            '.github/workflows/ip-f14-viewer-restore-protocol-20261105.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/F14_VIEWER_RESTORE_PROTOCOL_2026-11-05.md' \
+            'src/IndividualProgressionF14ViewerRestoreProtocol.h' \
+            'tests/f14_viewer_restore_protocol.cpp' \
+            'tests/test_ip_f14_viewer_restore_protocol_source.py' | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          git diff --check "$parent" HEAD
+          # Register is append-only against the parent.
+          git diff -U0 "$parent" HEAD -- docs/CUSTOM_MODIFICATIONS_REGISTER.md \
+            | grep -E '^-' | grep -Ev '^--- ' > /tmp/register-removed || true
+          test ! -s /tmp/register-removed
+          # Nothing else under src/, conf/, data/, sql/ or optional/ changes.
+          test -z "$(git diff --name-only "$parent" HEAD -- src conf data sql optional \
+                     | grep -v '^src/IndividualProgressionF14ViewerRestoreProtocol.h$' || true)"
+      - name: Source contracts (pure, unwired, ledger never cleared, parents byte-identical)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_viewer_restore_protocol_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_prior_hidden_ledger_source.py' -v
+      - name: "Native model tests (${{ matrix.cxx }} ${{ matrix.std }}, with and without NDEBUG)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ndebug in "" "-DNDEBUG"; do
+            ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 $ndebug \
+              -Isrc tests/f14_viewer_restore_protocol.cpp -o /tmp/f14-viewer-restore
+            /tmp/f14-viewer-restore | tee /tmp/out.txt
+            grep -Eq '^F14 VIEWER RESTORE PROTOCOL ([0-9]+)/\1 passed' /tmp/out.txt
+            ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 $ndebug \
+              -Isrc tests/f14_prior_hidden_ledger.cpp -o /tmp/f14-ledger
+            /tmp/f14-ledger
+          done
+          echo 'PASS: pure evidence model only; nothing installed, no hiding, no packet or client proof'
+
+  pinned-core-trace:
+    name: "Pinned Grim Core source trace (0d754d19), read-only"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout pinned Grim Core (sparse, read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: core
+          persist-credentials: false
+          sparse-checkout: |
+            src/server/game/Entities/Player
+            src/server/game/Entities/Object
+            src/server/game/Entities/Unit
+            src/server/game/Grids/Notifiers
+            src/server/game/Server/Protocol
+      - name: Verify the documented trace facts at their exact lines
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          python3 -I - <<'PY'
+          from pathlib import Path
+          base = Path("core/src/server/game")
+          files = {
+              "PU": base / "Entities/Player/PlayerUpdates.cpp",
+              "OB": base / "Entities/Object/Object.cpp",
+              "GN": base / "Grids/Notifiers/GridNotifiers.cpp",
+              "UN": base / "Entities/Unit/Unit.cpp",
+              "OP": base / "Server/Protocol/Opcodes.h",
+          }
+          lines = {k: p.read_text(encoding="utf-8").splitlines() for k, p in files.items()}
+          facts = [
+              ("T1", "PU", 1738, "void Player::UpdateVisibilityOf(WorldObject* target)"),
+              ("T1", "PU", 1742, "if (!CanSeeOrDetect(target, false, true))"),
+              ("T1", "PU", 1747, "target->DestroyForPlayer(this);"),
+              ("T1", "PU", 1748, "GetObjectVisibilityContainer().UnlinkWorldObjectVisibility(target);"),
+              ("T2", "PU", 1753, "if (CanSeeOrDetect(target, false, true))"),
+              ("T2", "PU", 1755, "target->SendUpdateToPlayer(this);"),
+              ("T2", "PU", 1756, "GetObjectVisibilityContainer().LinkWorldObjectVisibility(target);"),
+              ("T3", "OB", 272, "void Object::DestroyForPlayer(Player* target, bool onDeath) const"),
+              ("T3", "OB", 289, "WorldPacket data(SMSG_DESTROY_OBJECT, 8 + 1);"),
+              ("T3", "OB", 294, "target->SendDirectMessage(&data);"),
+              ("T4", "OB", 244, "void Object::SendUpdateToPlayer(Player* player)"),
+              ("T4", "OB", 252, "player->SendDirectMessage(&packet);"),
+              ("T5", "PU", 1702, "void Player::UpdateVisibilityOf(T* target, UpdateData& data,"),
+              ("T5", "PU", 1709, "if (!CanSeeOrDetect(target, false, true))"),
+              ("T5", "PU", 1713, "target->BuildOutOfRangeUpdateBlock(&data);"),
+              ("T5", "PU", 1714, "GetObjectVisibilityContainer().UnlinkWorldObjectVisibility(target);"),
+              ("T5", "PU", 1719, "if (CanSeeOrDetect(target, false, true))"),
+              ("T5", "PU", 1721, "target->BuildCreateUpdateBlockForPlayer(&data, this);"),
+              ("T6", "GN", 36, "void VisibleNotifier::SendToSelf()"),
+              ("T6", "GN", 85, "i_data.BuildPacket(packet);"),
+              ("T6", "GN", 86, "i_player.SendDirectMessage(&packet);"),
+              ("T7", "PU", 1633, "notifier.SendToSelf();"),
+              ("T7", "UN", 16030, "notifier.SendToSelf();"),
+              ("T7", "UN", 16067, "notifier.SendToSelf();"),
+              ("T8", "GN", 66, "|| i_player.CanSeeOrDetect(obj, false, true))"),
+              ("T8", "GN", 78, "itr = i_player.GetObjectVisibilityContainer().UnlinkVisibilityFromPlayer(obj, itr);"),
+              ("T9", "OP", 199, "SMSG_UPDATE_OBJECT"),
+              ("T9", "OP", 200, "SMSG_DESTROY_OBJECT"),
+              ("T9", "OP", 436, "SMSG_QUESTUPDATE_FAILED "),
+              ("T9", "OP", 437, "SMSG_QUESTUPDATE_FAILEDTIMER"),
+          ]
+          bad = 0
+          for tag, f, n, text in facts:
+              got = lines[f][n - 1]
+              if text not in got:
+                  bad += 1
+                  print(f"FAIL {tag} {files[f]}:{n}: expected {text!r}, got {got!r}")
+          # T6: the batched flush only happens when there is data.
+          gn = "\n".join(lines["GN"][35:90])
+          if "if (!i_data.HasData())\n        return;" not in gn:
+              bad += 1
+              print("FAIL T6: SendToSelf HasData early return moved")
+          # T9: no object create/destroy acknowledgement opcode exists.
+          op = "\n".join(lines["OP"])
+          import re
+          failed = sorted(set(re.findall(r"\b(\w*UPDATE_FAILED\w*)\s*=", op)))
+          if failed != ["SMSG_QUESTUPDATE_FAILED", "SMSG_QUESTUPDATE_FAILEDTIMER"]:
+              bad += 1
+              print("FAIL T9: unexpected *UPDATE_FAILED opcodes", failed)
+          for name in re.findall(r"\b(CMSG_\w+)\s*=", op):
+              if re.search(r"(OBJECT|DESTROY|CREATE)_?(ACK|RECEIVED|RECEIPT)|UPDATE_OBJECT", name):
+                  bad += 1
+                  print("FAIL T9: possible object ACK opcode", name)
+          # No batch-flush hook exists yet at the pin (the proposed seam).
+          for k in ("GN", "PU"):
+              if "OnF14VisibilityBatchFlushed" in "\n".join(lines[k]):
+                  bad += 1
+                  print("FAIL: proposed hook unexpectedly present in", files[k])
+          if bad:
+              raise SystemExit(f"{bad} trace fact(s) drifted")
+          print(f"PASS: {len(facts)} pinned trace lines + HasData guard + no object ACK opcode + no flush hook")
+          PY
