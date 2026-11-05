@@ -70,8 +70,8 @@ namespace
     using LogoutQueue = IndividualProgressionF14LogoutRefreshQueue::Queue<>;
 
     // Both queue operations and registry writes use LifecycleLock().
-    // Atomic flag makes the extra Unit::Update callback negligible unless a
-    // verified owner actually loses its login epoch.
+    // Atomic flag makes extra Unit::Update work negligible unless a
+    // verified owner logs out OR a previously tracked NPC's rights change.
     LogoutQueue& PendingLogoutRefresh()
     {
         static LogoutQueue pending;
@@ -136,7 +136,7 @@ void IndividualProgression::ExpireF14LifecycleActor(std::uint64_t loginEpoch)
     if (pending.IsPoisoned() && !LogoutRefreshOverflowLogged())
     {
         LogoutRefreshOverflowLogged() = true;
-        LOG_ERROR("module", "IndividualProgression F14 experimental logout refresh queue exhausted; no further requests accepted, concealment must remain disabled");
+        LOG_ERROR("module", "IndividualProgression F14 experimental map-thread refresh queue exhausted; no further requests accepted, concealment must remain disabled");
     }
 #else
     std::size_t const affected = LifecycleRegistry().ExpireActor(loginEpoch);
@@ -388,9 +388,23 @@ namespace
             // Creatures, pets, minions, totems, environment (null) and
             // unverified players are all unverified sources.
             std::uint64_t const sourceToken = AsWorldCreature(source) ? 0 : ActorTokenOf(source);
-            if (!registry.OnParticipantEvidence(key, stamp, sourceToken) &&
-                registry.NeedsSnapshot(key, stamp))
+            bool evidenceChanged = registry.OnParticipantEvidence(key, stamp, sourceToken);
+            if (!evidenceChanged && registry.NeedsSnapshot(key, stamp))
+            {
                 registry.ApplyParticipantSnapshot(key, stamp, CollectSnapshot(tracked));
+                evidenceChanged = true; // a new conservative snapshot can revoke old rights.
+            }
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+            // Real-player damage/DoT/heal and unexpected owners invalidate
+            // previous observer facts. Request one future owning-map pass,
+            // NEVER a visibility update inside this damage/heal callback.
+            if (evidenceChanged)
+            {
+                LogoutQueue& pending = PendingLogoutRefresh();
+                pending.Remember(key, stamp);
+                HasPendingLogoutRefresh().store(pending.HasPending(), std::memory_order_release);
+            }
+#endif
             LogPoisonOnce();
             return;
         }
@@ -403,7 +417,22 @@ namespace
             std::lock_guard<std::mutex> guard(LifecycleLock());
             std::uint64_t const receiver = ActorTokenOf(target);
             if (receiver)
+            {
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                // Healing a verified bot may create new threat/assist rights
+                // for an unseen human without touching the creature itself.
+                // Fan out value-only affected creature identities under lock.
+                LogoutQueue& pending = PendingLogoutRefresh();
+                LifecycleRegistry().OnAssistOfActor(receiver, ActorTokenOf(source),
+                    [&pending](Registry::CreatureKey const& key, std::uint64_t stamp)
+                    {
+                        pending.Remember(key, stamp);
+                    });
+                HasPendingLogoutRefresh().store(pending.HasPending(), std::memory_order_release);
+#else
                 LifecycleRegistry().OnAssistOfActor(receiver, ActorTokenOf(source));
+#endif
+            }
             LogPoisonOnce();
         }
     }
@@ -448,7 +477,7 @@ public:
                       UNITHOOK_ON_UNIT_ENTER_EVADE_MODE}) { }
 
 #if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
-    // Map-thread handoff of logged-out owner evidence. The queue stores no
+    // Map-thread handoff of logged-out owner / changed threat-rights evidence. The queue stores no
     // pointers; a different object with a recycled creature GUID cannot
     // consume an expired incarnation stamp. Always drop the lock BEFORE
     // asking Core to refresh links or walking any nearby viewers.

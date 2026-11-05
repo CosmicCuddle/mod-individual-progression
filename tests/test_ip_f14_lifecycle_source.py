@@ -275,7 +275,12 @@ class Stage2ParticipantSnapshot(unittest.TestCase):
     def test_snapshot_only_after_rostered_source_never_same_event(self):
         body = self.fn(self.script(), "void HandleParticipantEvent(Unit* source, Unit* target, bool mayBeAssist)", "\n    }\n\n")
         self.assertTrue(body.split("{", 1)[1].lstrip().startswith("if (!LifecycleEnabled() || !target)"))
-        self.assertIn("if (!registry.OnParticipantEvidence(key, stamp, sourceToken) &&\n                registry.NeedsSnapshot(key, stamp))", body)
+        self.assertIn("bool evidenceChanged = registry.OnParticipantEvidence(key, stamp, sourceToken);", body)
+        self.assertIn("if (!evidenceChanged && registry.NeedsSnapshot(key, stamp))", body)
+        self.assertIn("evidenceChanged = true;", body)  # strip_comments() already removed source comment
+        self.assertIn("if (evidenceChanged)", body)
+        self.assertIn("pending.Remember(key, stamp);", body)
+        self.assertIn("OnAssistOfActor(receiver, ActorTokenOf(source),", body)
         self.assertEqual(body.count("ApplyParticipantSnapshot("), 1)
         self.assertEqual(body.count("std::lock_guard<std::mutex> guard(LifecycleLock());"), 2)
         self.assertIn("AsWorldCreature(source) ? 0 : ActorTokenOf(source)", body)
