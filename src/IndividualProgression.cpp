@@ -5,6 +5,7 @@
 #include "IndividualProgression.h"
 #include "IndividualProgressionGroupPolicy.h"
 #include "IndividualProgressionF14LoginPolicy.h"
+#include "IndividualProgressionF14StageFloorPolicy.h"
 #include "naxxramas_40.h"
 #include "Mail.h"
 #include <mutex>
@@ -90,6 +91,21 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
 {
     if (!player || !player->IsInWorld())
         return;
+
+    // F14 stage-8 floor durability (default OFF): every IP-owned route that
+    // could lower an earned stage funnels through here. A refused write is a
+    // no-op: the current earned stage stays exactly as it is.
+    if (sIndividualProgression->BlocksF14VerifiedStageFloorDowngrade(player, static_cast<uint8>(newState)))
+    {
+        uint8 const keptStage = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+        if (IndividualProgressionF14StageFloorPolicy::IsHistoricOverCapStage(keptStage, sIndividualProgression->progressionLimit))
+            LOG_INFO("module", "IndividualProgression F14: refused progression write {} for verified RandomBot guid {}; preserved historic over-cap stage {} (limit {}) untouched",
+                static_cast<uint32>(newState), player->GetGUID().GetCounter(), static_cast<uint32>(keptStage), sIndividualProgression->progressionLimit);
+        else
+            LOG_INFO("module", "IndividualProgression F14: refused progression write {} for verified RandomBot guid {} (earned TBC stage {} kept)",
+                static_cast<uint32>(newState), player->GetGUID().GetCounter(), static_cast<uint32>(keptStage));
+        return;
+    }
 
     if (!newState && newState != 0)
         return;
@@ -689,6 +705,22 @@ std::uint64_t IndividualProgression::GetF14VerifiedRandomBotLoginEpoch(ObjectGui
 
     auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(lowGuid);
     return epoch == _f14VerifiedRandomBotLoginEpoch.end() ? 0 : epoch->second;
+}
+
+bool IndividualProgression::BlocksF14VerifiedStageFloorDowngrade(Player* player, uint8 requestedStage)
+{
+    // Cheap early exits keep the historical behaviour byte-for-byte when the
+    // option is OFF. Identity is the login-thread verified epoch only; race,
+    // bot account and headless are additional requirements, never proof.
+    if (!enabled || !f14ProtectVerifiedRandomBotStageFloor || !player || !player->IsInWorld())
+        return false;
+    bool const identity = isBotAccount(player) &&
+        (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
+        player->GetSession() && player->GetSession()->IsHeadless() &&
+        HasF14VerifiedRandomBotIdentity(player);
+    // The cap is deliberately NOT an input: refusing is a no-op, never a grant.
+    return IndividualProgressionF14StageFloorPolicy::BlocksVerifiedFloorDowngrade(
+        true, identity, GetPlayerProgressionFromQuests(player), requestedStage);
 }
 
 bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage)
@@ -1396,6 +1428,8 @@ private:
             "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor", false);
         sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = sConfigMgr->GetOption<bool>(
             "IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin", false);
+        sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor", false);
         // F14 observer + WHO pilot remains OFF until the separately reviewed,
         // immediate, per-viewer Core visibility-refresh bridge is present.
         sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = sConfigMgr->GetOption<bool>(
@@ -1417,6 +1451,11 @@ private:
         {
             LOG_ERROR("module", "IndividualProgression F14 verified RandomBot group floor requires Playerbots API header; forcing OFF");
             sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = false;
+        }
+        if (sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 verified RandomBot stage floor requires Playerbots API header; forcing OFF");
+            sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor = false;
         }
         if (sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin)
         {
