@@ -60,6 +60,9 @@ jobs:
           test "$(git rev-parse HEAD:src/IndividualProgressionF14ViewerRestoreProtocol.h)" = f520356a8152d98580751604f4649fe1b564f072
           test "$(git -C pinned-grim-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
           grep -Fq 'GetGroup() const' pinned-grim-core/src/server/game/Entities/Player/Player.h
+          grep -Fq 'Unit* GetCharm() const;' pinned-grim-core/src/server/game/Entities/Unit/Unit.h
+          grep -Fq 'Guardian* GetGuardianPet() const;' pinned-grim-core/src/server/game/Entities/Unit/Unit.h
+          grep -Fq 'class Pet : public Guardian' pinned-grim-core/src/server/game/Entities/Pet/Pet.h
           grep -Fq 'GetAppliedAuras() const' pinned-grim-core/src/server/game/Entities/Unit/Unit.h
           grep -Fq 'Aura* GetBase() const' pinned-grim-core/src/server/game/Spells/Auras/SpellAuras.h
           grep -Fq 'GetCasterGUID() const' pinned-grim-core/src/server/game/Spells/Auras/SpellAuras.h
@@ -465,6 +468,8 @@ jobs:
           python3 -B "$ip/tests/core_patches/apply_f14_core_group_aura_veto.py" acore
           python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_core_group_aura_veto_source.py' -v
           git -C acore diff --check
+          grep -Fq 'viewer->GetCharm()' acore/src/server/game/Entities/Player/PlayerUpdates.cpp
+          grep -Fq 'viewer->GetGuardianPet()' acore/src/server/game/Entities/Player/PlayerUpdates.cpp
           grep -Fq 'if (viewer->GetGroup())' acore/src/server/game/Entities/Player/PlayerUpdates.cpp
           grep -Fq 'f14Auras.size() > 64' acore/src/server/game/Entities/Player/PlayerUpdates.cpp
           ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' "$ip/src"
