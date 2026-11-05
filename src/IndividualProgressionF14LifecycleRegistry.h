@@ -600,7 +600,8 @@ namespace IndividualProgressionF14LifecycleRegistry
         // creature that bot is fighting, without any creature-side event.
         // Mark each such creature uncertain unless the healer is that same
         // verified bot or is already rostered there. Returns affected count.
-        std::size_t OnAssistOfActor(std::uint64_t receiverToken, std::uint64_t helperToken)
+        std::size_t OnAssistOfActor(std::uint64_t receiverToken, std::uint64_t helperToken,
+                                    std::function<void(CreatureKey const&, std::uint64_t)> onAffected = {})
         {
             if (Guard() || receiverToken == 0 || receiverToken == helperToken)
                 return 0;
@@ -611,6 +612,10 @@ namespace IndividualProgressionF14LifecycleRegistry
                     continue;
                 if (helperToken != 0 && Rostered(pair.second.state, helperToken))
                     continue;
+                // Copy the affected target identity BEFORE invalidating evidence;
+                // the consumer may queue ONLY keys+stamps, never game pointers.
+                if (onAffected)
+                    onAffected(pair.second.key, pair.second.token);
                 Apply(pair.second, helperToken == 0 ? Policy::Event::UnverifiedOrHumanParticipant
                                                     : Policy::Event::ThreatRightsOrIdentityChanged, helperToken);
                 ++affected;
