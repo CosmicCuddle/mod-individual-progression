@@ -11,10 +11,10 @@ Earlier [DRAFT #103](https://github.com/CosmicCuddle/mod-individual-progression/
 
 This child adds an **independent human viewer login epoch**, not a creature incarnation and not a full #103 bridge:
 
-1. An actual opt-in `PlayerScript` on the existing IP lifecycle C++ compilation unit issues a new strictly increasing nonzero 64-bit server-process epoch on login for an actual Player with a non-headless session. It **does not** use verified headless RandomBot actor epochs as human viewer identity, nor does it infer a session from a GUID alone.
+1. An actual opt-in `PlayerScript` on the existing IP lifecycle C++ compilation unit issues a new strictly increasing nonzero 64-bit server-process epoch on login for an actual Player with a non-headless session **and current normal-account classification** (neither bot nor excluded account). It **does not** use verified headless RandomBot actor epochs as human viewer identity, nor does it infer a session from a GUID alone.
 2. The stamp is stored in the logged-in `Player` object's existing `CustomData` and binds the **full player ObjectGuid** to the unique epoch. No account ID, IP address, password, session address or arbitrary player pointer is persisted in the issuer.
 3. `OnPlayerLogout` clears the stamp. A second login for the same GUID receives a **different** epoch. Bad input and unsigned counter exhaustion **fail closed without wrapping**.
-4. The previously added #104 Core callback observer now requires `CurrentHumanViewerEpoch(viewer) != 0` for valid anonymous counters. Missing/in-world=false, null session, headless session or mismatched stored full GUID is rejected. No callback stores an epoch, modifies Claude's ledger, or grants concealment.
+4. The previously added #104 Core callback observer now requires `CurrentHumanViewerEpoch(viewer) != 0` for valid anonymous counters. Missing/in-world=false, null session, headless session, changed bot/excluded account classification or mismatched stored full GUID is rejected. No callback stores an epoch, modifies Claude's ledger, or grants concealment.
 5. Both scripts and their includes/registration remain under the single `COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT=1` **development-build-only** guard and the existing F14 Core hook version guard. Normal builds do not register these scripts. F14 concealment and paid defaults remain OFF.
 
 ## Critical limits
