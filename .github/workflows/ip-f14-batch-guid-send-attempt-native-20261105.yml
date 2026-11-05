@@ -1,7 +1,7 @@
 # IP F14 logout identity -> owned-map refresh handoff, experimental, default OFF.
 # Child of #82, includes Core #77 event hook and verified #78 minion evidence.
 # Bounded key+incarnation queue, NO Unit* across threads and no hide or rights.
-name: F14 per-viewer source-attributed suppression default FALSE + newest Grim native (NO HOST)
+name: F14 per-GUID batch out-of-range send-attempt provenance default OFF (NO HOST)
 
 on:
   push:
@@ -125,8 +125,8 @@ jobs:
           test "$(git -C acore/modules/mod-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
           test "$(git -C "$ip" rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           git -C "$ip" merge-base --is-ancestor c2cc14bc9c18a3e60c984c491370e7da787a388a HEAD
-          # Preserve every reviewed #83 source hunk; add only a five-file
-          # compiled-in-disposable-Core observer prototype, documentation and CI.
+          # Preserve all reviewed #83 and #86 source hunks. The ONLY newer
+          # paths are four new #93 CI/test/docs files and append-only register.
           git -C "$ip" merge-base --is-ancestor 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD
           git -C "$ip" diff --name-only 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD | sort > /tmp/source-actual
           printf '%s\n' \
@@ -143,7 +143,11 @@ jobs:
             '.github/workflows/ip-f14-viewer-suppression-attribution-native-20261105.yml' \
             'tests/core_patches/apply_f14_viewer_suppression_attribution.py' \
             'tests/test_ip_f14_viewer_suppression_attribution.py' \
-            'docs/F14_VIEWER_SUPPRESSION_ATTRIBUTION_2026-11-05.md' | sort > /tmp/source-allowed
+            'docs/F14_VIEWER_SUPPRESSION_ATTRIBUTION_2026-11-05.md' \
+            '.github/workflows/ip-f14-batch-guid-send-attempt-native-20261105.yml' \
+            'tests/core_patches/apply_f14_batched_guid_send_attempt.py' \
+            'tests/test_ip_f14_batched_guid_send_attempt_source.py' \
+            'docs/F14_BATCH_GUID_SEND_ATTEMPT_2026-11-05.md' | sort > /tmp/source-allowed
           diff -u /tmp/source-allowed /tmp/source-actual
           git -C "$ip" diff --check 2df1eadb1c3f3aa12f76eaa357e17487792f8077
           test -z "$(git -C "$ip" diff --name-only 2df1eadb1c3f3aa12f76eaa357e17487792f8077 HEAD -- conf sql data optional)"
