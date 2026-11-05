@@ -98,6 +98,11 @@ namespace IndividualProgressionF14GuidSendAttemptEvidence
 
         if (direction == Direction::OutOfRange)
         {
+            // A delayed destroy send-call report cannot upgrade suppression
+            // evidence AFTER stop/death/rights change made this exact pair
+            // owe restoration. Ordering matters even on the same map thread.
+            if (protocol.NeedsRestore(viewer, creature))
+                return Outcome::WrongDirectionOrServerStage;
             if (evidence.suppressServer != Restore::ServerStage::UnlinkedByF14)
                 return Outcome::WrongDirectionOrServerStage;
             if (evidence.suppressPacket != Restore::PacketStage::ImpliedPendingBatchFlush)
