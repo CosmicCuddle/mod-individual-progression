@@ -34,6 +34,8 @@ namespace IndividualProgressionF14GuidSendAttemptEvidence
     {
         MissingOrUnverifiedCoreAttribution,
         StaleOrCrossMapViewerCreature,
+        InvalidDirection,
+        FrozenGlobalRestore,
         MissingMatchingPriorF14Suppression,
         WrongDirectionOrServerStage,
         NotPendingSameDirectionBatch,
@@ -80,6 +82,14 @@ namespace IndividualProgressionF14GuidSendAttemptEvidence
             facts.eventMapId != creature.mapId ||
             facts.eventInstanceId != creature.instanceId)
             return Outcome::StaleOrCrossMapViewerCreature;
+
+        if (direction != Direction::OutOfRange && direction != Direction::Create)
+            return Outcome::InvalidDirection;
+
+        // Once a protocol is globally frozen or poisoned, reject late
+        // send-call notifications and preserve every restore obligation.
+        if (protocol.GlobalRestoreRequired())
+            return Outcome::FrozenGlobalRestore;
 
         Restore::Evidence const evidence = protocol.Find(viewer, creature);
         if (!evidence.found || !evidence.suppressIntent ||
