@@ -84,7 +84,7 @@ jobs:
                   -Isrc tests/f14_suppression_decision_identity.cpp -o /tmp/f14-source-identity
                 /tmp/f14-source-identity
                 "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
-                  -Isrc tests/f14_human_viewer_epoch.cpp -o /tmp/f14-human-epoch
+                  -Isrc tests/f14_human_viewer_session_epoch.cpp -o /tmp/f14-human-epoch
                 /tmp/f14-human-epoch
               done
             done
