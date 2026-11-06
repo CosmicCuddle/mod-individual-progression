@@ -26,13 +26,6 @@ static P::DecisionFacts SyntheticOnly(P::ViewerKey v, P::CreatureKey c, std::uin
     return f;
 }
 
-template<std::size_t N>
-static bool Contains(std::array<typename P::Protocol<N>::ExactPendingRestore, N> const&,
-                     std::size_t, P::ViewerKey, P::CreatureKey)
-{
-    return false; // unused: tests inspect exact entries and ordering below
-}
-
 static int TestExactCopyAndGlobalRisk()
 {
     using Proto = P::Protocol<6>;
