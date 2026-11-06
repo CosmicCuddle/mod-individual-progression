@@ -1,0 +1,59 @@
+# Source-only safety audit; no runtime hiding, no Worldserver launch, no host edits.
+name: F14 pinned zero-diff and late AllMap hook source safety gate (OFF)
+on:
+  push:
+    branches:
+      - research/cs01-f14-map-hook-timing-source-gate-off-20261106
+  pull_request:
+    branches:
+      - research/cs01-f14-core-map-update-observer-native-off-20261106
+permissions:
+  contents: read
+jobs:
+  pinned-map-hook-timing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact review head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify parent, four scoped changes, unchanged runtime and OFF defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=bfadef922bb36dd7a244222698047c7abef92d93
+          test "$(git rev-parse HEAD^{commit})" != "$parent"
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            'tests/test_ip_f14_map_hook_timing_source_gate.py' \
+            '.github/workflows/ip-f14-map-hook-timing-source-gate-20261106.yml' \
+            'docs/F14_MAP_HOOK_TIMING_SOURCE_GATE_2026-11-06.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src conf sql data optional tests/core_patches)"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' src
+          echo 'PASS: test/workflow/docs/register only, no feature switches or original Claude changes'
+      - name: Checkout exact pinned Grim Core Map timing source (read only)
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: pinned-core
+          sparse-checkout: |
+            src/server/game/Maps/Map.cpp
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Run exact source contract and nine fail-drift/mutation cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C pinned-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          F14_PINNED_CORE_ROOT="$PWD/pinned-core" python3 -B -m unittest discover -s tests -p 'test_ip_f14_map_hook_timing_source_gate.py' -v
+          echo 'PASS: callback remains late and zero-t_diff optional; NOT a synchronous restoration or exclusive ownership guarantee'
