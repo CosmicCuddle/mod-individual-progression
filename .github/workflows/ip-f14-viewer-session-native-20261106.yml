@@ -532,6 +532,33 @@ jobs:
           assert visibility.count("GetMap()->IsWithinF14MapUpdateInvocation() &&") == 2
           print("PASS: exact pinned MapMgr schedules root maps AND MapInstanced schedules child maps, with worker queue and wait; entry visibility outside Map::Update; NO exclusive-owner proof")
           PY
+      - name: Audit Corpse vs Dead Unit::Update and F14 deferred refresh boundary (NOT client proof)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B - <<'PY'
+          from pathlib import Path
+          base = Path("acore/src/server/game/Entities")
+          creature = (base / "Creature/Creature.cpp").read_text(encoding="utf-8")
+          unit = (base / "Unit/Unit.cpp").read_text(encoding="utf-8")
+          ip = Path("acore/modules/mod-individual-progression/src/IndividualProgressionF14LifecycleScript.cpp").read_text(encoding="utf-8")
+          assert creature.count("void Creature::Update(uint32 diff)") == 1
+          update = creature.split("void Creature::Update(uint32 diff)", 1)[1]
+          assert "switch (m_deathState)" in update
+          dead = update.split("case DeathState::Dead:", 1)[1].split("case DeathState::Corpse:", 1)[0]
+          corpse = update.split("case DeathState::Corpse:", 1)[1].split("case DeathState::Alive:", 1)[0]
+          assert "Unit::Update(diff);" not in dead, "Dead state unexpectedly updates Unit"
+          assert corpse.count("Unit::Update(diff);") == 1, "Corpse must still call Unit::Update"
+          assert unit.count("void Unit::Update(uint32 p_time)") == 1
+          unit_update = unit.split("void Unit::Update(uint32 p_time)", 1)[1]
+          assert "sScriptMgr->OnUnitUpdate(this, p_time);" in unit_update[:700]
+          assert "void OnUnitUpdate(Unit* unit, uint32 /*diff*/) override" in ip
+          assert "if (!HasPendingLogoutRefresh().load(std::memory_order_acquire))" in ip
+          assert "sScriptMgr->ShouldF14RefreshCreatureVisibility(creature)" in ip
+          assert "void OnF14CreatureCorpseReady(Creature* creature) override" in ip
+          assert "MarkPendingRefresh(creature);" in ip
+          print("PASS: pinned Corpse -> Unit::Update -> optional F14 refresh hook exists; Dead does NOT update Unit. This is source only, not scheduled refresh or client CREATE proof.")
+          PY
       - name: Apply #111 current human viewer session/GM fail-visible veto BEFORE F14 query (OFF)
         shell: bash
         run: |
