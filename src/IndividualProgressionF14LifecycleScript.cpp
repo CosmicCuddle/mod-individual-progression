@@ -42,6 +42,7 @@
 #if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
 #include "WorldObjectScript.h"
 #include "WorldSession.h"
+#include "Map.h" // Disposable Core-only F14 Map::Update invocation diagnostic
 #include "IndividualProgressionF14HumanViewerEpoch.h"
 #include "IndividualProgressionF14SuppressionDecisionIdentity.h"
 #include <atomic>
@@ -905,6 +906,21 @@ private:
         facts.sameLiveCoreMapPointer = viewer && creature &&
             viewer->IsInWorld() && creature->IsInWorld() &&
             viewer->GetMap() && viewer->GetMap() == creature->GetMap();
+
+        // #108 isolated disposable Core frame proof: a matching Map pointer
+        // alone is insufficient. Visibility can also originate outside
+        // Map::Update (e.g. player map entry). This checks ONLY the current
+        // synchronous Map::Update invocation, not exclusive thread ownership.
+        // On missing proof, count once and retain default-visible behavior.
+        if (facts.sameLiveCoreMapPointer &&
+            !viewer->GetMap()->IsWithinF14MapUpdateInvocation())
+        {
+            std::atomic<std::uint64_t>& rejected =
+                beforeViewerLinkMutation ? _rejectedBeforeViewerLinkSnapshots : _rejectedDecisionSnapshots;
+            if (rejected.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_ERROR("module", "IP F14 diagnostic source not within current Map::Update invocation; concealment OFF");
+            return;
+        }
 
         // Try instead of blocking in a Core visibility script; a concurrent
         // or recursive lifecycle operation cannot deadlock this diagnostic.
