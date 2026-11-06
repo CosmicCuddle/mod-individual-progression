@@ -39,6 +39,9 @@ jobs:
           path: pinned-core
           sparse-checkout: |
             src/server/game/Entities/Creature/Creature.cpp
+            src/server/game/Entities/Object/Object.cpp
+            src/server/game/Grids/Notifiers/GridNotifiers.cpp
+            src/server/game/Entities/Player/PlayerUpdates.cpp
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Checkout original #56 attack/corpse hook prototype, read only
@@ -69,4 +72,4 @@ jobs:
           test "$(git -C pinned-attack-hook rev-parse HEAD)" = 6cf528c0f1728ed3ec8fdd11e020f07ec23f3af5
           test "$(git -C pinned-refresh-hook rev-parse HEAD)" = 6182893d18e0ab2bb1d581900910346c1c0819b2
           F14_PINNED_CORE_ROOT="$PWD/pinned-core" F14_PINNED_ATTACK_PATCH_ROOT="$PWD/pinned-attack-hook" F14_PINNED_REFRESH_PATCH_ROOT="$PWD/pinned-refresh-hook" python3 -B -m unittest discover -s tests -p 'test_ip_f14_corpse_ready_immediate_handoff_source.py' -v
-          echo 'PASS source-only: existing #56/#77 CORPSE READY immediate refresh happens before both corpse removal modes; no client proof and no positive hide'
+          echo 'PASS source-only: corpse-ready after-event refresh reaches nearby Player direct CREATE/link through Core VisibleChangesNotifier; this is NOT per-viewer prior-hide/rights or client ACK proof'
