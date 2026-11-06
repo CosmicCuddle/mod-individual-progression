@@ -30,8 +30,10 @@ def exactly(s, text, label, n=1):
 
 def between(s, start, stop, label):
     exactly(s, start, label + " start")
-    exactly(s, stop, label + " end")
-    body = s.split(start, 1)[1].split(stop, 1)[0]
+    tail = s.split(start, 1)[1]
+    if stop not in tail:
+        raise ValueError(f"{label}: exact end anchor absent")
+    body = tail.split(stop, 1)[0]
     if not body:
         raise ValueError(f"{label}: empty exact Core span")
     return body
