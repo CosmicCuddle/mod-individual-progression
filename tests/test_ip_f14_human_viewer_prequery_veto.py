@@ -2,6 +2,7 @@
 """F14 disposable Core exact viewer-session guard fixture tests; NO LIVE HIDE."""
 from pathlib import Path
 import ast
+import os
 import subprocess
 import sys
 import tempfile
@@ -139,6 +140,40 @@ class F14ViewerPrequeryVetoFixture(unittest.TestCase):
         self.assertNotIn("ObserveProposedBatchFlush(", source)
         self.assertNotIn("ClearPreviouslyHidden(", source)
         self.assertIn("COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT", source)
+
+
+    @unittest.skipUnless(os.environ.get("F14_PINNED_CORE_ROOT"),
+                         "exact pinned Grim Core not checked out")
+    def test_exact_pinned_core_session_api_before_disposable_overlays(self):
+        root = Path(os.environ["F14_PINNED_CORE_ROOT"])
+        h = (root / PLAYER_H).read_text(encoding="utf-8")
+        sess = (root / SESSION_H).read_text(encoding="utf-8")
+        updates = (root / PLAYER).read_text(encoding="utf-8")
+        self.assertIn("[[nodiscard]] WorldSession* GetSession() const", h)
+        self.assertIn("[[nodiscard]] bool IsGameMaster() const", h)
+        self.assertIn("[[nodiscard]] bool IsHeadless() const { return _headless; }", sess)
+        self.assertIn('#include "WorldStatePackets.h"', updates)
+        self.assertIn("void Player::UpdateVisibilityOf(T* target, UpdateData& data,", updates)
+        self.assertIn("void Player::UpdateVisibilityOf(WorldObject* target)", updates)
+        self.assertNotIn("IsWithinF14MapUpdateInvocation()", updates)
+        # An opt-in Core overlay must be applied before the hard frame gate.
+        self.assertNotIn("IsWithinF14MapUpdateInvocation() const;", (root / MAP_H).read_text())
+
+    @unittest.skipUnless(os.environ.get("F14_PINNED_PLAYERBOTS_ROOT"),
+                         "selected historical Playerbots not checked out")
+    def test_exact_historical_playerbots_identity_is_not_headless_proof(self):
+        root = Path(os.environ["F14_PINNED_PLAYERBOTS_ROOT"])
+        cpp = (root / "src/Bot/RandomPlayerbotMgr.cpp").read_text(encoding="utf-8")
+        playerbot_ai = (root / "src/Bot/PlayerbotAI.cpp").read_text(encoding="utf-8")
+        self.assertIn("bool RandomPlayerbotMgr::IsRandomBot(Player* bot)", cpp)
+        self.assertIn("bool RandomPlayerbotMgr::IsRandomBot(ObjectGuid::LowType bot)", cpp)
+        self.assertIn("return currentBots.contains(bot);", cpp)
+        self.assertIn("sPlayerbotAIConfig.IsInRandomAccountList", cpp)
+        self.assertIn("bool PlayerbotAI::IsAltBot()", playerbot_ai)
+        self.assertIn("bool PlayerbotAI::HasGameClientMaster()", playerbot_ai)
+        # This source API does not prove a client-less actual viewer.
+        self.assertNotIn("GetSession()->IsHeadless()", cpp)
+
 
 if __name__ == "__main__":
     unittest.main()
