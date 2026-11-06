@@ -1,0 +1,74 @@
+# F14-only negative Core pre-policy map-frame gate, default FALSE. NO LAUNCH.
+name: F14 prequery map-frame fail-visible source and model (OFF)
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-prequery-map-frame-hard-veto-off-20261106
+  pull_request:
+    branches:
+      - research/cs01-f14-map-frame-native-integration-off-20261106
+    paths:
+      - 'tests/core_patches/apply_f14_prequery_map_frame_hard_veto.py'
+      - 'tests/test_ip_f14_prequery_map_frame_hard_veto.py'
+      - 'tests/f14_prequery_map_frame_hard_veto_model.cpp'
+      - '.github/workflows/ip-f14-prequery-map-frame-source-20261106.yml'
+      - '.github/workflows/ip-f14-prequery-map-frame-native-20261106.yml'
+      - 'docs/F14_PREQUERY_MAP_FRAME_HARD_VETO_2026-11-06.md'
+      - 'docs/CUSTOM_MODIFICATIONS_REGISTER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  prequery-hard-veto-source:
+    name: Both real F14 visibility paths fail visible, no positive policy (source only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact child IP commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Require exactly seven review paths and unchanged #109 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=566c9524f81ca537623a95789568bd8a708a082f
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            'tests/core_patches/apply_f14_prequery_map_frame_hard_veto.py' \
+            'tests/test_ip_f14_prequery_map_frame_hard_veto.py' \
+            'tests/f14_prequery_map_frame_hard_veto_model.cpp' \
+            '.github/workflows/ip-f14-prequery-map-frame-source-20261106.yml' \
+            '.github/workflows/ip-f14-prequery-map-frame-native-20261106.yml' \
+            'docs/F14_PREQUERY_MAP_FRAME_HARD_VETO_2026-11-06.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src conf sql data optional)"
+          echo 'PASS: all #107-#109 runtime/quests/default-OFF code unchanged'
+      - name: Run fail-atomic two-path fixture tests, no installed Core
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_prequery_map_frame_hard_veto.py' -v
+      - name: Compile and execute 2048-case pure negative gate model in eight compiler modes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  tests/f14_prequery_map_frame_hard_veto_model.cpp -o /tmp/f14-prequery-hard-veto
+                /tmp/f14-prequery-hard-veto
+              done
+            done
+          done
+          echo 'PASS: 2048 assertion-active cases in EACH of 8 compiler/configuration modes; no production hide'
