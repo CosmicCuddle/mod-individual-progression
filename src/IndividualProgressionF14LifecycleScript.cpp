@@ -39,6 +39,11 @@
 #include "Log.h"
 #include "Player.h"
 #include "ScriptMgr.h"
+#if defined(COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER) && COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER >= 1
+#include "AllMapScript.h"
+#include "Map.h" // #108 disposable Core frame diagnostic; not exclusive map ownership
+#include <atomic>
+#endif
 #if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
 #include "WorldObjectScript.h"
 #include "WorldSession.h"
@@ -991,7 +996,41 @@ private:
             LOG_INFO("module", "IP F14 observer saw its first tagged {} server send-call; this is NOT client receipt or restoration", direction);
     }
 };
+
 #endif
+#endif
+
+// Optional source-only/CI map-frame observer. Never registered by stock
+// builds; no new Core hook, no player/creature lookup, no per-GUID log, no
+// F14 policy, packet, ledger, settings or even a visibility recheck.
+// This proves only that an existing AllMapScript hook can inspect the
+// exact active Map::Update frame in a pinned disposable Core build.
+// It does NOT prove exclusive map ownership or authorise delayed removal.
+#if defined(COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER) && COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER >= 1
+class IndividualProgressionF14MapUpdateFrameObserver final : public AllMapScript
+{
+public:
+    IndividualProgressionF14MapUpdateFrameObserver()
+        : AllMapScript("IndividualProgression_F14MapUpdateFrameObserver",
+                       {ALLMAPHOOK_ON_MAP_UPDATE}) { }
+
+    void OnMapUpdate(Map* map, uint32 /*diff*/) override
+    {
+        if (!map || !map->IsWithinF14MapUpdateInvocation())
+        {
+            if (_rejected.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_ERROR("module", "IP F14 map-frame observer saw no current Map::Update invocation; no restoration or hiding authorised");
+            return;
+        }
+
+        if (_observed.fetch_add(1, std::memory_order_relaxed) == 0)
+            LOG_INFO("module", "IP F14 map-frame observer saw an existing map update callback; this is NOT exclusive owning-map, delayed-removal or client proof");
+    }
+
+private:
+    std::atomic<std::uint64_t> _observed{0};
+    std::atomic<std::uint64_t> _rejected{0};
+};
 #endif
 
 void AddSC_mod_individual_progression_f14_lifecycle()
@@ -1003,5 +1042,8 @@ void AddSC_mod_individual_progression_f14_lifecycle()
     new IndividualProgressionF14HumanViewerEpochScript();
     new IndividualProgressionF14TaggedGuidObserverScript();
 #endif
+#endif
+#if defined(COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER) && COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER >= 1
+    new IndividualProgressionF14MapUpdateFrameObserver();
 #endif
 }
