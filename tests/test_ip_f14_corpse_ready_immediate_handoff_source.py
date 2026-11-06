@@ -13,6 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 CREATURE = "src/server/game/Entities/Creature/Creature.cpp"
 ATTACK_PATCH = "tests/core_patches/f14_attack_corpse_event_bridge_prototype.patch"
 REFRESH_PATCH = "tests/core_patches/f14_event_visibility_refresh_request_prototype.patch"
+CORE_OBJECT = "src/server/game/Entities/Object/Object.cpp"
+CORE_PLAYER_UPDATES = "src/server/game/Entities/Player/PlayerUpdates.cpp"
+CORE_NOTIFIER = "src/server/game/Grids/Notifiers/GridNotifiers.cpp"
+
 EXPECTED_ORIGINAL = """        Unit::setDeathState(DeathState::Corpse, despawn);
     }
     else if (state == DeathState::JustRespawned)"""
@@ -114,6 +118,50 @@ def validate_chain(creature, attack, refresh, lifecycle):
     return True
 
 
+def verify_generic_refresh_delivery(object_source, notifier_source, player_updates):
+    # Confirm that Core's existing creature-wide visibility request does
+    # reach each nearby Player::UpdateVisibilityOf direct path. This is a
+    # necessary server routing fact, NOT client acknowledgement or proof of
+    # one viewer's previous-F14-hidden/quest/loot entitlements.
+    key = "void WorldObject::UpdateObjectVisibility(bool /*forced*/, bool /*fromUpdate*/)"
+    exact_once(object_source, key, "Core WorldObject visibility entry")
+    body = object_source.split(key, 1)[1].split("\n}\n", 1)[0]
+    expected = ("Acore::VisibleChangesNotifier notifier(*this);",
+                "Cell::VisitObjects(this, notifier, GetVisibilityRange());")
+    if any(body.count(x) != 1 for x in expected) or body.index(expected[0]) >= body.index(expected[1]):
+        raise ValueError("existing Core creature-wide visibility route changed")
+
+    key = "void VisibleChangesNotifier::Visit(PlayerMapType& m)"
+    exact_once(notifier_source, key, "nearby human player notifier")
+    visit = notifier_source.split(key, 1)[1].split("\n}\n", 1)[0]
+    token = "iter->GetSource()->UpdateVisibilityOf(&i_object);"
+    if visit.count(token) != 1:
+        raise ValueError("missing or duplicated direct player callback")
+    # Shared vision observers can also trigger visibility updates, so this
+    # cannot be equated with a single current approved human viewer.
+    if "HasSharedVision()" not in visit:
+        raise ValueError("shared-vision path changed or omitted from audit")
+
+    key = "void Player::UpdateVisibilityOf(WorldObject* target)"
+    exact_once(player_updates, key, "direct Core player visibility path")
+    direct = player_updates.split(key, 1)[1].split("\n}\n", 1)[0]
+    steps = (
+        "if (HaveAtClient(target))",
+        "else",
+        "if (CanSeeOrDetect(target, false, true))",
+        "target->SendUpdateToPlayer(this);",
+        "GetObjectVisibilityContainer().LinkWorldObjectVisibility(target);",
+    )
+    if any(direct.count(x) != 1 for x in steps):
+        raise ValueError("Core direct branch changed; no inferred server CREATE path")
+    positions = [direct.index(x) for x in steps]
+    if positions != sorted(positions) or len(set(positions)) != len(positions):
+        raise ValueError("direct Core CREATE/link order changed")
+    if "GetObjectVisibilityContainer().UnlinkWorldObjectVisibility(target);" not in direct:
+        raise ValueError("Core ordinary unlink path missing")
+    return True
+
+
 class PreRemovalHandoffSource(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -123,12 +171,28 @@ class PreRemovalHandoffSource(unittest.TestCase):
         if not all(required):
             raise unittest.SkipTest("Exact pinned Core and ORIGINAL patch checkouts not provided")
         cls.creature = (Path(required[0]) / CREATURE).read_text(encoding="utf-8")
+        cls.core_object = (Path(required[0]) / CORE_OBJECT).read_text(encoding="utf-8")
+        cls.core_notifier = (Path(required[0]) / CORE_NOTIFIER).read_text(encoding="utf-8")
+        cls.core_player = (Path(required[0]) / CORE_PLAYER_UPDATES).read_text(encoding="utf-8")
         cls.attack = (Path(required[1]) / ATTACK_PATCH).read_text(encoding="utf-8")
         cls.refresh = (Path(required[2]) / REFRESH_PATCH).read_text(encoding="utf-8")
         cls.lifecycle = (ROOT / "src/IndividualProgressionF14LifecycleScript.cpp").read_text(encoding="utf-8")
 
     def test_original_temporal_contract_with_both_corpse_modes(self):
         self.assertTrue(validate_chain(self.creature, self.attack, self.refresh, self.lifecycle))
+
+    def test_immediate_refresh_reaches_core_direct_player_visibility_create_path(self):
+        self.assertTrue(verify_generic_refresh_delivery(self.core_object, self.core_notifier, self.core_player))
+
+    def test_missing_core_player_create_path_is_rejected(self):
+        altered = self.core_player.replace("target->SendUpdateToPlayer(this);", "NoClientSend();", 1)
+        with self.assertRaises(ValueError):
+            verify_generic_refresh_delivery(self.core_object, self.core_notifier, altered)
+
+    def test_missing_notifier_player_visit_is_rejected(self):
+        altered = self.core_notifier.replace("iter->GetSource()->UpdateVisibilityOf(&i_object);", "NoViewerCallback();", 1)
+        with self.assertRaises(ValueError):
+            verify_generic_refresh_delivery(self.core_object, altered, self.core_player)
 
     def test_removing_attack_corpse_hook_fails(self):
         altered = self.attack.replace(
