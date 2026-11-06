@@ -116,6 +116,8 @@ def main():
     if not root.is_dir():
         raise SystemExit("Core root missing")
     previous = {p: (root / p).read_text(encoding="utf-8") for p in FILES}
+    if any("OnF14BeforeCreatureSuppression" in original for original in previous.values()):
+        raise ValueError("already has F14 pre-unlink source hook; reject repeat or mixed patch")
     if "OnF14CreatureSuppressionDecision" not in previous[FILES[0]]:
         raise ValueError("missing exact prior #86 source-attributed F14 decision")
     if "F14ViewerHasDirectInteractionVeto" not in previous[FILES[3]] or (
