@@ -1,0 +1,68 @@
+name: F14 original ledger read-only pending pairs test OFF
+on:
+  push:
+    branches: [research/cs01-f14-known-pair-readonly-snapshot-off-20261106]
+  pull_request:
+    branches: [research/cs01-f14-exact-viewer-restore-recheck-plan-off-20261106]
+permissions:
+  contents: read
+jobs:
+  read-only-snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Preserve Claude original code; enforce six scoped files and F14 OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=f9b3a5d1f6f16fad0174da1e81920db1ace9894d
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort >/tmp/actual
+          printf '%s\n' 'src/IndividualProgressionF14ViewerRestoreProtocol.h' 'tests/f14_original_protocol_readonly_owed_snapshot.cpp' 'tests/f14_snapshot_to_exact_recheck_no_packet.cpp' '.github/workflows/ip-f14-original-protocol-readonly-snapshot-20261106.yml' 'docs/F14_ORIGINAL_READONLY_PENDING_PAIR_SNAPSHOT_2026-11-06.md' 'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src/IndividualProgressionF14PriorHiddenLedger.h src/IndividualProgressionF14GuidSendAttemptEvidence.h src/IndividualProgressionF14LifecycleScript.cpp src/IndividualProgressionPlayer.cpp src/IndividualProgression.cpp conf sql data optional)"
+          python3 -B - <<'PY'
+          from pathlib import Path
+          import subprocess
+          p='src/IndividualProgressionF14ViewerRestoreProtocol.h'
+          old=subprocess.check_output(['git','show','f9b3a5d1f6f16fad0174da1e81920db1ace9894d:'+p],text=True)
+          now=Path(p).read_text()
+          begin='\n        // ADDITIVE PURE read-only snapshot seam for the original #94 protocol.'
+          end='\n        // Const only: no caller can complete or reset through this protocol.'
+          assert now.count(begin)==1 and now.count(end)==1
+          i=now.index(begin); j=now.index(end,i+len(begin))
+          assert now[:i]+now[j+1:]==old, 'Claude original #94 bytes modified outside additive read-only block'
+          extra=now[i:j]
+          for t in ('CopyExactPendingRestores(', '_ledger.NeedsRestore(', 'OutputTooSmallNoCopy', 'KnownPairsWithUnattributedRisk'):
+              assert t in extra, t
+          for unsafe in ('CompleteRestoreOnlyWithClientProof(', 'ClearFrozenAfterGlobalProof(', 'SendDirectMessage(', 'ShouldF14SuppressCreatureForViewer('):
+              assert unsafe not in extra, unsafe
+          print('PASS original #94 unchanged except one additive const snapshot method')
+          PY
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' src
+      - name: Compile and run bounded previous-hidden snapshot in eight variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$standard" -Isrc -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" tests/f14_original_protocol_readonly_owed_snapshot.cpp -o /tmp/f14-original-snapshot
+                /tmp/f14-original-snapshot
+                "$compiler" -std="$standard" -Isrc -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" tests/f14_snapshot_to_exact_recheck_no_packet.cpp -o /tmp/f14-snapshot-composed
+                /tmp/f14-snapshot-composed
+              done
+            done
+          done
+          echo 'PASS: original #94 snapshot AND #116 exact recheck composed across direct/batched clients in eight compiler modes; no packet, ACK or historical debt release'
