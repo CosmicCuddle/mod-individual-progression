@@ -392,7 +392,7 @@ jobs:
               test_ip_f14_viewer_suppression_attribution.CoreAttribution.test_direct_and_batched_consult_core_once_and_only_tag_f14 \
               test_ip_f14_viewer_suppression_attribution.CoreAttribution.test_no_global_see_or_detect_hook_or_full_ready_macro
           python3 -B -m unittest discover -s "$ip/tests" \
-            -p 'test_ip_f14_source_decision_creature_snapshot.py' -v
+            -p 'test_ip_f14_preunlink_source_attribution.py' -v
           git -C acore diff --check
           grep -Fq 'CALL_ENABLED_BOOLEAN_HOOKS_WITH_DEFAULT_FALSE(WorldObjectScript' \
             acore/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
