@@ -282,6 +282,80 @@ namespace IndividualProgressionF14ViewerRestoreProtocol
         {
             return reason < FailReason::Count ? _failures[static_cast<std::size_t>(reason)] : 0;
         }
+
+        // ADDITIVE PURE read-only snapshot seam for the original #94 protocol.
+        // No Core pointers, no callbacks, no change to #85 or ledger mutation.
+        // Caller MUST hold one owner/mutex across Copy AND must release it
+        // before ANY Core visibility, ScriptMgr or player-session action.
+        // A known pair is ONLY positive F14-attributed server evidence,
+        // not proof that the client rendered/destroyed an object.
+        enum class SnapshotResult : std::uint8_t
+        {
+            KnownPairsCopied,
+            KnownPairsWithUnattributedRisk,
+            OutputTooSmallNoCopy
+        };
+
+        struct ExactPendingRestore
+        {
+            ViewerKey viewer{};
+            CreatureKey creature{};
+            std::uint64_t incarnation = 0;
+            ServerStage suppressedAtServer = ServerStage::None;
+            ServerStage relinkAtServer = ServerStage::None;
+            PacketStage restorePacket = PacketStage::None;
+        };
+
+        // Fail atomic on insufficient capacity: count=0, destination UNCHANGED,
+        // requiredCount tells the owner how much fixed storage is needed.
+        // Never silently truncate, evict, clear, acknowledge, or infer a hide.
+        // If unattributed risk exists, copied exact known pairs are only a
+        // SUBSET; returning a non-empty list is never proof of global safety.
+        template<std::size_t OutputCapacity>
+        SnapshotResult CopyExactPendingRestores(
+            std::array<ExactPendingRestore, OutputCapacity>& destination,
+            std::size_t& count,
+            std::size_t& requiredCount) const
+        {
+            count = 0;
+            requiredCount = 0;
+
+            for (std::size_t i = 0; i < _size; ++i)
+            {
+                Record const& r = _records[i];
+                if (r.suppressIntent &&
+                    (r.suppressServer == ServerStage::UnlinkedByF14 ||
+                     r.suppressServer == ServerStage::CreateWithheldByF14) &&
+                    _ledger.NeedsRestore(r.viewer, r.creature))
+                    ++requiredCount;
+            }
+
+            if (requiredCount > OutputCapacity)
+                return SnapshotResult::OutputTooSmallNoCopy;
+
+            for (std::size_t i = 0; i < _size; ++i)
+            {
+                Record const& r = _records[i];
+                if (r.suppressIntent &&
+                    (r.suppressServer == ServerStage::UnlinkedByF14 ||
+                     r.suppressServer == ServerStage::CreateWithheldByF14) &&
+                    _ledger.NeedsRestore(r.viewer, r.creature))
+                    destination[count++] = {
+                        r.viewer, r.creature, r.incarnation,
+                        r.suppressServer, r.restoreServer, r.restorePacket
+                    };
+            }
+
+            // A write to the ledger can precede a refused record insertion.
+            // Never describe the known list as complete in that state, or
+            // after an unattributed hide risk / global overflow poison.
+            bool const incompleteAttribution = _unattributedHideRisk ||
+                _ledger.IsPoisoned() || _ledger.Size() != _size;
+            return incompleteAttribution
+                ? SnapshotResult::KnownPairsWithUnattributedRisk
+                : SnapshotResult::KnownPairsCopied;
+        }
+
         // Const only: no caller can complete or reset through this protocol.
         Ledger::Ledger<Capacity> const& LedgerView() const { return _ledger; }
 
