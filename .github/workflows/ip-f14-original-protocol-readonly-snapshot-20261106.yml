@@ -17,7 +17,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Preserve Claude original code; enforce five scoped files and F14 OFF
+      - name: Preserve Claude original code; enforce six scoped files and F14 OFF
         shell: bash
         run: |
           set -euo pipefail
@@ -25,7 +25,7 @@ jobs:
           git merge-base --is-ancestor "$parent" HEAD
           git diff --check "$parent"
           git diff --name-only "$parent" HEAD | sort >/tmp/actual
-          printf '%s\n' 'src/IndividualProgressionF14ViewerRestoreProtocol.h' 'tests/f14_original_protocol_readonly_owed_snapshot.cpp' '.github/workflows/ip-f14-original-protocol-readonly-snapshot-20261106.yml' 'docs/F14_ORIGINAL_READONLY_PENDING_PAIR_SNAPSHOT_2026-11-06.md' 'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          printf '%s\n' 'src/IndividualProgressionF14ViewerRestoreProtocol.h' 'tests/f14_original_protocol_readonly_owed_snapshot.cpp' 'tests/f14_snapshot_to_exact_recheck_no_packet.cpp' '.github/workflows/ip-f14-original-protocol-readonly-snapshot-20261106.yml' 'docs/F14_ORIGINAL_READONLY_PENDING_PAIR_SNAPSHOT_2026-11-06.md' 'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
           diff -u /tmp/expected /tmp/actual
           test -z "$(git diff --name-only "$parent" HEAD -- src/IndividualProgressionF14PriorHiddenLedger.h src/IndividualProgressionF14GuidSendAttemptEvidence.h src/IndividualProgressionF14LifecycleScript.cpp src/IndividualProgressionPlayer.cpp src/IndividualProgression.cpp conf sql data optional)"
           python3 -B - <<'PY'
@@ -60,7 +60,9 @@ jobs:
                 if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
                 "$compiler" -std="$standard" -Isrc -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" tests/f14_original_protocol_readonly_owed_snapshot.cpp -o /tmp/f14-original-snapshot
                 /tmp/f14-original-snapshot
+                "$compiler" -std="$standard" -Isrc -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" tests/f14_snapshot_to_exact_recheck_no_packet.cpp -o /tmp/f14-snapshot-composed
+                /tmp/f14-snapshot-composed
               done
             done
           done
-          echo 'PASS: exact pending F14 pairs with fail-atomic insufficient capacity, global risk and untouched ledger in eight modes'
+          echo 'PASS: original #94 snapshot AND #116 exact recheck composed across direct/batched clients in eight compiler modes; no packet, ACK or historical debt release'
