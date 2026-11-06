@@ -1,7 +1,6 @@
 // Pure negative F14 pre-query Map::Update frame gate MODEL, not live Core.
 // No AzerothCore process, positive hide script, client, database or packets.
 // Enumerates the same conjunctive order as the disposable Core overlay.
-#include <cassert>
 #include <cstdint>
 #include <iostream>
 
@@ -41,6 +40,14 @@ bool ProposedF14Decision(SourceFacts const& f, Policy policy, int& calls)
            policy(f, calls) && !f.directHumanRightsVeto;
 }
 
+// CHECK stays active even with -DNDEBUG, unlike standard assert.
+#define CHECK(expression) do { \
+    if (!(expression)) { \
+        std::cerr << "FAIL expression: " << #expression << " at line " << __LINE__ << '\n'; \
+        return 1; \
+    } \
+} while (0)
+
 int main()
 {
     int scenarios = 0;
@@ -62,33 +69,33 @@ int main()
                 mode == 0
                     ? ProposedF14Decision<false>(f, DefaultFalsePolicy, realPolicyCalls)
                     : ProposedF14Decision<true>(f, DefaultFalsePolicy, realPolicyCalls);
-            assert(!actualDefaultFalse); // no live positive provider
-            assert(realPolicyCalls == (prerequisite ? 1 : 0));
+            CHECK(!actualDefaultFalse); // no live positive provider
+            CHECK(realPolicyCalls == (prerequisite ? 1 : 0));
 
             int hypotheticalCalls = 0;
             bool const hypotheticallyApproved =
                 mode == 0
                     ? ProposedF14Decision<false>(f, HypotheticalPolicyOnly, hypotheticalCalls)
                     : ProposedF14Decision<true>(f, HypotheticalPolicyOnly, hypotheticalCalls);
-            assert(hypotheticalCalls == (prerequisite ? 1 : 0));
-            assert(hypotheticallyApproved ==
+            CHECK(hypotheticalCalls == (prerequisite ? 1 : 0));
+            CHECK(hypotheticallyApproved ==
                    (prerequisite && f.futurePolicyWouldSayYes &&
                     !f.directHumanRightsVeto));
             if (!f.inThisMapUpdateInvocation || !f.sameMap ||
                 !f.mapKnown || !f.viewerInWorld || !f.creatureInWorld)
             {
-                assert(!hypotheticallyApproved);
-                assert(hypotheticalCalls == 0);
+                CHECK(!hypotheticallyApproved);
+                CHECK(hypotheticalCalls == 0);
             }
             if (!f.baselineVisible || !f.creatureNpc || f.isPet)
             {
-                assert(!hypotheticallyApproved);
-                assert(hypotheticalCalls == 0);
+                CHECK(!hypotheticallyApproved);
+                CHECK(hypotheticalCalls == 0);
             }
             ++scenarios;
         }
     }
-    assert(scenarios == 2048);
+    CHECK(scenarios == 2048);
     std::cout << "F14 pre-query hard frame-veto pure model: "
               << scenarios << " exhaustive path/boolean cases passed\n";
 }
