@@ -342,8 +342,15 @@ jobs:
               test_ip_f14_viewer_suppression_attribution.CoreAttribution.test_positive_query_defaults_false_and_emits_source_tag \
               test_ip_f14_viewer_suppression_attribution.CoreAttribution.test_direct_and_batched_consult_core_once_and_only_tag_f14 \
               test_ip_f14_viewer_suppression_attribution.CoreAttribution.test_no_global_see_or_detect_hook_or_full_ready_macro
-          python3 -B -m unittest discover -s "$ip/tests" \
-            -p 'test_ip_f14_preunlink_source_attribution.py' -v
+          # The #107 exact-SIX-path and pre-#108 no-Map-header expectations
+          # are obsolete on stacked #109. Retain all four original #86
+          # default-FALSE attribution tests above, plus the FOUR original #107
+          # Core fixture/patcher guarantees; never weaken the actual Core path.
+          PYTHONPATH="$ip/tests" python3 -B -m unittest -v \
+            test_ip_f14_preunlink_source_attribution.CoreFixture.test_failure_is_atomic_without_partial_core_changes \
+            test_ip_f14_preunlink_source_attribution.CoreFixture.test_prelink_both_paths_and_old_posthook_unchanged \
+            test_ip_f14_preunlink_source_attribution.CoreFixture.test_reapply_refused_without_second_mutation \
+            test_ip_f14_preunlink_source_attribution.ScopeAndImmutable.test_patcher_is_restrictive_and_both_paths
           git -C acore diff --check
           grep -Fq 'CALL_ENABLED_BOOLEAN_HOOKS_WITH_DEFAULT_FALSE(WorldObjectScript' \
             acore/src/server/game/Scripting/ScriptDefines/WorldObjectScript.cpp
