@@ -1,4 +1,4 @@
-# Stacked on exact #109 native-green Core/IP/PB/Naxx/Services; #110 adds a real negative F14 pre-query frame veto in disposable Core only.
+# Isolated CI-only child of #111. Includes #110 F14 frame veto plus #111 viewer-session guard.
 # Core modifications apply ONLY in disposable CI; no server launch, no positive F14 hide.
 name: F14 viewer nonheadless and GM veto combined pinned Worldserver (OFF)
 
@@ -8,7 +8,7 @@ on:
       - research/cs01-f14-viewer-session-native-ci-off-20261106
   pull_request:
     branches:
-      - research/cs01-f14-prequery-map-frame-hard-veto-off-20261106
+      - research/cs01-f14-human-viewer-prequery-veto-off-20261106
     paths:
       - '.github/workflows/ip-f14-viewer-session-native-20261106.yml'
 
