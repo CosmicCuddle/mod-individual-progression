@@ -483,6 +483,43 @@ jobs:
           test "$(grep -Fc 'OnF14BeforeCreatureSuppression(this, target' "$p")" = 2
           ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' "$ip/src"
           echo 'PASS: #110 prevents a future F14-only positive query off the current Map::Update frame; normal Core visibility unaffected, hide still OFF'
+      - name: Verify exact pinned MapMgr scheduling and worker dispatch boundaries (NOT owner-thread proof)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B - <<'PY'
+          from pathlib import Path
+          root = Path("acore/src/server/game/Maps")
+          mgr = (root / "MapMgr.cpp").read_text(encoding="utf-8")
+          upd = (root / "MapUpdater.cpp").read_text(encoding="utf-8")
+          coremap = (root / "Map.cpp").read_text(encoding="utf-8")
+          def between(s, begin, end, label):
+              assert s.count(begin) == 1, f"{label}: missing/duplicated begin"
+              return s.split(begin, 1)[1].split(end, 1)[0]
+          m = between(mgr, "void MapMgr::Update(uint32 diff)",
+                      "void MapMgr::DoDelayedMovesAndRemoves()", "MapMgr::Update")
+          # A single scheduled request for each outer i_maps iterator exists
+          # in this function; this does NOT exclude other map update callers.
+          assert m.count("m_updater.schedule_update(*iter->second,") == 1
+          assert m.count("iter->second->Update(") == 1
+          assert m.count("m_updater.wait();") == 1
+          assert m.index("m_updater.schedule_update(*iter->second") < m.index("m_updater.wait();")
+          assert m.count("iter = i_maps.begin()") >= 1
+          w = between(upd, "void MapUpdater::WorkerThread()",
+                      "\n}", "MapUpdater::WorkerThread")
+          assert w.count("request->call();") == 1
+          assert "schedule_task(new MapUpdateRequest(map, *this, diff, s_diff));" in upd
+          assert "pending_requests.load(std::memory_order_acquire) == 0;" in upd
+          assert "std::thread(&MapUpdater::WorkerThread, this)" in upd
+          # There is a real entry visibility update on a different call
+          # stack, outside Map::Update. The F14-only guard must fail visible.
+          assert "player->UpdateObjectVisibility(false);" in coremap
+          assert "F14ScopedMapUpdateInvocation f14ScopedInvocation(this);" in coremap
+          # #110 F14 query must not assume entry callbacks are map-owner ticks.
+          visibility = Path("acore/src/server/game/Entities/Player/PlayerUpdates.cpp").read_text(encoding="utf-8")
+          assert visibility.count("GetMap()->IsWithinF14MapUpdateInvocation() &&") == 2
+          print("PASS: exact pinned MapMgr queues one map task per outer iterator and waits; worker threads shared; entry visibility outside Map::Update; NO exclusive-owner proof")
+          PY
       - name: Apply #111 current human viewer session/GM fail-visible veto BEFORE F14 query (OFF)
         shell: bash
         run: |
