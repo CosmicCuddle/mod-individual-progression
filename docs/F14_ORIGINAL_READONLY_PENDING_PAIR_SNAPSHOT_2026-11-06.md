@@ -20,6 +20,8 @@ The smallest auditable way forward is to add **one new const, value-only, bounde
 - On a successful copy returns `KnownPairsCopied`, or `KnownPairsWithUnattributedRisk` if prior protocol risk/ledger poisoning or a ledger/record count discrepancy shows that known exact pairs might be only a subset. The latter still provides recoverable *known* pairs, but **never proves that all hidden clients were found or that hiding is safe**.
 - The snapshot cannot remove, reset, unfreeze or acknowledge a single entry, never calls `CompleteRestoreOnlyWithClientProof` or `ClearFrozenAfterGlobalProof`, never sends/receives a packet, never grants positive concealment, never fabricates a 3.3.5a per-object client ACK.
 
+**Composed handoff regression:** `tests/f14_snapshot_to_exact_recheck_no_packet.cpp` links this new original #94 read-only snapshot with the previously tested #116 exact old-human recheck planner. It tests multiple previously F14-hidden human viewers on one NPC, an unrelated NPC not yet revoked, fail-atomic undersized output, wrong current human viewer/old login epoch, headless/Altbot ineligible session, uncertain map owner, wrong instance, an already-server-relinked but client-unacknowledged pair, F14 disabled and later entitlement change, and global unattributed risk that cannot be called an all-clear. Its only possible positive outcome is a **candidate for ordinary Core visibility reevaluation**, never a force CREATE or a packet/client ACK. Both C++ executables run in eight compiler modes.
+
 ## Ownership, locking and safety boundaries
 
 The original #94 protocol is not thread-safe. A future caller must obtain one **verified** owning-map or mutex ownership before calling this const method, copy its **bounded value-only** result and release the lock **before** invoking any Core visibility/ScriptMgr or player session callback. Do not assume the #108 synchronous `Map::Update` frame marker itself proves owner-thread exclusivity. An external caller must supply authoritative exact current normal-human nonheadless session and current creature incarnation/instance; the new snapshot only exposes historical data.
@@ -28,7 +30,7 @@ The destination should be preallocated to an approved maximum and must never aut
 
 ## Verification and protected original behaviour
 
-Five review paths only: the additive original #94 API, a new pure C++ regression `tests/f14_original_protocol_readonly_owed_snapshot.cpp`, the strict source workflow `.github/workflows/ip-f14-original-protocol-readonly-snapshot-20261106.yml`, this note, and the Custom Modifications Register entry.
+Six review paths only: the additive original #94 API, two pure C++ regressions `tests/f14_original_protocol_readonly_owed_snapshot.cpp`, the strict source workflow `.github/workflows/ip-f14-original-protocol-readonly-snapshot-20261106.yml`, this note, and the Custom Modifications Register entry.
 
 The workflow **compares the new original #94 file with the exact pinned parent and rejects any difference outside the one new additive block**. It asserts no modification to the original #85 ledger/#103 bridge/IP runtime/config/SQL/DBC/client, and that F14/paid flags remain OFF.
 
