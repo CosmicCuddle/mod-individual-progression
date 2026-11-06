@@ -491,6 +491,7 @@ jobs:
           from pathlib import Path
           root = Path("acore/src/server/game/Maps")
           mgr = (root / "MapMgr.cpp").read_text(encoding="utf-8")
+          instanced = (root / "MapInstanced.cpp").read_text(encoding="utf-8")
           upd = (root / "MapUpdater.cpp").read_text(encoding="utf-8")
           coremap = (root / "Map.cpp").read_text(encoding="utf-8")
           def between(s, begin, end, label):
@@ -505,6 +506,17 @@ jobs:
           assert m.count("m_updater.wait();") == 1
           assert m.index("m_updater.schedule_update(*iter->second") < m.index("m_updater.wait();")
           assert m.count("iter = i_maps.begin()") >= 1
+          # CRITICAL: MapInstanced::Update also submits child-instance maps
+          # to the same worker queue. One outer map task is NOT the same
+          # as one total map request or full map-owner thread authority.
+          mi = between(instanced, "void MapInstanced::Update(const uint32 t, const uint32 s_diff, bool /*thread*/)",
+                       "void MapInstanced::DelayedUpdate(const uint32 diff)",
+                       "MapInstanced::Update")
+          assert mi.count("Map::Update(t, s_diff, false);") == 1
+          assert mi.count("sMapMgr->GetMapUpdater()->schedule_update(*i->second, t, s_diff);") == 1
+          assert mi.count("i->second->Update(t, s_diff);") == 1
+          assert mi.index("Map::Update(t, s_diff, false);") < mi.index("schedule_update(*i->second")
+          assert "m_InstancedMaps.begin()" in mi and "m_InstancedMaps.end()" in mi
           w = between(upd, "void MapUpdater::WorkerThread()",
                       "\n}", "MapUpdater::WorkerThread")
           assert w.count("request->call();") == 1
@@ -518,7 +530,7 @@ jobs:
           # #110 F14 query must not assume entry callbacks are map-owner ticks.
           visibility = Path("acore/src/server/game/Entities/Player/PlayerUpdates.cpp").read_text(encoding="utf-8")
           assert visibility.count("GetMap()->IsWithinF14MapUpdateInvocation() &&") == 2
-          print("PASS: exact pinned MapMgr queues one map task per outer iterator and waits; worker threads shared; entry visibility outside Map::Update; NO exclusive-owner proof")
+          print("PASS: exact pinned MapMgr schedules root maps AND MapInstanced schedules child maps, with worker queue and wait; entry visibility outside Map::Update; NO exclusive-owner proof")
           PY
       - name: Apply #111 current human viewer session/GM fail-visible veto BEFORE F14 query (OFF)
         shell: bash
