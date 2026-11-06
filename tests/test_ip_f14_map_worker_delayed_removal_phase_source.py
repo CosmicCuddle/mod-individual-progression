@@ -122,12 +122,15 @@ def audit(sources, marker, negative):
             "original experimental #108 marker")
     exactly(marker, "return f14CurrentMapUpdateInvocation == this;",
             "original exact-map comparison")
-    if "Map::DelayedUpdate" in marker.split(
-        "F14ScopedMapUpdateInvocation f14ScopedInvocation(this);", 1)[1].split(
-        "return f14CurrentMapUpdateInvocation == this;", 1)[0]:
-        raise ValueError("unreviewed frame-marker scope")
+    # Exact #108 patch puts a thread_local Map* RAII scope into the
+    # Map::Update entry only; NO Map::DelayedUpdate marker or claim.
+    exactly(marker,
+            'void Map::Update(const uint32 t_diff, const uint32 s_diff, bool  /*thread*/)\n{\n    F14ScopedMapUpdateInvocation f14ScopedInvocation(this);',
+            "exact #108 scoped update entry")
+    if "F14ScopedMapUpdateInvocation f14ScopedInvocation(this);" in delayed:
+        raise ValueError("upstream Core unexpectedly marks delayed remove")
     exactly(negative, "GetMap()->IsWithinF14MapUpdateInvocation() &&",
-            "#110 pre-policy map-current-frame requirement")
+            "#110 pre-policy map-current-frame requirement", n=2)
     return True
 
 
