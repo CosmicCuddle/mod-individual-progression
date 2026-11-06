@@ -825,6 +825,7 @@ public:
             {WORLDOBJECTHOOK_ON_F14_BATCH_OUT_OF_RANGE_ATTEMPT,
              WORLDOBJECTHOOK_ON_F14_BATCH_CREATE_ATTRIBUTION_QUERY,
              WORLDOBJECTHOOK_ON_F14_BATCH_CREATE_ATTEMPT,
+             WORLDOBJECTHOOK_ON_F14_VIEWER_CREATURE_BEFORE_SUPPRESSION,
              WORLDOBJECTHOOK_ON_F14_VIEWER_CREATURE_SUPPRESSION_DECIDED}) { }
 
     // Negative-only: this script NEVER nominates a CREATE for F14.
@@ -840,8 +841,41 @@ public:
     // The current source still has NO positive F14 hide script, so this is
     // dormant even in a disposable build with observer diagnostics enabled.
     // WorldObjects are used synchronously and NEVER retained after callback.
+    // Precisely source-attributed positive F14 intent. In the Core overlay
+    // this happens BEFORE its viewer link update or packet construction.
+    // This diagnostic is dormant: the positive hide callback defaults FALSE.
+    void OnF14BeforeCreatureSuppression(Player const* viewer,
+        WorldObject const* target, bool /*wasLinked*/, bool /*batched*/) override
+    {
+        InspectCurrentSourceIdentity(viewer, target, true);
+    }
+
+    // Original #106 AFTER-decision observer retained for contrast only.
     void OnF14CreatureSuppressionDecision(Player const* viewer,
         WorldObject const* target, bool /*wasLinked*/, bool /*batched*/) override
+    {
+        InspectCurrentSourceIdentity(viewer, target, false);
+    }
+
+    void OnF14VisibilityBatchOutOfRangeAttempt(
+        Player const* viewer, ObjectGuid const& creatureGuid) override
+    {
+        RecordServerCall(viewer, creatureGuid, _outAttempts, _invalidAttempts,
+                         "OUT-OF-RANGE");
+    }
+
+    void OnF14VisibilityBatchCreateAttempt(
+        Player const* viewer, ObjectGuid const& creatureGuid) override
+    {
+        RecordServerCall(viewer, creatureGuid, _createAttempts, _invalidAttempts,
+                         "CREATE");
+    }
+
+private:
+    // Sample current pointers synchronously; do not persist per-pair identity
+    // or claim these facts establish owning-map thread or client display.
+    void InspectCurrentSourceIdentity(Player const* viewer,
+        WorldObject const* target, bool beforeViewerLinkMutation)
     {
         namespace Decision = IndividualProgressionF14SuppressionDecisionIdentity;
         Decision::Facts facts{};
@@ -895,31 +929,23 @@ public:
 
         // This classification is only a per-call diagnostic: no per-pair
         // record, protocol state, original Claude ledger or network effect.
+        std::atomic<std::uint64_t>& successes =
+            beforeViewerLinkMutation ? _beforeViewerLinkSnapshots : _sourceDecisionSnapshots;
+        std::atomic<std::uint64_t>& rejected =
+            beforeViewerLinkMutation ? _rejectedBeforeViewerLinkSnapshots : _rejectedDecisionSnapshots;
         if (Decision::Validate(facts) ==
             Decision::Result::CurrentSourceDecisionIdentitySnapshotOnly)
         {
-            if (_sourceDecisionSnapshots.fetch_add(1, std::memory_order_relaxed) == 0)
-                LOG_INFO("module", "IP F14 first matching source-decision viewer/creature snapshot observed; NOT owner-thread, rights, packet or client proof");
+            if (successes.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_INFO("module", "IP F14 first matching {} current source identity snapshot observed; NOT historic hidden-pair, owner thread or client proof",
+                    beforeViewerLinkMutation ? "pre-link" : "post-link");
         }
-        else if (_rejectedDecisionSnapshots.fetch_add(1, std::memory_order_relaxed) == 0)
-            LOG_ERROR("module", "IP F14 source-decision identity snapshot rejected; all hiding remains OFF");
+        else if (rejected.fetch_add(1, std::memory_order_relaxed) == 0)
+            LOG_ERROR("module", "IP F14 {} current source identity snapshot rejected; hiding stays OFF",
+                beforeViewerLinkMutation ? "pre-link" : "post-link");
     }
 
-    void OnF14VisibilityBatchOutOfRangeAttempt(
-        Player const* viewer, ObjectGuid const& creatureGuid) override
-    {
-        RecordServerCall(viewer, creatureGuid, _outAttempts, _invalidAttempts,
-                         "OUT-OF-RANGE");
-    }
 
-    void OnF14VisibilityBatchCreateAttempt(
-        Player const* viewer, ObjectGuid const& creatureGuid) override
-    {
-        RecordServerCall(viewer, creatureGuid, _createAttempts, _invalidAttempts,
-                         "CREATE");
-    }
-
-private:
     // Per-script aggregate counters only: no GUID, Player*, Map* or login
     // epoch is retained. These are send-CALL observations, not client ACKs.
     std::atomic<std::uint64_t> _outAttempts{0};
@@ -927,6 +953,8 @@ private:
     std::atomic<std::uint64_t> _invalidAttempts{0};
     std::atomic<std::uint64_t> _sourceDecisionSnapshots{0};
     std::atomic<std::uint64_t> _rejectedDecisionSnapshots{0};
+    std::atomic<std::uint64_t> _beforeViewerLinkSnapshots{0};
+    std::atomic<std::uint64_t> _rejectedBeforeViewerLinkSnapshots{0};
 
     static void RecordServerCall(Player const* viewer, ObjectGuid const& guid,
         std::atomic<std::uint64_t>& count,
