@@ -1,0 +1,92 @@
+# Source-only, disposable Core F14 Map::Update invocation test.
+# NO positive hide, NO worldserver launch, NO client/DB/host writes.
+name: F14 pinned map update frame source diagnostics (OFF)
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-map-frame-diagnostic-off-20261106
+  pull_request:
+    branches:
+      - research/cs01-f14-preunlink-source-attribution-off-20261106
+    paths:
+      - 'tests/core_patches/apply_f14_map_update_invocation_diagnostic.py'
+      - 'tests/test_ip_f14_map_update_invocation_source.py'
+      - 'src/IndividualProgressionF14LifecycleScript.cpp'
+      - '.github/workflows/ip-f14-map-update-invocation-source-20261106.yml'
+      - 'docs/F14_MAP_UPDATE_INVOCATION_SOURCE_AUDIT_2026-11-06.md'
+      - 'docs/CUSTOM_MODIFICATIONS_REGISTER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  map-update-invocation-source:
+    name: Strict pinned Map::Update scope, fail-atomic Core fixture and original pure source models
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact IP source head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout unchanged exact Grim Core source for isolated tests
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: pinned-core
+          sparse-checkout: |
+            src/server/game/Maps
+          persist-credentials: false
+
+      - name: Require six exact changed paths, immutable parent, exact Core
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=0697960f3f726c5abe48dd10138467e854086f6b
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort > /tmp/f14-actual
+          printf '%s\n' \
+            'tests/core_patches/apply_f14_map_update_invocation_diagnostic.py' \
+            'tests/test_ip_f14_map_update_invocation_source.py' \
+            'src/IndividualProgressionF14LifecycleScript.cpp' \
+            '.github/workflows/ip-f14-map-update-invocation-source-20261106.yml' \
+            'docs/F14_MAP_UPDATE_INVOCATION_SOURCE_AUDIT_2026-11-06.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/f14-expected
+          diff -u /tmp/f14-expected /tmp/f14-actual
+          test "$(git -C pinned-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          echo 'PASS exact staged source, no production and pinned Core'
+
+      - name: Test source patch against exact Core and failure fixtures
+        shell: bash
+        env:
+          F14_PINNED_CORE_ROOT: pinned-core
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_map_update_invocation_source.py' -v
+          echo 'PASS: no hide policy and no original Claude #94 ledger wiring'
+
+      - name: Preserve unchanged pure human epoch and NPC source identity models
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  -Isrc tests/f14_suppression_decision_identity.cpp -o /tmp/f14-source-identity
+                /tmp/f14-source-identity
+                "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  -Isrc tests/f14_human_viewer_epoch.cpp -o /tmp/f14-human-epoch
+                /tmp/f14-human-epoch
+              done
+            done
+          done
+          echo 'PASS: pure tests only; NO native Worldserver compile, runtime, or client acceptance'
