@@ -1,0 +1,61 @@
+name: F14 first-start eligibility policy UNWIRED test matrix (NO STAGE WRITES)
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-first-start-eligibility-policy-model-off-20261107
+  pull_request:
+    branches:
+      - integration/cs01-ip44-paid-tests-f14-group-20261103
+permissions:
+  contents: read
+jobs:
+  exact-off-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prove only test files, workflow and memo changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=26d5b7a1de30ad92a595aaf251fc14754cf54f32
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base"
+          git diff --name-only "$base" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            tests/f14_first_start_eligibility_model.h \
+            tests/f14_first_start_eligibility_model.cpp \
+            tests/test_f14_first_start_eligibility_source.py \
+            .github/workflows/f14-first-start-eligibility-test-only-20261107.yml \
+            docs/F14-FIRST-START-ELIGIBILITY-MODEL-20261107.md | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$base" HEAD -- src/ conf/ data/)"
+      - name: Source test original IP/PB eligibility constraints remain unwired
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_f14_first_start_eligibility_source.py' -v
+      - name: Native C++17 and C++20 negative matrix all variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for std in c++17 c++20; do
+              for mode in normal ndebug; do
+                flags=()
+                if [[ "$mode" == ndebug ]]; then flags=(-DNDEBUG); fi
+                "$compiler" "-std=$std" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  tests/f14_first_start_eligibility_model.cpp -Itests -o /tmp/f14-policy
+                /tmp/f14-policy
+              done
+            done
+          done
+      - name: Explicit nonrelease safety statement
+        run: |
+          echo 'TEST-ONLY. No Core/PB runtime actor provenance or saved-stage0..7 migration evidence.'
+          echo 'No owner host/server/DB, paid entitlement, quest marker or config write; not S4/S5.'
