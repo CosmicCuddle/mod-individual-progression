@@ -7,10 +7,12 @@ on:
     branches:
       - research/cs01-f14-core-map-update-observer-native-off-20261106
       - research/cs01-f14-observer-native-symbol-diagnostics-off-20261107
+      - ci/cs01-f14-inline-observer-constructor-proof-20261107
   pull_request:
     branches:
       - research/cs01-f14-map-worker-vs-delayed-removal-source-audit-off-20261106
       - research/cs01-f14-core-map-update-observer-native-off-20261106
+      - research/cs01-f14-observer-native-symbol-diagnostics-off-20261107
     paths:
       - '.github/workflows/ip-f14-allmap-observer-native-20261106.yml'
 
