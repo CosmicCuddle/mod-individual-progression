@@ -6,9 +6,11 @@ on:
   push:
     branches:
       - research/cs01-f14-core-map-update-observer-native-off-20261106
+      - research/cs01-f14-observer-native-symbol-diagnostics-off-20261107
   pull_request:
     branches:
       - research/cs01-f14-map-worker-vs-delayed-removal-source-audit-off-20261106
+      - research/cs01-f14-core-map-update-observer-native-off-20261106
     paths:
       - '.github/workflows/ip-f14-allmap-observer-native-20261106.yml'
 
@@ -640,6 +642,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Preserve every original required symbol test. If any fails after
+          # 1900/1900 link, report WHICH exact command failed instead of a
+          # generic exit 1; never convert a missing symbol into a PASS.
+          trap 'rc=$?; printf "F14 native symbol proof FAILED (exit %d): %s\n" "$rc" "$BASH_COMMAND" >&2' ERR
           obj=$(find acore-build -name 'IndividualProgressionF14LifecycleScript.cpp.o' | head -n1)
           test -s "$obj"
           # Render once to a file: `nm | grep -q` can SIGPIPE under pipefail.
