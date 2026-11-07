@@ -640,6 +640,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Keep fail-closed assertions but name the exact failure in CI logs.
+          trap 'rc=$?; echo "::error title=F14 post-link symbol check::Exit ${rc} at line ${LINENO}: ${BASH_COMMAND}"; exit "$rc"' ERR
           obj=$(find acore-build -name 'IndividualProgressionF14LifecycleScript.cpp.o' | head -n1)
           test -s "$obj"
           # Render once to a file: `nm | grep -q` can SIGPIPE under pipefail.
@@ -647,7 +649,9 @@ jobs:
           grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14AttackTargetTransition(Unit*, Unit*, Unit*)' /tmp/f14-lifecycle-symbols.txt
           grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14CreatureCorpseReady(Creature*)' /tmp/f14-lifecycle-symbols.txt
           grep -Fq 'IndividualProgressionF14MapUpdateFrameObserver::OnMapUpdate(Map*, unsigned int)' /tmp/f14-lifecycle-symbols.txt
-          grep -Fq 'IndividualProgressionF14MapUpdateFrameObserver::IndividualProgressionF14MapUpdateFrameObserver()' /tmp/f14-lifecycle-symbols.txt
+          # A class-inline constructor may be inlined in Release and lack an nm symbol.
+          # Require the emitted virtual dispatch table as well as OnMapUpdate above.
+          grep -Fq 'vtable for IndividualProgressionF14MapUpdateFrameObserver' /tmp/f14-lifecycle-symbols.txt
           grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14CreatureRespawned(Creature*)' /tmp/f14-lifecycle-symbols.txt
           grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14ShouldRefreshCreatureVisibility(Creature const*)' /tmp/f14-lifecycle-symbols.txt
           grep -Fq 'IndividualProgressionF14LifecycleScript::OnUnitUpdate(Unit*,' /tmp/f14-lifecycle-symbols.txt
