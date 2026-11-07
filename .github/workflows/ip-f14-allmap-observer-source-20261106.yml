@@ -1,0 +1,53 @@
+name: F14 optional AllMapScript current-frame observer SOURCE (OFF)
+on:
+  push:
+    branches: [research/cs01-f14-core-map-update-observer-native-off-20261106]
+  pull_request:
+    branches: [research/cs01-f14-map-worker-vs-delayed-removal-source-audit-off-20261106]
+permissions:
+  contents: read
+jobs:
+  pinned-source-hook:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact review source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Enforce six review paths, default OFF, and immutable original restoration
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=4f3799f5dc8c7749fea1dfd0b5a775579ed7f762
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort >/tmp/actual
+          printf '%s\n' 'src/IndividualProgressionF14LifecycleScript.cpp' 'tests/test_ip_f14_allmap_update_frame_observer_source.py' '.github/workflows/ip-f14-allmap-observer-source-20261106.yml' '.github/workflows/ip-f14-allmap-observer-native-20261106.yml' 'docs/F14_ALLMAP_UPDATE_FRAME_OBSERVER_2026-11-06.md' 'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src/IndividualProgressionF14ViewerRestoreProtocol.h src/IndividualProgressionF14PriorHiddenLedger.h src/IndividualProgressionF14GuidSendAttemptEvidence.h src/IndividualProgressionF14ExactViewerRestoreRecheckPlan.h src/IndividualProgressionF14StaleSnapshotRecheckGuard.h src/IndividualProgression.cpp src/IndividualProgressionPlayer.cpp conf sql data optional)"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' src
+          echo 'PASS: only observer source + source/native CI + docs/register; original #85/#94/#103 unchanged, F14/paid OFF'
+      - name: Checkout exact pinned Core AllMapScript routing (read only)
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: pinned-core
+          sparse-checkout: |
+            src/server/game/Scripting/ScriptDefines/AllMapScript.h
+            src/server/game/Scripting/ScriptDefines/AllMapScript.cpp
+            src/server/game/Maps/Map.cpp
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Run exact Core map script route and opt-in observer 6 fail-drift tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C pinned-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          F14_PINNED_CORE_ROOT="$PWD/pinned-core" python3 -B -m unittest discover -s tests -p 'test_ip_f14_allmap_update_frame_observer_source.py' -v
+          echo 'PASS: pinned Core AllMapScript current Map::Update callback receives optional aggregate-only IP observer; no owning-map exclusivity or in-client visibility proved'
