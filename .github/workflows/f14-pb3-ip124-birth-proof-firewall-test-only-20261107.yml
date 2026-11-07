@@ -6,7 +6,7 @@ on:
       - research/cs01-f14-pb3-birth-vs-ip124-first-start-firewall-20261107
   pull_request:
     branches:
-      - integration/cs01-ip44-paid-tests-f14-group-20261103
+      - research/cs01-f14-first-start-eligibility-policy-model-off-20261107
 
 permissions:
   contents: read
