@@ -7,10 +7,12 @@ on:
     branches:
       - research/cs01-f14-core-map-update-observer-native-off-20261106
       - research/cs01-f14-observer-native-symbol-diagnostics-off-20261107
+      - ci/cs01-f14-inline-observer-constructor-proof-20261107
   pull_request:
     branches:
       - research/cs01-f14-map-worker-vs-delayed-removal-source-audit-off-20261106
       - research/cs01-f14-core-map-update-observer-native-off-20261106
+      - research/cs01-f14-observer-native-symbol-diagnostics-off-20261107
     paths:
       - '.github/workflows/ip-f14-allmap-observer-native-20261106.yml'
 
@@ -653,7 +655,16 @@ jobs:
           grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14AttackTargetTransition(Unit*, Unit*, Unit*)' /tmp/f14-lifecycle-symbols.txt
           grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14CreatureCorpseReady(Creature*)' /tmp/f14-lifecycle-symbols.txt
           grep -Fq 'IndividualProgressionF14MapUpdateFrameObserver::OnMapUpdate(Map*, unsigned int)' /tmp/f14-lifecycle-symbols.txt
-          grep -Fq 'IndividualProgressionF14MapUpdateFrameObserver::IndividualProgressionF14MapUpdateFrameObserver()' /tmp/f14-lifecycle-symbols.txt
+          # The constructor is defined INSIDE the observer class; Release GCC
+          # may inline it into AddSC_mod_individual_progression_f14_lifecycle().
+          # Therefore a standalone ctor symbol is NOT a valid requirement.
+          # Require the same compiled virtual method (checked immediately
+          # above), the emitted class VTABLE and the exact script-registration
+          # literal in this actual object. Do not weaken any other checks.
+          grep -Eq 'vtable for .*IndividualProgressionF14MapUpdateFrameObserver' /tmp/f14-lifecycle-symbols.txt
+          strings -a "$obj" > /tmp/f14-lifecycle-strings.txt
+          grep -Fq 'IndividualProgression_F14MapUpdateFrameObserver' /tmp/f14-lifecycle-strings.txt
+          grep -Fq 'new IndividualProgressionF14MapUpdateFrameObserver();' acore/modules/mod-individual-progression/src/IndividualProgressionF14LifecycleScript.cpp
           grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14CreatureRespawned(Creature*)' /tmp/f14-lifecycle-symbols.txt
           grep -Fq 'IndividualProgressionF14LifecycleScript::OnF14ShouldRefreshCreatureVisibility(Creature const*)' /tmp/f14-lifecycle-symbols.txt
           grep -Fq 'IndividualProgressionF14LifecycleScript::OnUnitUpdate(Unit*,' /tmp/f14-lifecycle-symbols.txt
