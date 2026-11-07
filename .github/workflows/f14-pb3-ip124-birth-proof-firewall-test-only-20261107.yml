@@ -1,0 +1,80 @@
+name: Owner F14 PB3 x IP124 birth-proof trust firewall (TEST ONLY)
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-pb3-birth-vs-ip124-first-start-firewall-20261107
+  pull_request:
+    branches:
+      - research/cs01-f14-first-start-eligibility-policy-model-off-20261107
+
+permissions:
+  contents: read
+
+jobs:
+  first-birth-not-a-stage-grant:
+    name: Actual PB3 + IP124 C++ model, no server or quest writes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact owner IP child draft
+        uses: actions/checkout@v4
+        with:
+          path: ip
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout owner Playerbots #3 diagnostic source (NOT newer master)
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-playerbots
+          ref: f209a3a09d4479e1d183ba62f591709822db32fe
+          path: pb
+          persist-credentials: false
+      - name: Verify exact pins, child write-set, and no runtime/SQL changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=820621861e55b2dba6d2517e2cb5fd2fa281d7d0
+          test "$(git -C pb rev-parse HEAD)" = f209a3a09d4479e1d183ba62f591709822db32fe
+          git -C ip merge-base --is-ancestor "$parent" HEAD
+          git -C ip diff --check "$parent" HEAD
+          git -C ip diff --name-only "$parent" HEAD | sort > /tmp/actual-f14-bridge
+          printf '%s\n' \
+            'tests/f14_pb3_ip124_birth_proof_firewall.cpp' \
+            'tests/test_f14_pb3_ip124_birth_proof_firewall_source.py' \
+            '.github/workflows/f14-pb3-ip124-birth-proof-firewall-test-only-20261107.yml' \
+            'docs/F14-PB3-IP124-DIAGNOSTIC-BIRTH-TRUST-FIREWALL-20261107.md' | sort > /tmp/expected-f14-bridge
+          diff -u /tmp/expected-f14-bridge /tmp/actual-f14-bridge
+          test -z "$(git -C ip diff --name-only "$parent" HEAD -- src conf data sql modules)"
+          test -f pb/src/Bot/F14NewRandomBotBirthProbe.h
+          test -f ip/tests/f14_first_start_eligibility_model.h
+          echo 'PASS exact owner PB and IP model headers pinned; no executable source edits'
+      - name: Python source guard against converting diagnostic into trusted birth
+        run: |
+          python3 -B -m unittest discover -s ip/tests -p 'test_f14_pb3_ip124_birth_proof_firewall_source.py' -v
+          python3 -B -m unittest discover -s ip/tests -p 'test_f14_first_start_eligibility_source.py' -v
+      - name: Compile actual two header implementations under eight C++ variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/f14-birth-proof-firewall
+          for cc in g++ clang++; do
+            for lang in c++17 c++20; do
+              for variant in normal ndebug; do
+                flags=()
+                if [[ "$variant" == ndebug ]]; then flags=(-DNDEBUG); fi
+                "$cc" "-std=$lang" -pthread -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  -Iip/tests -Ipb/src/Bot \
+                  ip/tests/f14_pb3_ip124_birth_proof_firewall.cpp \
+                  -o /tmp/f14-birth-proof-firewall/verify
+                /tmp/f14-birth-proof-firewall/verify
+              done
+            done
+          done
+          echo 'PASS: actual PB3 production diagnostic header + IP124 PURE model; no durable birth, no stage writer'
+      - name: Safety confidence boundary
+        if: always()
+        run: |
+          echo 'Source-native pure test only. Not a Worldserver, MySQL, character stage, quest, paid or gameplay test.'
+          echo 'F14 and paid OFF. No owner authorization to convert PB probe to a trusted creation receipt.'
+          echo 'No database or client operation; no release, merge, live test or production change.'
