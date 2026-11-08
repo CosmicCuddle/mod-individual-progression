@@ -602,6 +602,10 @@ private:
     // Do not read the old non-atomic public IP 'enabled' Boolean on
     // observer/WHO workers. This atomic is publication-only and starts OFF.
     std::atomic_bool _f14ActorPublicationEnabled{false};
+    // A pending verified-login writer must never cross a config reload and
+    // publish an identity from its previous generation after re-enable.
+    // Saturate instead of wrapping; generation exhaustion disables publishing.
+    std::atomic<std::uint64_t> _f14ActorPublicationReloadGeneration{0};
 #endif
     std::uint64_t _f14NextRandomBotLoginEpoch = 0;
     std::shared_mutex _f14GroupCacheLock;
