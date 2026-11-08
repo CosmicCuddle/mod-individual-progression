@@ -1,0 +1,83 @@
+# F14 E1 send-attempt correlation (viewer login epoch + creature incarnation): pure model only.
+# Child of #104 (3c273c80). No runtime source, Core, config, SQL, DB, DBC or client change.
+# Disposable GitHub runner ONLY; no worldserver launch, database, host or deployment.
+name: F14 send-attempt correlation pure model (OFF, NO HOST)
+on:
+  pull_request:
+    branches:
+      - research/cs01-f14-real-core-guid-observer-off-20261105
+    paths:
+      - "src/**"
+      - "conf/**"
+      - "tests/**"
+      - "docs/F14_SEND_ATTEMPT_CORRELATION_2026-11-08.md"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+      - ".github/workflows/ip-f14-send-attempt-correlation-20261108.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pure-model:
+    name: "Correlation model + source contracts (${{ matrix.cxx }} ${{ matrix.std }})"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: "Verify #104 ancestry and EXACT six-path child scope"
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=3c273c8060eb9f1f90c01f76669b9bec0d1d8935
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            '.github/workflows/ip-f14-send-attempt-correlation-20261108.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/F14_SEND_ATTEMPT_CORRELATION_2026-11-08.md' \
+            'src/IndividualProgressionF14SendAttemptCorrelation.h' \
+            'tests/f14_send_attempt_correlation.cpp' \
+            'tests/test_ip_f14_send_attempt_correlation_source.py' | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          git diff --check "$parent" HEAD
+          # Register is append-only against the parent.
+          git diff -U0 "$parent" HEAD -- docs/CUSTOM_MODIFICATIONS_REGISTER.md \
+            | grep -E '^-' | grep -Ev '^--- ' > /tmp/register-removed || true
+          test ! -s /tmp/register-removed
+      - name: Source contracts (pure, read-only protocol, parents byte-identical, flags OFF)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_send_attempt_correlation_source.py' -v
+          # Not re-run here: #103's own six-path scope contract already fails at the
+          # frozen #104 parent (it diffs against #103's parent). Its files are pinned
+          # byte-identical by the correlation contracts instead.
+      - name: "Native model tests (${{ matrix.cxx }} ${{ matrix.std }}, with and without NDEBUG)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ndebug in "" "-DNDEBUG"; do
+            ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 $ndebug \
+              -Isrc tests/f14_send_attempt_correlation.cpp -o /tmp/f14-correlation
+            /tmp/f14-correlation | tee /tmp/out.txt
+            grep -Eq '^F14 SEND ATTEMPT CORRELATION ([0-9]+)/\1 passed' /tmp/out.txt
+            # Unchanged originals still pass alongside the new model.
+            ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 $ndebug \
+              -Isrc tests/f14_viewer_restore_protocol.cpp -o /tmp/f14-protocol
+            /tmp/f14-protocol
+            ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 $ndebug \
+              -Isrc tests/f14_guid_send_attempt_evidence.cpp -o /tmp/f14-adapter
+            /tmp/f14-adapter
+          done
+          echo 'PASS: pure correlation model only; synthetic tokens, nothing wired, no packet or client proof'
