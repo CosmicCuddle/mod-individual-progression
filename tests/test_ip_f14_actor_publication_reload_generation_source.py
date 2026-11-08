@@ -50,7 +50,8 @@ class AtomicActorReloadGenerationSource(unittest.TestCase):
         self.assertIn(
             "_f14ActorPublicationEnabled.load(std::memory_order_acquire);", c)
         self.assertIn(
-            "f14SourceLease = sIndividualProgression->CaptureF14ActorPublicationLoginLease();",
+            "IndividualProgression::F14ActorPublicationLoginLease const f14SourceLease =\n"
+            "            sIndividualProgression->CaptureF14ActorPublicationLoginLease();",
             login)
         self.assertIn(
             "player, sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()),\n"
