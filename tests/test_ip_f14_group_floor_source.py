@@ -51,7 +51,12 @@ class IdentitySafety(unittest.TestCase):
         self.assertIn("player->getRace() == RACE_DRAENEI", login)
         self.assertIn("player->getRace() == RACE_BLOODELF", login)
         self.assertIn("sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter())", login)
-        self.assertRegex(login, r"RememberF14VerifiedRandomBotGroupIdentity\(\s*player,\s*sRandomPlayerbotMgr\.IsRandomBot\(player->GetGUID\(\)\.GetCounter\(\)\)\);")
+        # Preserve the original *positive verified* RandomBot GUID predicate,
+        # and require the same entry-time publication lease after it. Never
+        # turn this into a race/headless-only identity decision.
+        self.assertRegex(login, r"RememberF14VerifiedRandomBotGroupIdentity\(\s*player,\s*sRandomPlayerbotMgr\.IsRandomBot\(player->GetGUID\(\)\.GetCounter\(\)\),\s*f14SourceLease\s*\);")
+        self.assertLess(login.index("CaptureF14ActorPublicationLoginLease();"),
+                        login.index("sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter())"))
         self.assertIn("RememberF14VerifiedRandomBotGroupIdentity(", login)
         self.assertIn("#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE", login)
         # The older optional F14 login preserve may also check PB identity;

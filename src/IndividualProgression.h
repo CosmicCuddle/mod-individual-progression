@@ -480,13 +480,21 @@ public:
     };
     bool TryReadF14VerifiedActorPublication(
         ObjectGuid const& fullGuid, F14VerifiedActorPublication& out);
+    struct F14ActorPublicationLoginLease
+    {
+        std::uint64_t generation = 0;
+        bool publicationWasEnabled = false;
+    };
+    // Ordinary builds return a disabled value-only lease.
+    F14ActorPublicationLoginLease CaptureF14ActorPublicationLoginLease();
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
     // Called from the existing WorldScript config thread. Disable/evict
     // before re-reading settings; only re-arm after a completed reload.
     void BeginF14ActorPublicationConfigReload();
     void FinishF14ActorPublicationConfigReload(bool ipEnabled);
 #endif
-    void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
+    void RememberF14VerifiedRandomBotGroupIdentity(
+        Player* player, bool verified, F14ActorPublicationLoginLease sourceLease = {});
     void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
     // Read-only current verified incarnation; no Playerbots access on
     // observer/WHO threads. Missing or stale means ALLOW visibility.
@@ -602,6 +610,10 @@ private:
     // Do not read the old non-atomic public IP 'enabled' Boolean on
     // observer/WHO workers. This atomic is publication-only and starts OFF.
     std::atomic_bool _f14ActorPublicationEnabled{false};
+    // A pending verified-login writer must never cross a config reload and
+    // publish an identity from its previous generation after re-enable.
+    // Saturate instead of wrapping; generation exhaustion disables publishing.
+    std::atomic<std::uint64_t> _f14ActorPublicationReloadGeneration{0};
 #endif
     std::uint64_t _f14NextRandomBotLoginEpoch = 0;
     std::shared_mutex _f14GroupCacheLock;

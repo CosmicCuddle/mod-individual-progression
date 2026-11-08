@@ -617,11 +617,15 @@ bool IndividualProgression::isPlayerInDungeonOrRaid(Player* player)
     return (map && (map->IsDungeon() || map->IsRaid()));
 }
 
-void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified)
+void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(
+    Player* player, bool verified, F14ActorPublicationLoginLease sourceLease)
 {
     if (!player)
         return;
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    // A sourceLease captured at OnPlayerLogin ENTRY, before the original
+    // Playerbots verified-login predicates, is passed here. A login already
+    // in progress as config reloads cannot republish under the new generation.
     // Read Player / Session facts ONLY on the established verified login
     // source path, OUTSIDE the identity lock. WHO readers never dereference
     // Player or consult mutable RandomPlayerbotMgr.
@@ -674,8 +678,13 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
         // Config reload may revoke identity between the login precheck
         // and this lock. Always recheck the atomic while holding the lock.
         if (canPublishActor && _f14ActorPublicationEnabled.load(std::memory_order_acquire))
-            _f14VerifiedActorPublications.emplace(
-                guid, F14VerifiedActorPublication{fullGuid, accountId, race, loginEpoch});
+        {
+            if (sourceLease.publicationWasEnabled &&
+                sourceLease.generation ==
+                    _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire))
+                _f14VerifiedActorPublications.emplace(
+                    guid, F14VerifiedActorPublication{fullGuid, accountId, race, loginEpoch});
+        }
 #endif
     }();
     ExpireF14LifecycleActor(expiredLoginEpoch);
@@ -689,16 +698,49 @@ void IndividualProgression::BeginF14ActorPublicationConfigReload()
     // next publication must come from a fresh verified bot login.
     std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
     _f14ActorPublicationEnabled.store(false, std::memory_order_release);
+    std::uint64_t const previousGeneration =
+        _f14ActorPublicationReloadGeneration.load(std::memory_order_relaxed);
+    if (previousGeneration != std::numeric_limits<std::uint64_t>::max())
+        _f14ActorPublicationReloadGeneration.store(
+            previousGeneration + 1, std::memory_order_release);
     _f14VerifiedActorPublications.clear();
 }
 
 void IndividualProgression::FinishF14ActorPublicationConfigReload(bool ipEnabled)
 {
+    // The publication switch must be rearmed under the same identity mutex
+    // as login-lease capture and BeginReload. A login captured during the
+    // reload must never see the NEW generation with the OLD enabled state.
+    std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
     // End is reached only after the existing LoadConfig completed.
     // Incomplete reload leaves publication OFF, never stale-enabled.
+    if (_f14ActorPublicationReloadGeneration.load(std::memory_order_acquire) ==
+        std::numeric_limits<std::uint64_t>::max())
+        return; // permanent safe OFF, never wrap back into a prior lease
     _f14ActorPublicationEnabled.store(ipEnabled, std::memory_order_release);
 }
+
 #endif
+
+// Capture the optional source lease at OnPlayerLogin entry. Ordinary builds
+// return a disabled value only; no positive F14 publisher or player hide.
+IndividualProgression::F14ActorPublicationLoginLease
+IndividualProgression::CaptureF14ActorPublicationLoginLease()
+{
+    F14ActorPublicationLoginLease lease;
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    // Serialize BOTH lease fields with BeginReload and FinishReload. An
+    // in-flight OnPlayerLogin either sees the old generation (then fails
+    // under the writer lock) or sees disabled while a reload is open;
+    // it cannot synthesize a new-generation/old-enabled torn snapshot.
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    lease.generation =
+        _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);
+    lease.publicationWasEnabled =
+        _f14ActorPublicationEnabled.load(std::memory_order_acquire);
+#endif
+    return lease;
+}
 
 // New WHO/actor identity snapshot read does not depend on mutable bot manager,
 // Player*, current world/map pointers, SQL or cached WHO race. A snapshot is

@@ -54,6 +54,10 @@ public:
         // settings change and be mistaken for this new login incarnation.
         // Forget also expires prior attack-lifecycle evidence. It never
         // awards stage, paid entitlements or conceals another character.
+        // Capture the opt-in publication lease BEFORE the old identity
+        // is revoked and BEFORE the original Playerbots verification.
+        IndividualProgression::F14ActorPublicationLoginLease const f14SourceLease =
+            sIndividualProgression->CaptureF14ActorPublicationLoginLease();
         sIndividualProgression->ForgetF14VerifiedRandomBotGroupIdentity(player);
 
         if (!sIndividualProgression->enabled || !player->IsInWorld())
@@ -71,7 +75,8 @@ public:
             player->GetSession() && player->GetSession()->IsHeadless())
         {
             sIndividualProgression->RememberF14VerifiedRandomBotGroupIdentity(
-                player, sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()));
+                player, sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()),
+                f14SourceLease);
         }
 #endif
 

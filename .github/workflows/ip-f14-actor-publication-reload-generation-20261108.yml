@@ -1,0 +1,82 @@
+name: F14 IP133 optional actor publication login-vs-reload generation gate OFF
+
+on:
+  push:
+    branches:
+      - fix/cs01-f14-publication-reload-generation-20261108
+  pull_request:
+    branches:
+      - fix/cs01-ip132-inherited-test-atomic-condition-20261108
+
+permissions:
+  contents: read
+
+jobs:
+  lease-source-and-model:
+    name: "IP reload generation: stale in-flight verified bot login must fail closed"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - name: Checkout EXACT candidate from this review branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify frozen IP133 parent and exact nine changed paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=b4c2eb8073bb7178a4fbac8e744cb456f6b8eaf2
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            'src/IndividualProgression.cpp' \
+            'src/IndividualProgression.h' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'tests/f14_actor_publication_reload_generation_model.cpp' \
+            'tests/test_ip_f14_actor_publication_reload_generation_source.py' \
+            'tests/test_ip_f14_group_floor_source.py' \
+            '.github/workflows/ip-f14-actor-publication-reload-generation-20261108.yml' \
+            'docs/F14_ACTOR_PUBLICATION_RELOAD_GENERATION_2026-11-08.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$base" HEAD -- conf sql data optional)"
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          ! grep -R -E '^[[:space:]]*#define COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT' src/
+          echo 'PASS only scoped opt-in F14 producer and test/docs; paid and F14 unchanged OFF'
+      - name: Guard actual IP source and preserve original IP133 source regressions
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_actor_publication_reload_generation_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_atomic_publication_reload_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_current_actor_publication_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_disabled_login_revoke_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_group_floor_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_core6_negative_actor_who_adapter_source.py' -v
+      - name: Compile deterministic native C++ reload interleavings (pure test, NOT Worldserver)
+        shell: bash
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          set -euo pipefail
+          for std in c++17 c++20; do
+            for mode in normal ndebug; do
+              flags=()
+              if [[ "$mode" == ndebug ]]; then flags=(-DNDEBUG); fi
+              "$CXX" -std="$std" -pthread -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                tests/f14_actor_publication_reload_generation_model.cpp -o /tmp/f14-reload-generation-model
+              /tmp/f14-reload-generation-model
+            done
+          done
+      - name: Honest stage boundary
+        if: always()
+        run: |
+          echo 'Only Python source contracts and portable pure C++ model: NOT native IP module, Worldserver, database, session or WoW client.'
+          echo 'No positive WHO/actor/NPC callback or stage8/paid grant. No live host/config/SQL changes.'
