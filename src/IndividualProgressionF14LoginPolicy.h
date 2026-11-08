@@ -46,9 +46,13 @@ namespace IndividualProgressionF14LoginPolicy
     {
         // Do not accept corrupt/unsupported stages or bypass a configured
         // limit. Limit=0 means IP has no stage cap; not a level-cap decision.
-        if (savedStage > 18)
+        // A negative or out-of-domain cap is UNKNOWN, never "uncapped".
+        // Only 0 has the documented no-IP-stage-cap meaning. That STILL
+        // does not prove world TBC availability, first birth or paid rights;
+        // the separate default-OFF runtime caller is not release-ready.
+        if (savedStage > 18 || progressionLimit < 0 || progressionLimit > 18)
             return false;
-        return progressionLimit <= 0 ||
+        return progressionLimit == 0 ||
             DesiredVerifiedTbcRaceStage(savedStage, level) <= progressionLimit;
     }
 
