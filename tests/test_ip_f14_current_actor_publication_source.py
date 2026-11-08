@@ -39,8 +39,12 @@ class CurrentActorPublication(unittest.TestCase):
                      "player->IsInWorld()", "currentSession->IsHeadless()",
                      "!player->IsGameMaster()", "isBotAccount(player)", "accountId != 0",
                      "race == RACE_BLOODELF", "race == RACE_DRAENEI",
-                     "if (canPublishActor)", "F14VerifiedActorPublication{fullGuid, accountId, race, loginEpoch}"):
+                     "if (canPublishActor && _f14ActorPublicationEnabled.load(std::memory_order_acquire))", "F14VerifiedActorPublication{fullGuid, accountId, race, loginEpoch}"):
             self.assertIn(term,w)
+        # The opt-in publication now requires the source-verified actor AND the
+        # atomic config/reload gate while holding the existing identity lock.
+        self.assertLess(w.index("std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock)"),
+                        w.index("if (canPublishActor && _f14ActorPublicationEnabled.load(std::memory_order_acquire))"))
         self.assertIn("sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter())",P)
         self.assertIn("void OnPlayerLogout(Player* player) override",P)
 
