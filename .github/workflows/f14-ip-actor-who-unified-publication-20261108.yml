@@ -1,0 +1,65 @@
+name: CosmicCuddle F14 IP WHO player actor consistent publication model (UNWIRED)
+on:
+  push:
+    branches:
+      - research/cs01-f14-unified-actor-who-publication-contract-20261108
+  pull_request:
+    branches:
+      - feature/cs01-f14-ip120-owner-five-native-20261107
+permissions:
+  contents: read
+jobs:
+  pure-actor-who-publication-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - name: Checkout exact IP120 child
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact IP120 parent and only six review paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=38d6844af45eb1d89679299c9a8d466ae64375d5
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            '.github/workflows/f14-ip-actor-who-unified-publication-20261108.yml' \
+            'src/IndividualProgressionF14ActorWhoPublicationContract.h' \
+            'tests/f14_actor_who_unified_publication.cpp' \
+            'tests/test_ip_f14_actor_who_unified_publication_source.py' \
+            'docs/F14-ACTOR-WHO-UNIFIED-PUBLICATION-20261108.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$base" HEAD -- sql/ data/ conf/)"
+      - name: Strict no-current-listener source protection
+        run: python3 -B -m unittest discover -s tests -p test_ip_f14_actor_who_unified_publication_source.py -v
+      - name: Compile and execute actual pure C++ 128-case actor WHO parity
+        shell: bash
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          set -euo pipefail
+          for std in c++17 c++20; do
+            for mode in normal ndebug; do
+              flags=()
+              if [[ "$mode" == ndebug ]]; then flags=(-DNDEBUG); fi
+              "$CXX" "-std=$std" -O1 -Wall -Wextra -Werror -pedantic "${flags[@]}" \
+                -Isrc tests/f14_actor_who_unified_publication.cpp -o /tmp/f14-actor-who-contract
+              /tmp/f14-actor-who-contract
+            done
+          done
+      - name: Honest evidence boundary
+        if: always()
+        run: |
+          echo 'No actor identity producer, WHO client, actual Playerbot, Worldserver, DB or map run.'
+          echo 'This pure model is UNWIRED; no F14 player/WHO/NPC hiding, stage8 or paid grant.'
+          echo 'All runtime flags remain OFF, no owner installed SQL/host/client data touched.'
