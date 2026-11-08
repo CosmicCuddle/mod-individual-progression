@@ -1,0 +1,55 @@
+name: CosmicCuddle F14 revoke identity before disabled login exit (SOURCE)
+on:
+  push:
+    branches:
+      - fix/cs01-f14-logout-reload-failvisible-identity-20261108
+  pull_request:
+    branches:
+      - feature/cs01-f14-current-verified-actor-publication-off-20261108
+permissions:
+  contents: read
+jobs:
+  f14-disabled-relogin-revokes-stale-actor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact unmerged IP129 child
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Guard exact parent and six review-only paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=b7d4c5602d4222b4b3d9a93b13dd79a04f408ca3
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            '.github/workflows/f14-ip-disabled-login-evict-source-20261108.yml' \
+            'src/IndividualProgression.cpp' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'tests/test_ip_f14_disabled_login_revoke_source.py' \
+            'docs/F14-DISABLED-LOGIN-REVOKE-20261108.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$base" HEAD -- sql/ conf/ data/)"
+      - name: New regression and mutation guards
+        run: python3 -B -m unittest discover -s tests -p test_ip_f14_disabled_login_revoke_source.py -v
+      - name: Preserve existing original source protections (no rewrites)
+        run: |
+          python3 -B -m unittest discover -s tests -p test_ip_f14_current_actor_publication_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_core6_negative_actor_who_adapter_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_actor_who_unified_publication_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_grim_player_who_observer_source.py -v
+      - name: Native original IP127 pure identity model, no Game/DB
+        run: |
+          g++ -std=c++17 -O1 -Wall -Wextra -Werror -pedantic -Isrc tests/f14_actor_who_unified_publication.cpp -o /tmp/f14-publisher-model
+          /tmp/f14-publisher-model
+      - name: Evidence boundary
+        if: always()
+        run: |
+          echo 'Source-only: no full Worldserver compile, login, SQL, client ACK, hide or in-game validation.'
+          echo 'Fail-visible invalidation only; existing IP128 callbacks always FALSE, all runtime macros default OFF.'
