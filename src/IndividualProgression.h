@@ -466,6 +466,19 @@ public:
     void LoadAccountRegexes();
     void SyncBotsProgressionToLeader(Group* group);
     // F14: verified GUID is recorded only on the login thread; group workers never call Playerbots.
+    // Compile-only F14 current-login identity publication for a future
+    // Core6 player/WHO reader. It is not a suppression, paid or stage grant.
+    // The published entry may be read only when independently enabled;
+    // normal builds return false and maintain no additional record.
+    struct F14VerifiedActorPublication
+    {
+        ObjectGuid fullGuid{};
+        uint32 accountId = 0;
+        uint8 race = 0;
+        std::uint64_t loginEpoch = 0;
+    };
+    bool TryReadF14VerifiedActorPublication(
+        ObjectGuid const& fullGuid, F14VerifiedActorPublication& out);
     void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
     void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
     // Read-only current verified incarnation; no Playerbots access on
@@ -575,6 +588,11 @@ private:
     std::unordered_map<uint32, bool> _f14VerifiedRandomBotGroupCache;
     // Do not recycle a GUID-only identity for a new login incarnation.
     std::unordered_map<uint32, std::uint64_t> _f14VerifiedRandomBotLoginEpoch;
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    // Only the existing *login-thread-verified* positive RandomBot may
+    // publish. Revoked inside the same identity lock on every login/logout.
+    std::unordered_map<uint32, F14VerifiedActorPublication> _f14VerifiedActorPublications;
+#endif
     std::uint64_t _f14NextRandomBotLoginEpoch = 0;
     std::shared_mutex _f14GroupCacheLock;
 };

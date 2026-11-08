@@ -621,6 +621,19 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
 {
     if (!player)
         return;
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    // Read Player / Session facts ONLY on the established verified login
+    // source path, OUTSIDE the identity lock. WHO readers never dereference
+    // Player or consult mutable RandomPlayerbotMgr.
+    ObjectGuid const fullGuid = player->GetGUID();
+    WorldSession const* currentSession = player->GetSession();
+    uint32 const accountId = currentSession ? currentSession->GetAccountId() : 0;
+    uint8 const race = player->getRace();
+    bool const canPublishActor = verified && fullGuid.IsPlayer() &&
+        player->IsInWorld() && currentSession && currentSession->IsHeadless() &&
+        !player->IsGameMaster() && isBotAccount(player) && accountId != 0 &&
+        (race == RACE_BLOODELF || race == RACE_DRAENEI);
+#endif
     // The previous login epoch (if any) is expired from the F14 lifecycle
     // registry AFTER the identity lock is released (lock order: registry
     // mutex -> identity lock). Logout/relogin never relies on AttackStop.
@@ -636,6 +649,11 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
         // an unverified login. An old GUID cannot resurrect a stale attack proof.
         _f14VerifiedRandomBotGroupCache.erase(guid);
         _f14VerifiedRandomBotLoginEpoch.erase(guid);
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+        // Revoke the old public identity at the same lock boundary as its
+        // login epoch, even if the new login fails proof or overflows.
+        _f14VerifiedActorPublications.erase(guid);
+#endif
         if (!verified)
             return;
 
@@ -652,8 +670,48 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
 
         const std::uint64_t loginEpoch = ++_f14NextRandomBotLoginEpoch;
         _f14VerifiedRandomBotLoginEpoch[guid] = loginEpoch;
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+        if (canPublishActor)
+            _f14VerifiedActorPublications.emplace(
+                guid, F14VerifiedActorPublication{fullGuid, accountId, race, loginEpoch});
+#endif
     }();
     ExpireF14LifecycleActor(expiredLoginEpoch);
+}
+
+// New WHO/actor identity snapshot read does not depend on mutable bot manager,
+// Player*, current world/map pointers, SQL or cached WHO race. A snapshot is
+// ONLY evidence at the lock acquisition; callers MUST revalidate on send,
+// logout, GUID re-use and era changes. Never use it alone to hide anyone.
+bool IndividualProgression::TryReadF14VerifiedActorPublication(
+    ObjectGuid const& fullGuid, F14VerifiedActorPublication& out)
+{
+    out = F14VerifiedActorPublication{};
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    if (!fullGuid || !fullGuid.IsPlayer())
+        return false;
+
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    uint32 const lowGuid = fullGuid.GetCounter();
+    auto const valid = _f14VerifiedRandomBotGroupCache.find(lowGuid);
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(lowGuid);
+    auto const identity = _f14VerifiedActorPublications.find(lowGuid);
+    if (valid == _f14VerifiedRandomBotGroupCache.end() || !valid->second ||
+        epoch == _f14VerifiedRandomBotLoginEpoch.end() || !epoch->second ||
+        identity == _f14VerifiedActorPublications.end() ||
+        identity->second.fullGuid != fullGuid ||
+        identity->second.loginEpoch != epoch->second ||
+        !identity->second.accountId ||
+        (identity->second.race != RACE_BLOODELF &&
+         identity->second.race != RACE_DRAENEI))
+        return false;
+
+    out = identity->second;
+    return true;
+#else
+    (void)fullGuid;
+    return false;
+#endif
 }
 
 void IndividualProgression::ForgetF14VerifiedRandomBotGroupIdentity(Player* player)
