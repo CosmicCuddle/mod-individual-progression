@@ -51,10 +51,8 @@ public:
         // Capture the optional actor-publication lease at login ENTRY,
         // before any original Playerbots identity verification. The
         // source must not cross a config-reload generation boundary.
-        IndividualProgression::F14ActorPublicationLoginLease f14SourceLease{};
-#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
-        f14SourceLease = sIndividualProgression->CaptureF14ActorPublicationLoginLease();
-#endif
+        IndividualProgression::F14ActorPublicationLoginLease const f14SourceLease =
+            sIndividualProgression->CaptureF14ActorPublicationLoginLease();
 
         // F14 identity invalidation must precede *every* new login,
         // including login when IP is disabled or the Player is not yet in
