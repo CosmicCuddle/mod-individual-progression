@@ -486,7 +486,7 @@ public:
         bool publicationWasEnabled = false;
     };
     // Ordinary builds return a disabled value-only lease.
-    F14ActorPublicationLoginLease CaptureF14ActorPublicationLoginLease() const;
+    F14ActorPublicationLoginLease CaptureF14ActorPublicationLoginLease();
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
     // Called from the existing WorldScript config thread. Disable/evict
     // before re-reading settings; only re-arm after a completed reload.
