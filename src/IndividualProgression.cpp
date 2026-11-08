@@ -671,13 +671,34 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
         const std::uint64_t loginEpoch = ++_f14NextRandomBotLoginEpoch;
         _f14VerifiedRandomBotLoginEpoch[guid] = loginEpoch;
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
-        if (canPublishActor)
+        // Config reload may revoke identity between the login precheck
+        // and this lock. Always recheck the atomic while holding the lock.
+        if (canPublishActor && _f14ActorPublicationEnabled.load(std::memory_order_acquire))
             _f14VerifiedActorPublications.emplace(
                 guid, F14VerifiedActorPublication{fullGuid, accountId, race, loginEpoch});
 #endif
     }();
     ExpireF14LifecycleActor(expiredLoginEpoch);
 }
+
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+void IndividualProgression::BeginF14ActorPublicationConfigReload()
+{
+    // WHO/visibility readers and bot-login writers use the same mutex.
+    // A reload invalidates ALL old snapshots (even if re-enabled): the
+    // next publication must come from a fresh verified bot login.
+    std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    _f14ActorPublicationEnabled.store(false, std::memory_order_release);
+    _f14VerifiedActorPublications.clear();
+}
+
+void IndividualProgression::FinishF14ActorPublicationConfigReload(bool ipEnabled)
+{
+    // End is reached only after the existing LoadConfig completed.
+    // Incomplete reload leaves publication OFF, never stale-enabled.
+    _f14ActorPublicationEnabled.store(ipEnabled, std::memory_order_release);
+}
+#endif
 
 // New WHO/actor identity snapshot read does not depend on mutable bot manager,
 // Player*, current world/map pointers, SQL or cached WHO race. A snapshot is
@@ -691,10 +712,18 @@ bool IndividualProgression::TryReadF14VerifiedActorPublication(
     // The producer remains a diagnostic-only source. On an IP runtime
     // disable, any old snapshot MUST fail visible immediately, even before
     // the normal logout hook retires its epoch. out was reset above.
+    // Local atomic snapshot intentionally shadows the historical public
+    // non-atomic 'enabled' field: never read that field from WHO workers.
+    bool const enabled = _f14ActorPublicationEnabled.load(std::memory_order_acquire);
     if (!enabled || !fullGuid || !fullGuid.IsPlayer())
         return false;
 
     std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    // A reload may begin after the first atomic read but before this
+    // shared lock. Retry under the lock, paired with reload's exclusive
+    // lock, to avoid returning an old published identity.
+    if (!_f14ActorPublicationEnabled.load(std::memory_order_acquire))
+        return false;
     uint32 const lowGuid = fullGuid.GetCounter();
     auto const valid = _f14VerifiedRandomBotGroupCache.find(lowGuid);
     auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(lowGuid);
@@ -1471,6 +1500,12 @@ class IndividualPlayerProgression_WorldScript : public WorldScript
 private:
     static void LoadConfig()
     {
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+        // Revoke BEFORE reloading the non-atomic legacy options. An old
+        // actor identity must not reappear if .reload disables then
+        // re-enables IP without an intervening bot login.
+        sIndividualProgression->BeginF14ActorPublicationConfigReload();
+#endif
         sIndividualProgression->customProgressionMap.clear();
         sIndividualProgression->enabled = sConfigMgr->GetOption<bool>("IndividualProgression.Enable", true);
         sIndividualProgression->vanillaPowerAdjustment = sConfigMgr->GetOption<float>("IndividualProgression.VanillaPowerAdjustment", 1);
@@ -1617,6 +1652,11 @@ private:
         sIndividualProgression->paidExpansionEnabled = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.Enable", false);
         sIndividualProgression->paidExpansionGrandfatherStage13 = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.GrandfatherStage13", false);
         sIndividualProgression->paidExpansionVendorName = sConfigMgr->GetOption<std::string>("IndividualProgression.PaidExpansion.VendorName", "Chronomancer Vezrath");
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+        // The atomic actor-source gate is published only after LoadConfig.
+        // The old identity map stays EMPTY until a newly verified login.
+        sIndividualProgression->FinishF14ActorPublicationConfigReload(sIndividualProgression->enabled);
+#endif
     }
 
     static void LoadXpValues()
