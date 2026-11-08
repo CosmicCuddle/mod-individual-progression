@@ -617,18 +617,15 @@ bool IndividualProgression::isPlayerInDungeonOrRaid(Player* player)
     return (map && (map->IsDungeon() || map->IsRaid()));
 }
 
-void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified)
+void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(
+    Player* player, bool verified, F14ActorPublicationLoginLease sourceLease)
 {
     if (!player)
         return;
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
-    // Snapshot publication authority BEFORE reading any Player facts. A
-    // config reload can complete before we acquire the identity lock: a
-    // different generation then refuses this in-flight login publication.
-    std::uint64_t const observedPublicationGeneration =
-        _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);
-    bool const publicationWasEnabled =
-        _f14ActorPublicationEnabled.load(std::memory_order_acquire);
+    // A sourceLease captured at OnPlayerLogin ENTRY, before the original
+    // Playerbots verified-login predicates, is passed here. A login already
+    // in progress as config reloads cannot republish under the new generation.
     // Read Player / Session facts ONLY on the established verified login
     // source path, OUTSIDE the identity lock. WHO readers never dereference
     // Player or consult mutable RandomPlayerbotMgr.
@@ -682,8 +679,8 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
         // and this lock. Always recheck the atomic while holding the lock.
         if (canPublishActor && _f14ActorPublicationEnabled.load(std::memory_order_acquire))
         {
-            if (publicationWasEnabled &&
-                observedPublicationGeneration ==
+            if (sourceLease.publicationWasEnabled &&
+                sourceLease.generation ==
                     _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire))
                 _f14VerifiedActorPublications.emplace(
                     guid, F14VerifiedActorPublication{fullGuid, accountId, race, loginEpoch});
@@ -694,6 +691,20 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
 }
 
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+IndividualProgression::F14ActorPublicationLoginLease
+IndividualProgression::CaptureF14ActorPublicationLoginLease() const
+{
+    // Capture before the original Playerbots login verification begins.
+    // A torn two-atomic snapshot can only fail closed: the writer compares
+    // generation again under the identity lock before publishing.
+    F14ActorPublicationLoginLease lease;
+    lease.generation =
+        _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);
+    lease.publicationWasEnabled =
+        _f14ActorPublicationEnabled.load(std::memory_order_acquire);
+    return lease;
+}
+
 void IndividualProgression::BeginF14ActorPublicationConfigReload()
 {
     // WHO/visibility readers and bot-login writers use the same mutex.
