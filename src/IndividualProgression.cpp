@@ -622,6 +622,13 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
     if (!player)
         return;
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    // Snapshot publication authority BEFORE reading any Player facts. A
+    // config reload can complete before we acquire the identity lock: a
+    // different generation then refuses this in-flight login publication.
+    std::uint64_t const observedPublicationGeneration =
+        _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);
+    bool const publicationWasEnabled =
+        _f14ActorPublicationEnabled.load(std::memory_order_acquire);
     // Read Player / Session facts ONLY on the established verified login
     // source path, OUTSIDE the identity lock. WHO readers never dereference
     // Player or consult mutable RandomPlayerbotMgr.
@@ -674,8 +681,13 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(Player* pl
         // Config reload may revoke identity between the login precheck
         // and this lock. Always recheck the atomic while holding the lock.
         if (canPublishActor && _f14ActorPublicationEnabled.load(std::memory_order_acquire))
-            _f14VerifiedActorPublications.emplace(
-                guid, F14VerifiedActorPublication{fullGuid, accountId, race, loginEpoch});
+        {
+            if (publicationWasEnabled &&
+                observedPublicationGeneration ==
+                    _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire))
+                _f14VerifiedActorPublications.emplace(
+                    guid, F14VerifiedActorPublication{fullGuid, accountId, race, loginEpoch});
+        }
 #endif
     }();
     ExpireF14LifecycleActor(expiredLoginEpoch);
@@ -689,6 +701,11 @@ void IndividualProgression::BeginF14ActorPublicationConfigReload()
     // next publication must come from a fresh verified bot login.
     std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
     _f14ActorPublicationEnabled.store(false, std::memory_order_release);
+    std::uint64_t const previousGeneration =
+        _f14ActorPublicationReloadGeneration.load(std::memory_order_relaxed);
+    if (previousGeneration != std::numeric_limits<std::uint64_t>::max())
+        _f14ActorPublicationReloadGeneration.store(
+            previousGeneration + 1, std::memory_order_release);
     _f14VerifiedActorPublications.clear();
 }
 
@@ -696,6 +713,9 @@ void IndividualProgression::FinishF14ActorPublicationConfigReload(bool ipEnabled
 {
     // End is reached only after the existing LoadConfig completed.
     // Incomplete reload leaves publication OFF, never stale-enabled.
+    if (_f14ActorPublicationReloadGeneration.load(std::memory_order_acquire) ==
+        std::numeric_limits<std::uint64_t>::max())
+        return; // permanent safe OFF, never wrap back into a prior lease
     _f14ActorPublicationEnabled.store(ipEnabled, std::memory_order_release);
 }
 #endif
