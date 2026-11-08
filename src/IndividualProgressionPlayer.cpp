@@ -1217,11 +1217,51 @@ public:
 };
 #endif
 
+// Experimental Core6 ABI adapter ONLY. It is not an F14 policy provider.
+// Both newer Core APIs interpret TRUE as HIDE; older IP observer returns TRUE
+// to ALLOW, so never forward the legacy Boolean into these callbacks.
+// The correct unified IP/Playerbots producer and restoration rights are not
+// implemented. This class is entirely absent from ordinary builds.
+// On explicit compile-only opt-in, both callbacks STILL always return FALSE.
+#if defined(COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT >= 1
+class IndividualProgressionF14Core6NegativeActorWhoAdapter final : public WorldObjectScript
+{
+public:
+    IndividualProgressionF14Core6NegativeActorWhoAdapter()
+        : WorldObjectScript("IndividualProgression_F14Core6NegativeActorWho",
+            {WORLDOBJECTHOOK_ON_F14_VIEWER_PLAYER_SUPPRESSION_QUERY,
+             WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY}) { }
+
+    // New Core6 actor client CREATE/OUT query: TRUE would hide a Player.
+    // NO positive identity publication, current-epoch, human rights or
+    // previously-hidden restoration proof is supplied yet. Fail visible.
+    bool OnF14ShouldSuppressPlayerForViewer(
+        Player const* /*viewer*/, Player const* /*actor*/) override
+    {
+        return false;
+    }
+
+    // New Core5 cached WHO query: TRUE would EXCLUDE a WHO row.
+    // Older IP OnWhoListEntryCanBeSeenByPlayer uses TRUE=ALLOW and is
+    // NOT compatible. The cache itself cannot verify target epoch, account,
+    // genuine RandomBot origin or active lifetime; fail visible.
+    bool OnF14ShouldExcludeWhoEntryForViewer(
+        Player const* /*viewer*/, ObjectGuid const& /*targetGuid*/,
+        uint32 /*cachedRace*/) override
+    {
+        return false;
+    }
+};
+#endif
+
 void AddSC_mod_individual_progression_player()
 {
     new IndividualPlayerProgression();
     new IndividualPlayerProgression_GroupScript();
     new IndividualPlayerProgression_AccountScript();
+#if defined(COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT >= 1
+    new IndividualProgressionF14Core6NegativeActorWhoAdapter();
+#endif
 #if defined(COSMIC_F14_OBSERVER_HOOK_VERSION)
     new IndividualProgressionF14ObserverScript();
 #endif
