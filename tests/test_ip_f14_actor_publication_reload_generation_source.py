@@ -22,7 +22,7 @@ class AtomicActorReloadGenerationSource(unittest.TestCase):
         )[0]
         cls.capture = CPP.split(
             "IndividualProgression::CaptureF14ActorPublicationLoginLease() const", 1
-        )[1].split("void IndividualProgression::BeginF14ActorPublicationConfigReload()", 1)[0]
+        )[1].split("// New WHO/actor identity snapshot", 1)[0]
         cls.login = PLAYER.split("void OnPlayerLogin(Player* player) override", 1)[1].split(
             "void OnPlayerLogout(Player* player) override", 1)[0]
         cls.begin = CPP.split(
