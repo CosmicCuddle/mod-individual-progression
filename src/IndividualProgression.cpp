@@ -688,7 +688,10 @@ bool IndividualProgression::TryReadF14VerifiedActorPublication(
 {
     out = F14VerifiedActorPublication{};
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
-    if (!fullGuid || !fullGuid.IsPlayer())
+    // The producer remains a diagnostic-only source. On an IP runtime
+    // disable, any old snapshot MUST fail visible immediately, even before
+    // the normal logout hook retires its epoch. out was reset above.
+    if (!enabled || !fullGuid || !fullGuid.IsPlayer())
         return false;
 
     std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
