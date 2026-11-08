@@ -485,10 +485,11 @@ public:
         std::uint64_t generation = 0;
         bool publicationWasEnabled = false;
     };
+    // Ordinary builds return a disabled value-only lease.
+    F14ActorPublicationLoginLease CaptureF14ActorPublicationLoginLease() const;
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
     // Called from the existing WorldScript config thread. Disable/evict
     // before re-reading settings; only re-arm after a completed reload.
-    F14ActorPublicationLoginLease CaptureF14ActorPublicationLoginLease() const;
     void BeginF14ActorPublicationConfigReload();
     void FinishF14ActorPublicationConfigReload(bool ipEnabled);
 #endif
