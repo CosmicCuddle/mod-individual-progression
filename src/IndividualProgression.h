@@ -493,8 +493,17 @@ public:
     void BeginF14ActorPublicationConfigReload();
     void FinishF14ActorPublicationConfigReload(bool ipEnabled);
 #endif
+    // Keep the captured entry-time lease explicit for verified RandomBot logins.
+    // A no-lease legacy call is fail-closed for optional actor publication.
+    // Avoid a default argument for this nested aggregate: GCC rejects it
+    // before the containing class is complete.
     void RememberF14VerifiedRandomBotGroupIdentity(
-        Player* player, bool verified, F14ActorPublicationLoginLease sourceLease = {});
+        Player* player, bool verified, F14ActorPublicationLoginLease sourceLease);
+    void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified)
+    {
+        RememberF14VerifiedRandomBotGroupIdentity(
+            player, verified, F14ActorPublicationLoginLease{});
+    }
     void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
     // Read-only current verified incarnation; no Playerbots access on
     // observer/WHO threads. Missing or stale means ALLOW visibility.
