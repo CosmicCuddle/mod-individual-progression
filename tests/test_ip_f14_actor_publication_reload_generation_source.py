@@ -21,7 +21,7 @@ class AtomicActorReloadGenerationSource(unittest.TestCase):
             " >= 1\nvoid IndividualProgression::Begin", 1
         )[0]
         cls.capture = CPP.split(
-            "IndividualProgression::CaptureF14ActorPublicationLoginLease() const", 1
+            "IndividualProgression::CaptureF14ActorPublicationLoginLease()", 1
         )[1].split("// New WHO/actor identity snapshot", 1)[0]
         cls.login = PLAYER.split("void OnPlayerLogin(Player* player) override", 1)[1].split(
             "void OnPlayerLogout(Player* player) override", 1)[0]
@@ -45,6 +45,11 @@ class AtomicActorReloadGenerationSource(unittest.TestCase):
     def test_caller_captures_lease_before_source_bot_verification(self):
         c = self.capture
         login = self.login
+        self.assertIn("std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);", c)
+        self.assertLess(c.index("std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);"),
+                        c.index("_f14ActorPublicationReloadGeneration.load("))
+        self.assertLess(c.index("std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);"),
+                        c.index("_f14ActorPublicationEnabled.load("))
         self.assertIn(
             "_f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);", c)
         self.assertIn(
@@ -97,6 +102,9 @@ class AtomicActorReloadGenerationSource(unittest.TestCase):
 
     def test_exhaustion_keeps_publisher_off_and_does_not_rearm_stale_identity(self):
         f = self.finish
+        self.assertIn("std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);", f)
+        self.assertLess(f.index("std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);"),
+                        f.index("_f14ActorPublicationEnabled.store(ipEnabled"))
         self.assertIn(
             "_f14ActorPublicationReloadGeneration.load(std::memory_order_acquire) ==", f)
         self.assertIn("std::numeric_limits<std::uint64_t>::max()", f)
@@ -117,6 +125,16 @@ class AtomicActorReloadGenerationSource(unittest.TestCase):
         for term in ("ForceUpdateProgressionState(", "RewardQuest(", "SaveToDB(",
                      "DELETE FROM", "SetPhaseMask(", "DestroyForPlayer("):
             self.assertNotIn(term, self.begin + self.finish + self.reader)
+
+    def test_mutations_removing_lock_serialization_are_detected(self):
+        capture = self.capture
+        finish = self.finish
+        shared = "std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);"
+        exclusive = "std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);"
+        self.assertIn(shared, capture)
+        self.assertIn(exclusive, finish)
+        self.assertNotIn(shared, capture.replace(shared, "", 1))
+        self.assertNotIn(exclusive, finish.replace(exclusive, "", 1))
 
     def test_mutations_removing_lease_gate_are_detected(self):
         w = self.writer
