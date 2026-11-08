@@ -45,21 +45,61 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B -m unittest discover -s tests -p test_ip_f14_stage8_invalid_cap_native.py -v
-      - name: Preserve inherited original F14 source and actual C++ policy
+      - name: Actual inherited group floor and actor reload checks
         shell: bash
         run: |
           set -euo pipefail
-          # These are the ACTUAL files in pinned IP136 history; the older
-          # F14 stage-floor PR #40 test/CPP names are not in this branch.
-          # The NEW test above itself compiles+executes the real policy in
-          # eight GCC/Clang/C++17/C++20/normal/NDEBUG combinations.
+          # These are present in the immutable IP136 source tree.
+          # The NEW test above already executes actual policy C++ across
+          # 8 GCC/Clang/C++17/C++20/normal/NDEBUG combinations.
           for t in \
-            test_ip_f19_login_floor_source.py \
             test_ip_f14_group_floor_source.py \
             test_ip_f14_actor_publication_reload_generation_source.py; do
             test -f "tests/$t"
             python3 -B -m unittest discover -s tests -p "$t" -v
           done
+      - name: Historical F19 exact-source RED must match pristine IP136 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This older test asserts the exact F19-only branch/source delta,
+          # preceding MANY independent owner F14 contributions. It already
+          # reports two historical failures on frozen IP136, unrelated to
+          # the one pure cap-policy edit. Do NOT change or silence that test:
+          # compare identical inherited failure lists, error counts and
+          # test execution on both frozen parent and child.
+          git worktree add --detach /tmp/ip136-f19-reference \
+            29fa9a179039ebf292ee137005cbdd112407581a >/dev/null
+          python3 - <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+          cmd = ["python3", "-B", "-m", "unittest", "discover",
+                 "-s", "tests", "-p", "test_ip_f19_login_floor_source.py", "-v"]
+          old = subprocess.run(cmd, cwd="/tmp/ip136-f19-reference",
+                               capture_output=True, text=True, check=False)
+          new = subprocess.run(cmd, cwd=".", capture_output=True,
+                               text=True, check=False)
+          rx = re.compile(r"^(test_\w+) \([^\n]+\) \.\.\. FAIL$", re.M)
+          old_failed = set(rx.findall(old.stderr))
+          new_failed = set(rx.findall(new.stderr))
+          historical = {
+              "test_f19_original_source_scope_and_reviewed_child_ownership",
+              "test_original_level_write_unchanged",
+          }
+          assert old.returncode == 1 and new.returncode == 1, (
+              "Historical exact-source baseline result changed")
+          assert old_failed == new_failed == historical, (
+              f"Inherited regressions changed; parent={old_failed}, child={new_failed}")
+          assert "Ran 8 tests" in old.stderr and "Ran 8 tests" in new.stderr
+          assert "ERROR:" not in old.stderr and "ERROR:" not in new.stderr
+          assert "FAILED (failures=2)" in old.stderr
+          assert "FAILED (failures=2)" in new.stderr
+          print("EXPECTED HISTORICAL RED (2 exact F19-only source tests) on BOTH "
+                "immutable IP136 parent and IP137 child; no additional failure.")
+          print("Do NOT describe inherited F19 suite as PASS. New cap test PASS "
+                "is independent old-RED/new-GREEN actual C++ execution.")
+          PY
       - name: Scope/evidence boundary
         if: always()
         run: |
