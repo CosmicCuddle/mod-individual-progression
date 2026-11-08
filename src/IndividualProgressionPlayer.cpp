@@ -48,6 +48,14 @@ public:
         if (!player)
             return;
 
+        // Capture the optional actor-publication lease at login ENTRY,
+        // before any original Playerbots identity verification. The
+        // source must not cross a config-reload generation boundary.
+        IndividualProgression::F14ActorPublicationLoginLease f14SourceLease{};
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+        f14SourceLease = sIndividualProgression->CaptureF14ActorPublicationLoginLease();
+#endif
+
         // F14 identity invalidation must precede *every* new login,
         // including login when IP is disabled or the Player is not yet in
         // world. Otherwise an older verified bot GUID/epoch can survive a
@@ -71,7 +79,8 @@ public:
             player->GetSession() && player->GetSession()->IsHeadless())
         {
             sIndividualProgression->RememberF14VerifiedRandomBotGroupIdentity(
-                player, sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()));
+                player, sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()),
+                f14SourceLease);
         }
 #endif
 
