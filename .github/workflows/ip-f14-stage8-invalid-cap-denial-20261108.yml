@@ -49,15 +49,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for t in test_ip_f14_tbc_floor_source.py test_ip_f19_login_floor_source.py test_ip_f14_group_floor_source.py; do
+          # These are the ACTUAL files in pinned IP136 history; the older
+          # F14 stage-floor PR #40 test/CPP names are not in this branch.
+          # The NEW test above itself compiles+executes the real policy in
+          # eight GCC/Clang/C++17/C++20/normal/NDEBUG combinations.
+          for t in \
+            test_ip_f19_login_floor_source.py \
+            test_ip_f14_group_floor_source.py \
+            test_ip_f14_actor_publication_reload_generation_source.py; do
+            test -f "tests/$t"
             python3 -B -m unittest discover -s tests -p "$t" -v
-          done
-          for compiler in g++ clang++; do
-            for std in c++17 c++20; do
-              "$compiler" -std="$std" -Wall -Wextra -Werror -O2 \
-                tests/f14_tbc_floor_policy.cpp -o /tmp/f14-tbc-floor-test
-              /tmp/f14-tbc-floor-test
-            done
           done
       - name: Scope/evidence boundary
         if: always()
