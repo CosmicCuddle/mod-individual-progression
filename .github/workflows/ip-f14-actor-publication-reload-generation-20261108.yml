@@ -27,7 +27,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify frozen IP133 parent and exact eight changed paths
+      - name: Verify frozen IP133 parent and exact nine changed paths
         shell: bash
         run: |
           set -euo pipefail
@@ -41,6 +41,7 @@ jobs:
             'src/IndividualProgressionPlayer.cpp' \
             'tests/f14_actor_publication_reload_generation_model.cpp' \
             'tests/test_ip_f14_actor_publication_reload_generation_source.py' \
+            'tests/test_ip_f14_group_floor_source.py' \
             '.github/workflows/ip-f14-actor-publication-reload-generation-20261108.yml' \
             'docs/F14_ACTOR_PUBLICATION_RELOAD_GENERATION_2026-11-08.md' \
             'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/expected
@@ -57,6 +58,7 @@ jobs:
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_atomic_publication_reload_source.py' -v
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_current_actor_publication_source.py' -v
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_disabled_login_revoke_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_group_floor_source.py' -v
           python3 -B -m unittest discover -s tests -p 'test_ip_f14_core6_negative_actor_who_adapter_source.py' -v
       - name: Compile deterministic native C++ reload interleavings (pure test, NOT Worldserver)
         shell: bash
