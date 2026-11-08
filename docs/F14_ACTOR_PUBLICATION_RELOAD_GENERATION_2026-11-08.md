@@ -33,3 +33,11 @@ Required later: actual Core6/PB10/IP-this-child/Naxx292/Services16 Worldserver l
 **Rollback:** reject this isolated DRAFT; original #133/#132 unchanged. No production data touched.
 
 **Inherited contract update:** the original group safety test assumed `Remember(player, IsRandomBot(guid))` had exactly two arguments. The new third argument is a verified entry-time generation lease; the test now explicitly requires the **unchanged real `IsRandomBot(guid)` predicate**, the new lease, and the lease's capture before the original verification. This is a stronger source contract, not disabling a failing test. The original group safety and IP stage-floor runtime are unchanged.
+
+## Atomic snapshot refinement (same review child, 8 Nov)
+
+A second review found that merely reading atomic `generation` followed by atomic `enabled` can produce a **mixed snapshot**: a login reader might observe the new generation immediately after `BeginReload` increments it, pause, then observe the newly enabled switch after `FinishReload`. Such a mixed pair could wrongly appear to be a fresh post-reload lease.
+
+The revised `CaptureF14ActorPublicationLoginLease` therefore acquires the **existing identity mutex in shared mode** before reading both values; `BeginF14ActorPublicationConfigReload` already holds that mutex exclusively, and `FinishF14ActorPublicationConfigReload` now also takes the exclusive lock before publishing `enabled`. Only a coherent before/during/after reload lease is returned. The unchanged verified-login writer retains its exclusive identity mutex and double checks the lease generation and enabled state before publishing. The lease getter is now non-const because the existing mutex is not a mutable member; no new mutex, Playerbots state read, SQL, positive hook or gameplay write was added.
+
+New source assertions **require** this capture shared lock and finish exclusive lock and reject removing either; the pure C++ interleaving model mirrors them. The previous source and model success at `7e240511` is still historically valid **for that older revision only**; this refinement requires a NEW exact-head hosted CI result and later full linked Worldserver on the exact new SHA. Source/model success alone does not establish runtime thread scheduling or 3.3.5a client behaviour.
