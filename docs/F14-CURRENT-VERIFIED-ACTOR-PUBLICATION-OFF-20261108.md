@@ -1,0 +1,17 @@
+# F14 verified headless RandomBot current actor publication — 8 November 2026
+
+**Owner:** CosmicCuddle. **Review-only child** of [IP #128](https://github.com/CosmicCuddle/mod-individual-progression/pull/128) at immutable `2ef6154536e0c8febcd745a3bd928f3b4a73009a`.
+
+## What changed
+The existing IP verified login producer creates an epoch for positively verified genuine headless Blood Elf/Draenei RandomBots. It previously published only a **low GUID + Boolean** and **low GUID + login epoch** in separate maps. This is not a complete snapshot for WHO or the actual actor Core6 hook: WHO cache cannot authenticate a live target, and an account, race, full ObjectGuid or login lifetime guessed later would risk hiding real players/Altbots or a recycled GUID.
+
+A new optional actor publication, guarded by `COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1` (macro **absent by default**), captures full ObjectGuid, Account ID, Blood Elf/Draenei race and **the exact same current monotonic login epoch**, only after the existing Playerbots-login-thread `IsRandomBot` verifies the selected headless bot. Additional checks require the player in-world, Player GUID, non-GM, genuine bot account and nonzero account ID. Original GroupSync cached positive and earned-stage floor behavior is unchanged.
+
+On **every** Remember/Forget login transition, the prior new publication is erased while holding **the same `_f14GroupCacheLock`** as the old cache and epoch, even for unverified login or exhausted epoch. A new `TryReadF14VerifiedActorPublication(guid,out)` returns false and clears the output if the macro is OFF, the supplied full GUID isn't a player, an epoch was revoked, or the current record disagrees on full GUID/epoch/account/race. It never dereferences a target Player or queries mutable RandomPlayerbotMgr from a WHO/visibility thread. No client sends, group rights, SQL, stage8 writes or active F14 hiding.
+
+## Critical limitations
+A successful read is a **copy of a momentary producer-owned snapshot**, NOT a lease held through packet transmission. Logout/re-login, GUID re-use, era changes and subsequent revocation can occur immediately afterward. Actual positive Core actor/WHO/NPC hooks **remain FALSE/OFF** through IP128. Before any future hide, runtime owner must demonstrate current per-send identity/epoch revalidation, viewer effective Vanilla stage, full human rights, correct attack-only NPC hiding and previously-hidden client restoration. The existing login producer's positive `IsRandomBot` proof also does not establish absence of orphaned GUID-linked quest/paid rows or brand-new stage8 eligibility.
+
+**Tests:** new source checks for opt-in OFF, source-only verified publisher, writer lock + revocation before reissue, single-lock exact full GUID/current epoch/account/race reader, and literal-FALSE IP128 adapter. Retains previous source models. Separate exact Core6+PB10+this IP+Naxx292+Services native CMake Worldserver build with publication and false-only adapter compile macros ON needed to prove real API compatibility; normal config/feature remains OFF.
+
+**Rollback:** discard this unmerged six-path child; IP128 unchanged. No actual host, SQL, config, DB/DBC/client updates or gameplay tests. Before any approved offline/live installation preserve **tracked/untracked/ignored custom SQL cleanup/migrations**, all modules/source/effective config/DB/DBC/client/binaries, verify backups+restore, confirm `Playerbots.DeleteRandomBotAccounts=0` in future isolated test.
