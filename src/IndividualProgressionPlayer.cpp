@@ -66,7 +66,13 @@ public:
         // F14 group/login identity is republished below only after the
         // original, positively verified Playerbots source check.
 #if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
-        if ((sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor ||
+        // The optional compile-gated actor publisher must be reachable
+        // without enabling unrelated F14 runtime pilots. In ordinary builds
+        // the lease is always disabled, so the old four-option gate is intact.
+        // This remains only a positively verified login-time identity producer;
+        // the Core actor/WHO and creature hide callbacks still return FALSE.
+        if ((f14SourceLease.publicationWasEnabled ||
+             sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor ||
              sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
              sIndividualProgression->f14ExperimentalAttackLifecycleRegistry ||
              sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor) &&
