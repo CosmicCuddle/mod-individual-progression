@@ -708,6 +708,10 @@ void IndividualProgression::BeginF14ActorPublicationConfigReload()
 
 void IndividualProgression::FinishF14ActorPublicationConfigReload(bool ipEnabled)
 {
+    // The publication switch must be rearmed under the same identity mutex
+    // as login-lease capture and BeginReload. A login captured during the
+    // reload must never see the NEW generation with the OLD enabled state.
+    std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
     // End is reached only after the existing LoadConfig completed.
     // Incomplete reload leaves publication OFF, never stale-enabled.
     if (_f14ActorPublicationReloadGeneration.load(std::memory_order_acquire) ==
@@ -721,12 +725,15 @@ void IndividualProgression::FinishF14ActorPublicationConfigReload(bool ipEnabled
 // Capture the optional source lease at OnPlayerLogin entry. Ordinary builds
 // return a disabled value only; no positive F14 publisher or player hide.
 IndividualProgression::F14ActorPublicationLoginLease
-IndividualProgression::CaptureF14ActorPublicationLoginLease() const
+IndividualProgression::CaptureF14ActorPublicationLoginLease()
 {
     F14ActorPublicationLoginLease lease;
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
-    // A torn two-atomic snapshot can only refuse later. The login writer
-    // checks this lease against the current epoch inside the identity lock.
+    // Serialize BOTH lease fields with BeginReload and FinishReload. An
+    // in-flight OnPlayerLogin either sees the old generation (then fails
+    // under the writer lock) or sees disabled while a reload is open;
+    // it cannot synthesize a new-generation/old-enabled torn snapshot.
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
     lease.generation =
         _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);
     lease.publicationWasEnabled =
