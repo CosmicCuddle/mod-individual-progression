@@ -70,7 +70,7 @@ int main()
         q=o; q.effectiveStage=13; Require(!MayAskActorSurface(p,q,a)&&!MayAskWhoSurface(p,q,w),"Wrath viewer");++cases;
         q=o; q.fullPlayerGuid=p.fullPlayerGuid; Require(!MayAskActorSurface(p,q,a)&&!MayAskWhoSurface(p,q,w),"self");++cases;
         q=o; q.loginEpoch=0; Require(!MayAskActorSurface(p,q,a)&&!MayAskWhoSurface(p,q,w),"stale viewer epoch");++cases;
-        q=p; q.activeAndNotRetired=false; Require(!MayAskWhoSurface(q,o,w),"retired publication");++cases;
+        auto retired=p; retired.activeAndNotRetired=false; Require(!MayAskWhoSurface(retired,o,w),"retired publication");++cases;
     }
     // Old actor, replaced session, wrong account or Altbot: actor must fail.
     {
