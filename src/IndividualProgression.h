@@ -480,13 +480,20 @@ public:
     };
     bool TryReadF14VerifiedActorPublication(
         ObjectGuid const& fullGuid, F14VerifiedActorPublication& out);
+    struct F14ActorPublicationLoginLease
+    {
+        std::uint64_t generation = 0;
+        bool publicationWasEnabled = false;
+    };
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
     // Called from the existing WorldScript config thread. Disable/evict
     // before re-reading settings; only re-arm after a completed reload.
+    F14ActorPublicationLoginLease CaptureF14ActorPublicationLoginLease() const;
     void BeginF14ActorPublicationConfigReload();
     void FinishF14ActorPublicationConfigReload(bool ipEnabled);
 #endif
-    void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
+    void RememberF14VerifiedRandomBotGroupIdentity(
+        Player* player, bool verified, F14ActorPublicationLoginLease sourceLease = {});
     void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
     // Read-only current verified incarnation; no Playerbots access on
     // observer/WHO threads. Missing or stale means ALLOW visibility.
