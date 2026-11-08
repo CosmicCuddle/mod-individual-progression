@@ -27,7 +27,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify frozen IP133 parent and exact seven changed paths
+      - name: Verify frozen IP133 parent and exact eight changed paths
         shell: bash
         run: |
           set -euo pipefail
@@ -38,6 +38,7 @@ jobs:
           printf '%s\n' \
             'src/IndividualProgression.cpp' \
             'src/IndividualProgression.h' \
+            'src/IndividualProgressionPlayer.cpp' \
             'tests/f14_actor_publication_reload_generation_model.cpp' \
             'tests/test_ip_f14_actor_publication_reload_generation_source.py' \
             '.github/workflows/ip-f14-actor-publication-reload-generation-20261108.yml' \
