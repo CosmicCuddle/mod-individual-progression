@@ -23,6 +23,7 @@
 // Lets dependent modules (e.g. Character Services) detect the paid expansion
 // API at compile time and keep building against an IP without it.
 #define COSMIC_IP_PAID_EXPANSION_API_VERSION 1
+#include <atomic>
 #include <regex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -479,6 +480,12 @@ public:
     };
     bool TryReadF14VerifiedActorPublication(
         ObjectGuid const& fullGuid, F14VerifiedActorPublication& out);
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    // Called from the existing WorldScript config thread. Disable/evict
+    // before re-reading settings; only re-arm after a completed reload.
+    void BeginF14ActorPublicationConfigReload();
+    void FinishF14ActorPublicationConfigReload(bool ipEnabled);
+#endif
     void RememberF14VerifiedRandomBotGroupIdentity(Player* player, bool verified);
     void ForgetF14VerifiedRandomBotGroupIdentity(Player* player);
     // Read-only current verified incarnation; no Playerbots access on
@@ -592,6 +599,9 @@ private:
     // Only the existing *login-thread-verified* positive RandomBot may
     // publish. Revoked inside the same identity lock on every login/logout.
     std::unordered_map<uint32, F14VerifiedActorPublication> _f14VerifiedActorPublications;
+    // Do not read the old non-atomic public IP 'enabled' Boolean on
+    // observer/WHO workers. This atomic is publication-only and starts OFF.
+    std::atomic_bool _f14ActorPublicationEnabled{false};
 #endif
     std::uint64_t _f14NextRandomBotLoginEpoch = 0;
     std::shared_mutex _f14GroupCacheLock;
