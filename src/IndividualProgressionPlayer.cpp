@@ -45,17 +45,22 @@ public:
 
     void OnPlayerLogin(Player* player) override
     {
-        if (!sIndividualProgression->enabled)
+        if (!player)
             return;
 
-        if (!player || !player->IsInWorld())
-            return;
-
-        // F14 optional group-sync containment. Refresh the GUID on every
-        // selected login, including a false result: do not trust a stale
-        // positive identity from a previous bot session. Only this existing
-        // source-verified login thread may consult currentBots/IsRandomBot.
+        // F14 identity invalidation must precede *every* new login,
+        // including login when IP is disabled or the Player is not yet in
+        // world. Otherwise an older verified bot GUID/epoch can survive a
+        // settings change and be mistaken for this new login incarnation.
+        // Forget also expires prior attack-lifecycle evidence. It never
+        // awards stage, paid entitlements or conceals another character.
         sIndividualProgression->ForgetF14VerifiedRandomBotGroupIdentity(player);
+
+        if (!sIndividualProgression->enabled || !player->IsInWorld())
+            return;
+
+        // F14 group/login identity is republished below only after the
+        // original, positively verified Playerbots source check.
 #if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
         if ((sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor ||
              sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
