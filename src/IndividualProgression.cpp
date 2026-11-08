@@ -716,22 +716,24 @@ void IndividualProgression::FinishF14ActorPublicationConfigReload(bool ipEnabled
     _f14ActorPublicationEnabled.store(ipEnabled, std::memory_order_release);
 }
 
-// Keep the original Begin/Finish adjacent and in their historic order.
-// The lease capture is still called at OnPlayerLogin ENTRY (not from writer).
+#endif
+
+// Capture the optional source lease at OnPlayerLogin entry. Ordinary builds
+// return a disabled value only; no positive F14 publisher or player hide.
 IndividualProgression::F14ActorPublicationLoginLease
 IndividualProgression::CaptureF14ActorPublicationLoginLease() const
 {
-    // Capture before the original Playerbots login verification begins.
-    // A torn two-atomic snapshot can only fail closed: the writer compares
-    // generation again under the identity lock before publishing.
     F14ActorPublicationLoginLease lease;
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    // A torn two-atomic snapshot can only refuse later. The login writer
+    // checks this lease against the current epoch inside the identity lock.
     lease.generation =
         _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);
     lease.publicationWasEnabled =
         _f14ActorPublicationEnabled.load(std::memory_order_acquire);
+#endif
     return lease;
 }
-#endif
 
 // New WHO/actor identity snapshot read does not depend on mutable bot manager,
 // Player*, current world/map pointers, SQL or cached WHO race. A snapshot is
