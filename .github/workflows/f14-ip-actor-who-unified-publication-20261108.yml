@@ -5,7 +5,7 @@ on:
       - research/cs01-f14-unified-actor-who-publication-contract-20261108
   pull_request:
     branches:
-      - feature/cs01-f14-ip120-owner-five-native-20261107
+      - research/cs01-f14-core-map-update-observer-native-off-20261106
 permissions:
   contents: read
 jobs:
