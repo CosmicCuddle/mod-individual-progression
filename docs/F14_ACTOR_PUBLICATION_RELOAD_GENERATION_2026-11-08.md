@@ -1,7 +1,7 @@
 # F14 optional RandomBot actor identity — reject in-flight login publication after .reload
 
-**Owner:** CosmicCuddle. **Date:** 8 November 2026. **Maintenance:** CS01-IP.  
-**Parent:** [IP review DRAFT #133](https://github.com/CosmicCuddle/mod-individual-progression/pull/133), immutable head `b4c2eb8073bb7178a4fbac8e744cb456f6b8eaf2`.  
+**Owner:** CosmicCuddle. **Date:** 8 November 2026. **Maintenance:** CS01-IP.
+**Parent:** [IP review DRAFT #133](https://github.com/CosmicCuddle/mod-individual-progression/pull/133), immutable head `b4c2eb8073bb7178a4fbac8e744cb456f6b8eaf2`.
 **Status:** isolated DRAFT, OFF by default, **not merged, deployed, game-tested or owner-approved**.
 
 ## Why this narrowly follows #132/#133
