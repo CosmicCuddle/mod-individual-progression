@@ -48,18 +48,16 @@ public:
         if (!player)
             return;
 
-        // Capture the optional actor-publication lease at login ENTRY,
-        // before any original Playerbots identity verification. The
-        // source must not cross a config-reload generation boundary.
-        IndividualProgression::F14ActorPublicationLoginLease const f14SourceLease =
-            sIndividualProgression->CaptureF14ActorPublicationLoginLease();
-
         // F14 identity invalidation must precede *every* new login,
         // including login when IP is disabled or the Player is not yet in
         // world. Otherwise an older verified bot GUID/epoch can survive a
         // settings change and be mistaken for this new login incarnation.
         // Forget also expires prior attack-lifecycle evidence. It never
         // awards stage, paid entitlements or conceals another character.
+        // Capture the opt-in publication lease BEFORE the old identity
+        // is revoked and BEFORE the original Playerbots verification.
+        IndividualProgression::F14ActorPublicationLoginLease const f14SourceLease =
+            sIndividualProgression->CaptureF14ActorPublicationLoginLease();
         sIndividualProgression->ForgetF14VerifiedRandomBotGroupIdentity(player);
 
         if (!sIndividualProgression->enabled || !player->IsInWorld())
