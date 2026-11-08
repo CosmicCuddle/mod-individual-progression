@@ -20,6 +20,11 @@ class AtomicActorReloadGenerationSource(unittest.TestCase):
             "#if defined(" + FLAG + ") && " + FLAG +
             " >= 1\nvoid IndividualProgression::Begin", 1
         )[0]
+        cls.capture = CPP.split(
+            "IndividualProgression::CaptureF14ActorPublicationLoginLease() const", 1
+        )[1].split("void IndividualProgression::BeginF14ActorPublicationConfigReload()", 1)[0]
+        cls.login = PLAYER.split("void OnPlayerLogin(Player* player) override", 1)[1].split(
+            "void OnPlayerLogout(Player* player) override", 1)[0]
         cls.begin = CPP.split(
             "void IndividualProgression::BeginF14ActorPublicationConfigReload()", 1
         )[1].split("void IndividualProgression::FinishF14ActorPublicationConfigReload(", 1)[0]
@@ -37,29 +42,39 @@ class AtomicActorReloadGenerationSource(unittest.TestCase):
         self.assertIn("#if defined(" + FLAG + ") && " + FLAG + " >= 1", CPP)
         self.assertIn("_f14ActorPublicationEnabled{false};", HDR)
 
-    def test_verification_captures_lease_before_mutable_player_facts(self):
-        w = self.writer
+    def test_caller_captures_lease_before_source_bot_verification(self):
+        c = self.capture
+        login = self.login
         self.assertIn(
-            "_f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);", w)
+            "_f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);", c)
         self.assertIn(
-            "_f14ActorPublicationEnabled.load(std::memory_order_acquire);", w)
-        self.assertLess(w.index("std::uint64_t const observedPublicationGeneration"),
-                        w.index("ObjectGuid const fullGuid = player->GetGUID();"))
-        self.assertLess(w.index("bool const publicationWasEnabled"),
-                        w.index("ObjectGuid const fullGuid = player->GetGUID();"))
+            "_f14ActorPublicationEnabled.load(std::memory_order_acquire);", c)
+        self.assertIn(
+            "f14SourceLease = sIndividualProgression->CaptureF14ActorPublicationLoginLease();",
+            login)
+        self.assertIn(
+            "player, sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()),\n"
+            "                f14SourceLease);", login)
+        self.assertLess(login.index("CaptureF14ActorPublicationLoginLease();"),
+                        login.index("ForgetF14VerifiedRandomBotGroupIdentity(player);"))
+        self.assertLess(login.index("CaptureF14ActorPublicationLoginLease();"),
+                        login.index("sRandomPlayerbotMgr.IsRandomBot("))
+        self.assertIn(
+            "F14ActorPublicationLoginLease sourceLease", self.writer.split("{", 1)[0])
+        self.assertNotIn("CaptureF14ActorPublicationLoginLease();", self.writer)
 
     def test_writer_rechecks_generation_under_existing_lock(self):
         w = self.writer
         self.assertIn("std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);", w)
         self.assertIn(
             "if (canPublishActor && _f14ActorPublicationEnabled.load(std::memory_order_acquire))", w)
-        self.assertIn("if (publicationWasEnabled &&", w)
-        self.assertIn("observedPublicationGeneration ==", w)
+        self.assertIn("if (sourceLease.publicationWasEnabled &&", w)
+        self.assertIn("sourceLease.generation ==", w)
         self.assertIn(
             "_f14ActorPublicationReloadGeneration.load(std::memory_order_acquire))", w)
         self.assertLess(w.index("std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock)"),
-                        w.index("if (publicationWasEnabled &&"))
-        self.assertLess(w.index("if (publicationWasEnabled &&"),
+                        w.index("if (sourceLease.publicationWasEnabled &&"))
+        self.assertLess(w.index("if (sourceLease.publicationWasEnabled &&"),
                         w.index("_f14VerifiedActorPublications.emplace("))
         self.assertIn("_f14VerifiedActorPublications.erase(guid);", w)
 
@@ -105,11 +120,11 @@ class AtomicActorReloadGenerationSource(unittest.TestCase):
     def test_mutations_removing_lease_gate_are_detected(self):
         w = self.writer
         self.assertNotIn(
-            "observedPublicationGeneration ==",
-            w.replace("observedPublicationGeneration ==", "true ||", 1))
+            "sourceLease.generation ==",
+            w.replace("sourceLease.generation ==", "true ||", 1))
         self.assertNotIn(
-            "if (publicationWasEnabled &&",
-            w.replace("if (publicationWasEnabled &&", "if (true &&", 1))
+            "if (sourceLease.publicationWasEnabled &&",
+            w.replace("if (sourceLease.publicationWasEnabled &&", "if (true &&", 1))
         b = self.begin
         self.assertNotIn(
             "previousGeneration + 1",
