@@ -20,6 +20,7 @@ public:
 
     Observed BeginLoginRead() const
     {
+        std::shared_lock<std::shared_mutex> lock(_lock);
         return {_generation.load(std::memory_order_acquire),
                 _enabled.load(std::memory_order_acquire)};
     }
@@ -36,6 +37,7 @@ public:
 
     void FinishReload(bool ipEnabled)
     {
+        std::unique_lock<std::shared_mutex> lock(_lock);
         if (_generation.load(std::memory_order_acquire) ==
             std::numeric_limits<std::uint64_t>::max())
             return;
