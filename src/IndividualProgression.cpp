@@ -691,20 +691,6 @@ void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(
 }
 
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
-IndividualProgression::F14ActorPublicationLoginLease
-IndividualProgression::CaptureF14ActorPublicationLoginLease() const
-{
-    // Capture before the original Playerbots login verification begins.
-    // A torn two-atomic snapshot can only fail closed: the writer compares
-    // generation again under the identity lock before publishing.
-    F14ActorPublicationLoginLease lease;
-    lease.generation =
-        _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);
-    lease.publicationWasEnabled =
-        _f14ActorPublicationEnabled.load(std::memory_order_acquire);
-    return lease;
-}
-
 void IndividualProgression::BeginF14ActorPublicationConfigReload()
 {
     // WHO/visibility readers and bot-login writers use the same mutex.
@@ -728,6 +714,22 @@ void IndividualProgression::FinishF14ActorPublicationConfigReload(bool ipEnabled
         std::numeric_limits<std::uint64_t>::max())
         return; // permanent safe OFF, never wrap back into a prior lease
     _f14ActorPublicationEnabled.store(ipEnabled, std::memory_order_release);
+}
+
+// Keep the original Begin/Finish adjacent and in their historic order.
+// The lease capture is still called at OnPlayerLogin ENTRY (not from writer).
+IndividualProgression::F14ActorPublicationLoginLease
+IndividualProgression::CaptureF14ActorPublicationLoginLease() const
+{
+    // Capture before the original Playerbots login verification begins.
+    // A torn two-atomic snapshot can only fail closed: the writer compares
+    // generation again under the identity lock before publishing.
+    F14ActorPublicationLoginLease lease;
+    lease.generation =
+        _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);
+    lease.publicationWasEnabled =
+        _f14ActorPublicationEnabled.load(std::memory_order_acquire);
+    return lease;
 }
 #endif
 
