@@ -90,6 +90,35 @@ class F14OptedCore6PositiveAdapter(unittest.TestCase):
         ):
             self.assertIn(needle, s)
 
+    def test_ordinary_viewer_is_not_gm_account_even_with_gm_mode_off(self):
+        path = "src/IndividualProgressionF14Core6PositiveRndbotAdapter.h"
+        original = subprocess.check_output(
+            ["git", "show", "a8d92ce4c867e53e6337765783956ce4f65e7022:" + path],
+            cwd=ROOT,
+        ).decode("utf-8")
+        updated = read(path)
+        # Real old-RED/new-GREEN, without modifying the owner-original pure
+        # policy or assuming toggled GM mode establishes account privilege.
+        self.assertNotIn("AccountMgr::IsPlayerAccount", original)
+        self.assertNotIn("sIndividualProgression->isGMAccount(ordinaryViewer)", original)
+        self.assertIn('#include "AccountMgr.h"', updated)
+        start = updated.index("static bool IsConservativePositiveViewer(")
+        end = updated.index("static CosmicIPF14Core6PositiveRndbot::Publication", start)
+        guard = updated[start:end]
+        self.assertIn(
+            "!AccountMgr::IsPlayerAccount(viewer->GetSession()->GetSecurity())", guard)
+        self.assertIn(
+            "sIndividualProgression->isGMAccount(ordinaryViewer)", guard)
+        self.assertIn("!viewer->IsInWorld() || viewer->IsGameMaster()", guard)
+        self.assertIn("!sIndividualProgression->isNormalAccount(ordinaryViewer)", guard)
+        self.assertLess(
+            guard.index("AccountMgr::IsPlayerAccount("),
+            guard.index("GetEffectiveProgression(ordinaryViewer)"))
+        self.assertLess(
+            guard.index("isGMAccount(ordinaryViewer)"),
+            guard.index("GetEffectiveProgression(ordinaryViewer)"))
+        self.assertIn("facts.confirmedNonGM = true;", guard)
+
     def test_who_is_cached_guid_race_only_and_never_target_player(self):
         s = read("src/IndividualProgressionF14Core6PositiveRndbotAdapter.h")
         start = s.index("bool OnF14ShouldExcludeWhoEntryForViewer(")
