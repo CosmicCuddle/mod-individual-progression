@@ -14,6 +14,7 @@
 #error "F14 positive Core6 policy requires the exact existing Core6 actor+WHO ABI"
 #endif
 
+#include "AccountMgr.h"
 #include "IndividualProgression.h"
 #include "IndividualProgressionGroupPolicy.h"
 #include "IndividualProgressionF14Core6PositiveRndbotViewerPolicy.h"
@@ -48,8 +49,15 @@ private:
             !viewer->GetSession() || viewer->GetSession()->IsHeadless())
             return false;
 
+        // GM mode may be OFF even when the actual account has administrator
+        // security. IP's "normal account" predicate excludes Bot/Excluded
+        // regex accounts but does NOT exclude GM accounts. Protect both the
+        // authenticated session security and IP's configured GM-account class.
+        if (!AccountMgr::IsPlayerAccount(viewer->GetSession()->GetSecurity()))
+            return false;
         Player* ordinaryViewer = const_cast<Player*>(viewer);
-        if (!sIndividualProgression->isNormalAccount(ordinaryViewer))
+        if (sIndividualProgression->isGMAccount(ordinaryViewer) ||
+            !sIndividualProgression->isNormalAccount(ordinaryViewer))
             return false;
 
         uint8 const effectiveStage =
