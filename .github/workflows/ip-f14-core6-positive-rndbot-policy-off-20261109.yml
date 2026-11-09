@@ -22,7 +22,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Exact seven changed paths, no config SQL DB schema or other module
+      - name: Exact eight changed paths, original adapter retained and conf SQL unchanged
         shell: bash
         run: |
           set -euo pipefail
@@ -33,6 +33,7 @@ jobs:
           printf '%s\n' \
             '.github/workflows/ip-f14-core6-positive-rndbot-policy-off-20261109.yml' \
             'src/IndividualProgressionPlayer.cpp' \
+            'src/IndividualProgressionF14Core6PositiveRndbotAdapter.h' \
             'src/IndividualProgressionF14Core6PositiveRndbotViewerPolicy.h' \
             'tests/f14_core6_positive_rndbot_viewer_policy.cpp' \
             'tests/test_ip_f14_core6_positive_rndbot_adapter_source.py' \
