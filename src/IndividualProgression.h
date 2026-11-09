@@ -463,6 +463,12 @@ public:
     bool isBotAccount(const Player* player);
     bool isBotAccount(uint32 accountId);
     bool isNormalAccount(Player* player);
+#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
+    // Only the existing login-thread-warmed classification may qualify a
+    // genuine human viewer. NEVER perform blocking Auth DB lookups from Core
+    // per-viewer actor/WHO visibility queries; cache MISS => FAIL VISIBLE.
+    bool TryReadF14CachedNormalHumanAccount(uint32 accountId);
+#endif
     bool isLockedExpansionGear(Player* player, ItemTemplate const* proto);
     void LoadAccountRegexes();
     void SyncBotsProgressionToLeader(Group* group);
