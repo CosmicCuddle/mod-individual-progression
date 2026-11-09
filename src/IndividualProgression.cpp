@@ -552,7 +552,7 @@ bool IndividualProgression::isNormalAccount(Player* player)
 #if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
 bool IndividualProgression::TryReadF14CachedNormalHumanAccount(uint32 accountId)
 {
-    // Core viewer actor/WHO callbacks MUST NOT call GetAccountMatch():
+    // Core viewer actor/WHO callbacks MUST NOT call the DB-loading matcher:
     // on a cache MISS that method runs blocking Auth DB GetName/GetSecurity.
     // Login-time account classification has already warmed this shared cache
     // for ordinary IP players; absent/invalidated cache is NOT human proof.
