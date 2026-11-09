@@ -80,7 +80,7 @@ class F14PositiveBridge(unittest.TestCase):
     def test_manual_positive_not_actually_default_on(self):
         s = read("src/IndividualProgressionPlayer.cpp")
         self.assertIn("!sIndividualProgression->f14ExperimentalRndbotPlayerVisibility", s)
-        conf = read("conf/individual_progression.conf.dist")
+        conf = read("conf/individualProgression.conf.dist")
         self.assertIn("IndividualProgression.F14.ExperimentalRndbotPlayerVisibility", conf)
         # The original IP137 dependency gate MUST remain: real Core refresh
         # is not in Core6 and both TBC race floor and old pilot force OFF.
