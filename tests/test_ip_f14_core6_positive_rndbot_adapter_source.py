@@ -172,7 +172,7 @@ class F14OptedCore6PositiveAdapter(unittest.TestCase):
         start = now.index(
             "#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT)",
             now.index("bool IndividualProgression::isNormalAccount("))
-        end = now.index("#endif", start) + len("#endif") + 1
+        end = now.index("#endif", start) + len("#endif") + 2  # two blank-line separators
         self.assertEqual(now[:start] + now[end:], original)
         conf = read("conf/individualProgression.conf.dist")
         self.assertIn("IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0", conf)
