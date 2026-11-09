@@ -1233,6 +1233,13 @@ public:
 };
 #endif
 
+// A separate C++ class, never the original false-only adapter, implements
+// the future positive Core6 policy only under an explicit additional build
+// macro; this keeps the old regression and ABI source exactly unchanged.
+#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
+#include "IndividualProgressionF14Core6PositiveRndbotAdapter.h"
+#endif
+
 // Experimental Core6 ABI adapter ONLY. It is not an F14 policy provider.
 // Both newer Core APIs interpret TRUE as HIDE; older IP observer returns TRUE
 // to ALLOW, so never forward the legacy Boolean into these callbacks.
@@ -1276,7 +1283,11 @@ void AddSC_mod_individual_progression_player()
     new IndividualPlayerProgression_GroupScript();
     new IndividualPlayerProgression_AccountScript();
 #if defined(COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT >= 1
+#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
+    new IndividualProgressionF14Core6PositiveRndbotAdapter();
+#else
     new IndividualProgressionF14Core6NegativeActorWhoAdapter();
+#endif
 #endif
 #if defined(COSMIC_F14_OBSERVER_HOOK_VERSION)
     new IndividualProgressionF14ObserverScript();
