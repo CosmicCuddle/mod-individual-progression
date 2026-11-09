@@ -4,7 +4,7 @@
 
 ## What this changes
 
-The original IP Core6 adapter in `src/IndividualProgressionPlayer.cpp` deliberately returned FALSE from `OnF14ShouldSuppressPlayerForViewer` and `OnF14ShouldExcludeWhoEntryForViewer` (TRUE **means HIDE** for Core6, unlike the old IP TRUE-means-ALLOW API). This child retains that exact FALSE behavior in **every ordinary build** and in the existing Core6/PB15/IP137/Naxx292/Services S4 build.
+The original IP Core6 adapter in `src/IndividualProgressionPlayer.cpp` deliberately returned FALSE from `OnF14ShouldSuppressPlayerForViewer` and `OnF14ShouldExcludeWhoEntryForViewer` (TRUE **means HIDE** for Core6, unlike the old IP TRUE-means-ALLOW API). This child keeps that original negative adapter **byte-identical**, retains its exact FALSE behavior in **every ordinary build**, and leaves the Core6/PB15/IP137/Naxx292/Services S4 build unchanged. An isolated NEW class implements the positive-only option.
 
 In a **separately deliberate, opt-in development-only build**, new macro `COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT>=1` requires:
 - the existing verified login publication compile macro `COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT>=1`;
@@ -20,10 +20,11 @@ Only in that multi-opted future prototype, the same IP-owned adapter *could* ret
 
 This is not an implicit assignment or port of Naxx/Claude's [test-only positive selected RNDbot pure policy #295](https://github.com/CosmicCuddle/Mod-Naxxramas-Core/pull/295). It reuses its owner's logical acceptance rule **within IP's runtime authority** while leaving Claude's Naxx implementation and Claude CS03-IP's **separate E1 pass-ended replay fix** [Issue #13](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13) untouched. Do NOT combine old true-means-ALLOW IP observer with Core6's new true-means-HIDE dispatcher or use IP GUID-only diagnostic caches without current login epoch.
 
-## Exact seven paths and evidence
+## Exact eight paths and evidence
 
 - New pure standard-C++ header `src/IndividualProgressionF14Core6PositiveRndbotViewerPolicy.h`.
-- Narrow opt-in conditional body in existing `src/IndividualProgressionPlayer.cpp`. The original IP137 implementation is byte-reconstructable by removing the new header guard and one adapter body; all earlier login, reward, group, Hunter, paid and stage logic remains original.
+- New `src/IndividualProgressionF14Core6PositiveRndbotAdapter.h`: distinct optional script class, compiled only under the new macro. It validates the real IP-published full GUID, cached/live race, current actor session account when available, nonzero login epoch and human paid-aware observer.
+- `src/IndividualProgressionPlayer.cpp`: **original false-only adapter class remains exactly byte-identical**. One new guarded include before it, and one guarded registration choice: original class in ordinary builds; separate positive class only in explicitly triple-opted builds. Removing these two inserts reconstructs original IP137 Player.cpp exactly. All earlier login, reward, group, Hunter, paid and stage logic remains original.
 - New `tests/f14_core6_positive_rndbot_viewer_policy.cpp` exercises exhaustive positive/negative, source/fullGUID/account/race/epoch, human, GM, self, headless, Vanilla vs TBC and absent proof cases under GCC/Clang C++17/C++20 normal/NDEBUG.
 - New `tests/test_ip_f14_core6_positive_rndbot_adapter_source.py` proves exact original restoration, runtime OFF, bridge prerequisites, actual IP positive-source function, WHO no-target-dereference, producer never calls Playerbots/DB from viewer worker.
 - One new scoped GitHub Actions workflow, this documentation and append-only Custom Modifications Register.
@@ -39,3 +40,7 @@ The current Core6 actual actor/WHO callbacks are **default FALSE** and intention
 **Integration plan:** (1) review the isolated IP adapter and original C++ policy/source tests, (2) obtain Claude E1 correction and trusted Core pass/refresh producer, (3) address combat/quest/loot/pet/DoT/corpse restoration and true stage8 birth, (4) run exact Core/PB/IP/Naxx/Services full native Worldserver with only deliberate experimental compile checks and flags OFF, (5) owner S5 installed extras, dirty tracked/untracked/**ignored** SQL, DB/DBC/client/rollback/restore evidence, (6) CosmicCuddle-approved disposable offline two-human + selected RNDbot 3.3.5a gameplay. Separate owner approval before merge/deploy/activation.
 
 **Rollback:** abandon this isolated draft and retain frozen IP137. All upstream and custom source, local SQL files, characters and live settings remain unchanged.
+
+## Strict negative adapter regression found and corrected (9 November 2026)
+
+The original first hosted [IP #138 CI #42622923884](https://github.com/CosmicCuddle/mod-individual-progression/actions/runs/42622923884) completed **FAILURE**: exact child diff and new positive pure C++ tests **PASSED**, but inherited `test_ip_f14_optin_publication_login_predicate` correctly rejected altering the original negative-only adapter and mentioning its publisher compile macro in `IndividualProgressionPlayer.cpp`. **This was a regression contract violation in the first draft, not a real game error.** The candidate has been redesigned rather than weakening or deleting the inherited safety tests: original Core6 false-only class remains byte-identical; optional new positive script class and publisher compiler prerequisites move into an independent header; the original compiled reader and publisher remain untouched. Updated source-contract asserts this exact preservation and the inherited IP136 test is rerun unchanged. New CI result must be checked before PASS claim.
