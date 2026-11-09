@@ -31,7 +31,7 @@ struct Publication
     // IP publisher; never accept race-only, no-socket or guessed bot identity.
     bool verifiedSelectedRandomBot = false;
     bool fullGuidMatches = false;
-    bool accountIdMatches = false;
+    bool currentAccountProven = false;
     bool raceMatches = false;
     bool nonzeroCurrentLoginEpoch = false;
     std::uint8_t publishedRace = 0;
@@ -48,7 +48,7 @@ constexpr bool ViewerIsVanilla(Viewer const& viewer)
 constexpr bool HasPositiveTargetProof(Publication const& source)
 {
     return source.verifiedSelectedRandomBot && source.fullGuidMatches &&
-           source.accountIdMatches && source.raceMatches &&
+           source.currentAccountProven && source.raceMatches &&
            source.nonzeroCurrentLoginEpoch &&
            (source.publishedRace == BloodElfRace ||
             source.publishedRace == DraeneiRace);
