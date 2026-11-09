@@ -84,7 +84,7 @@ class F14OptedCore6PositiveAdapter(unittest.TestCase):
             "actorSession && actorSession->IsHeadless() && accountId != 0",
             "!actor->IsGameMaster()",
             "!viewer->IsInWorld() || viewer->IsGameMaster()",
-            "sIndividualProgression->isNormalAccount(ordinaryViewer)",
+            "sIndividualProgression->TryReadF14CachedNormalHumanAccount(",
             "GetEffectiveProgression(ordinaryViewer)",
             "effectiveStage <= IndividualProgressionGroupPolicy::LastSupportedStage",
         ):
@@ -108,16 +108,48 @@ class F14OptedCore6PositiveAdapter(unittest.TestCase):
         self.assertIn(
             "!AccountMgr::IsPlayerAccount(viewer->GetSession()->GetSecurity())", guard)
         self.assertIn(
-            "sIndividualProgression->isGMAccount(ordinaryViewer)", guard)
+            "sIndividualProgression->TryReadF14CachedNormalHumanAccount(", guard)
+        self.assertIn("viewer->GetSession()->GetAccountId()", guard)
         self.assertIn("!viewer->IsInWorld() || viewer->IsGameMaster()", guard)
-        self.assertIn("!sIndividualProgression->isNormalAccount(ordinaryViewer)", guard)
+        self.assertNotIn("->isGMAccount(", guard)
+        self.assertNotIn("->isNormalAccount(", guard)
+        self.assertNotIn("->GetAccountMatch(", guard)
         self.assertLess(
             guard.index("AccountMgr::IsPlayerAccount("),
             guard.index("GetEffectiveProgression(ordinaryViewer)"))
         self.assertLess(
-            guard.index("isGMAccount(ordinaryViewer)"),
+            guard.index("TryReadF14CachedNormalHumanAccount("),
             guard.index("GetEffectiveProgression(ordinaryViewer)"))
         self.assertIn("facts.confirmedNonGM = true;", guard)
+
+    def test_old_ip139_auth_db_miss_red_and_new_cache_only_green(self):
+        adapter_path = "src/IndividualProgressionF14Core6PositiveRndbotAdapter.h"
+        old = subprocess.check_output(
+            ["git", "show", "e9ed33511a66bfe3207c7badfc4905c58b6c6f65:" + adapter_path],
+            cwd=ROOT,
+        ).decode("utf-8")
+        new = read(adapter_path)
+        self.assertIn("sIndividualProgression->isGMAccount(ordinaryViewer)", old)
+        self.assertIn("sIndividualProgression->isNormalAccount(ordinaryViewer)", old)
+        self.assertNotIn("TryReadF14CachedNormalHumanAccount(", old)
+        self.assertIn("TryReadF14CachedNormalHumanAccount(", new)
+        login = read("src/IndividualProgressionPlayer.cpp")
+        self.assertIn("if (!sIndividualProgression->isNormalAccount(player))", login)
+        cpp = read("src/IndividualProgression.cpp")
+        begin = cpp.index("bool IndividualProgression::TryReadF14CachedNormalHumanAccount(")
+        end = cpp.index("\n}\n#endif", begin)
+        body = cpp[begin:end]
+        self.assertIn("std::shared_lock<std::shared_mutex> lock(_accountMatchLock)", body)
+        self.assertIn("_accountMatchCache.find(accountId)", body)
+        self.assertIn("itr != _accountMatchCache.end()", body)
+        for needed in ("!itr->second.excluded", "!itr->second.bot", "!itr->second.gm"):
+            self.assertIn(needed, body)
+        for disallowed in ("GetAccountMatch(", "AccountMgr::", "CharacterDatabase",
+                           "LoginDatabase", "WorldDatabase", "AccountMgr::GetSecurity"):
+            self.assertNotIn(disallowed, body)
+        self.assertLess(body.index("if (!accountId)"), body.index("_accountMatchCache.find"))
+        self.assertIn("TryReadF14CachedNormalHumanAccount(uint32 accountId)",
+                      read("src/IndividualProgression.h"))
 
     def test_who_is_cached_guid_race_only_and_never_target_player(self):
         s = read("src/IndividualProgressionF14Core6PositiveRndbotAdapter.h")
@@ -133,9 +165,15 @@ class F14OptedCore6PositiveAdapter(unittest.TestCase):
             self.assertNotIn(forbidden, body)
 
     def test_off_default_and_original_refresh_gate_unchanged(self):
+        # All prior Core/IP behavior remains recoverable exactly after
+        # deleting only the new compile-gated cache-only reader.
         original = frozen("src/IndividualProgression.cpp")
         now = read("src/IndividualProgression.cpp")
-        self.assertEqual(now, original)
+        start = now.index(
+            "#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT)",
+            now.index("bool IndividualProgression::isNormalAccount("))
+        end = now.index("#endif", start) + len("#endif") + 1
+        self.assertEqual(now[:start] + now[end:], original)
         conf = read("conf/individualProgression.conf.dist")
         self.assertIn("IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0", conf)
         self.assertIn('LOG_ERROR("module", "F14 player observer pilot requires Core observer, cached WHO and immediate refresh hooks; forcing OFF")', now)
