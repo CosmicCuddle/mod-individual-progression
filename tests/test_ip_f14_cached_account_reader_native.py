@@ -88,7 +88,7 @@ int main() {
     std::atomic<unsigned> violations{0};
     std::vector<std::thread> workers;
     for (int t = 0; t < 6; ++t)
-        workers.emplace_back([&,t]{
+        workers.emplace_back([&]{
             for (int i = 0; i < 2000; ++i) {
                 if (ip.TryReadF14CachedNormalHumanAccount(0) ||
                     ip.TryReadF14CachedNormalHumanAccount(43) ||
