@@ -53,13 +53,15 @@ private:
         // security. IP's "normal account" predicate excludes Bot/Excluded
         // regex accounts but does NOT exclude GM accounts. Protect both the
         // authenticated session security and IP's configured GM-account class.
-        if (!AccountMgr::IsPlayerAccount(viewer->GetSession()->GetSecurity()))
-            return false;
-        Player* ordinaryViewer = const_cast<Player*>(viewer);
-        if (sIndividualProgression->isGMAccount(ordinaryViewer) ||
-            !sIndividualProgression->isNormalAccount(ordinaryViewer))
+        if (!AccountMgr::IsPlayerAccount(viewer->GetSession()->GetSecurity()) ||
+            !sIndividualProgression->TryReadF14CachedNormalHumanAccount(
+                viewer->GetSession()->GetAccountId()))
             return false;
 
+        // Existing IP login-time account classification warms the cache.
+        // A missing/invalidated account entry is unknown; do NOT call the
+        // blocking GetAccountMatch/isGMAccount/isNormalAccount here.
+        Player* ordinaryViewer = const_cast<Player*>(viewer);
         uint8 const effectiveStage =
             sIndividualProgression->GetEffectiveProgression(ordinaryViewer);
         facts.confirmedNormalHumanAccount = true;
