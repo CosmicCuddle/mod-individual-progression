@@ -1,18 +1,6 @@
 #include "IndividualProgression.h"
 #include "IndividualProgressionGroupPolicy.h"
 #include "IndividualProgressionF14LoginPolicy.h"
-// The independent Core6 adapter remains default-FALSE. Only a separately
-// compiled, IP-verified, explicit positive development build may model
-// concealment decisions. Core visibility refresh and gameplay are NOT ready.
-#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
-#if !defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) || COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT < 1
-#error "F14 positive Core6 policy requires the current-login verified actor publication experiment"
-#endif
-#if !defined(COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT) || COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT < 1
-#error "F14 positive Core6 policy requires the exact existing Core6 actor+WHO adapter"
-#endif
-#include "IndividualProgressionF14Core6PositiveRndbotViewerPolicy.h"
-#endif
 // Optional Playerbots dependency: the original IP fork can build without it.
 #if __has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
 #include "../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h"
@@ -1245,13 +1233,19 @@ public:
 };
 #endif
 
+// A separate C++ class, never the original false-only adapter, implements
+// the future positive Core6 policy only under an explicit additional build
+// macro; this keeps the old regression and ABI source exactly unchanged.
+#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
+#include "IndividualProgressionF14Core6PositiveRndbotAdapter.h"
+#endif
+
 // Experimental Core6 ABI adapter ONLY. It is not an F14 policy provider.
 // Both newer Core APIs interpret TRUE as HIDE; older IP observer returns TRUE
 // to ALLOW, so never forward the legacy Boolean into these callbacks.
 // The correct unified IP/Playerbots producer and restoration rights are not
 // implemented. This class is entirely absent from ordinary builds.
-// On the ORIGINAL compile-only opt-in, both callbacks remain FALSE.
-// A second, explicitly gated development-only positive policy is separate.
+// On explicit compile-only opt-in, both callbacks STILL always return FALSE.
 #if defined(COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT >= 1
 class IndividualProgressionF14Core6NegativeActorWhoAdapter final : public WorldObjectScript
 {
@@ -1261,114 +1255,24 @@ public:
             {WORLDOBJECTHOOK_ON_F14_VIEWER_PLAYER_SUPPRESSION_QUERY,
              WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY}) { }
 
-#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
-private:
-    static bool IsConservativePositiveViewer(
-        Player const* viewer, ObjectGuid const& targetGuid,
-        CosmicIPF14Core6PositiveRndbot::Viewer& facts)
-    {
-        // A live ordinary non-GM human, never a headless player or self. The
-        // separate IP effective stage includes character-paid entitlement.
-        // Legacy f14ExperimentalRndbotPlayerVisibility is non-atomic, so
-        // this pilot is NOT authorised for a live map/WHO worker until
-        // concurrent config reload and immediate refresh are reviewed.
-        if (!sIndividualProgression->enabled ||
-            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
-            !viewer || !targetGuid || viewer->GetGUID() == targetGuid ||
-            !viewer->IsInWorld() || viewer->IsGameMaster() ||
-            !viewer->GetSession() || viewer->GetSession()->IsHeadless())
-            return false;
-
-        Player* normalViewer = const_cast<Player*>(viewer);
-        if (!sIndividualProgression->isNormalAccount(normalViewer))
-            return false;
-        uint8 const effectiveStage =
-            sIndividualProgression->GetEffectiveProgression(normalViewer);
-        facts.confirmedNormalHumanAccount = true;
-        facts.confirmedNonGM = true;
-        facts.activeNonHeadlessSession = true;
-        facts.inWorld = true;
-        facts.confirmedNotSelf = true;
-        facts.effectiveStageKnown =
-            effectiveStage <= IndividualProgressionGroupPolicy::LastSupportedStage;
-        facts.effectiveStage = effectiveStage;
-        return CosmicIPF14Core6PositiveRndbot::ViewerIsVanilla(facts);
-    }
-
-    static CosmicIPF14Core6PositiveRndbot::Publication ReadVerifiedPublication(
-        ObjectGuid const& targetGuid, uint8 claimedRace, uint32 liveAccountId)
-    {
-        CosmicIPF14Core6PositiveRndbot::Publication proof;
-        IndividualProgression::F14VerifiedActorPublication published;
-        if (!sIndividualProgression->TryReadF14VerifiedActorPublication(
-                targetGuid, published))
-            return proof;
-
-        // WHO's cached row has NO account field. For WHO, liveAccountId==0
-        // means rely ONLY on the publisher's positively verified nonzero
-        // account and current-login epoch, never invent a cache account.
-        proof.verifiedSelectedRandomBot = true;
-        proof.fullGuidMatches = published.fullGuid == targetGuid;
-        proof.currentAccountProven = published.accountId != 0 &&
-            (!liveAccountId || liveAccountId == published.accountId);
-        proof.raceMatches = published.race == claimedRace;
-        proof.nonzeroCurrentLoginEpoch = published.loginEpoch != 0;
-        proof.publishedRace = published.race;
-        return proof;
-    }
-public:
-#endif
-
-    // Core6 ABI TRUE means HIDE; the older IP observer TRUE means ALLOW.
-    // Normal builds and source-only native builds stay EXACTLY false. An
-    // explicit opt-in does not itself authorise actual hiding or restore.
+    // New Core6 actor client CREATE/OUT query: TRUE would hide a Player.
+    // NO positive identity publication, current-epoch, human rights or
+    // previously-hidden restoration proof is supplied yet. Fail visible.
     bool OnF14ShouldSuppressPlayerForViewer(
-        Player const* viewer, Player const* actor) override
+        Player const* /*viewer*/, Player const* /*actor*/) override
     {
-#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
-        CosmicIPF14Core6PositiveRndbot::Viewer viewerFacts;
-        if (!actor || !IsConservativePositiveViewer(
-                viewer, actor->GetGUID(), viewerFacts) ||
-            (actor->getRace() != RACE_BLOODELF &&
-             actor->getRace() != RACE_DRAENEI))
-            return false;
-
-        WorldSession const* actorSession = actor->GetSession();
-        uint32 const accountId = actorSession ? actorSession->GetAccountId() : 0;
-        auto const proof = ReadVerifiedPublication(
-            actor->GetGUID(), actor->getRace(), accountId);
-        return CosmicIPF14Core6PositiveRndbot::HideActor(
-            viewerFacts, proof, actor->IsInWorld(),
-            actorSession && actorSession->IsHeadless() && accountId != 0,
-            !actor->IsGameMaster());
-#else
-        (void)viewer;
-        (void)actor;
         return false;
-#endif
     }
 
-    // Core6 cached WHO callback NEVER dereferences a target Player. Its
-    // race snapshot must exactly match IP's revocable publication; unknown
-    // identities/humans/Altbots are always allowed. No client ACK claimed.
+    // New Core5 cached WHO query: TRUE would EXCLUDE a WHO row.
+    // Older IP OnWhoListEntryCanBeSeenByPlayer uses TRUE=ALLOW and is
+    // NOT compatible. The cache itself cannot verify target epoch, account,
+    // genuine RandomBot origin or active lifetime; fail visible.
     bool OnF14ShouldExcludeWhoEntryForViewer(
-        Player const* viewer, ObjectGuid const& targetGuid,
-        uint32 cachedRace) override
+        Player const* /*viewer*/, ObjectGuid const& /*targetGuid*/,
+        uint32 /*cachedRace*/) override
     {
-#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
-        CosmicIPF14Core6PositiveRndbot::Viewer viewerFacts;
-        if (!IsConservativePositiveViewer(viewer, targetGuid, viewerFacts) ||
-            (cachedRace != RACE_BLOODELF && cachedRace != RACE_DRAENEI))
-            return false;
-        auto const proof = ReadVerifiedPublication(
-            targetGuid, static_cast<uint8>(cachedRace), 0);
-        return CosmicIPF14Core6PositiveRndbot::ExcludeWho(viewerFacts, proof);
-#else
-        (void)viewer;
-        (void)targetGuid;
-        (void)cachedRace;
         return false;
-#endif
     }
 };
 #endif
@@ -1379,7 +1283,11 @@ void AddSC_mod_individual_progression_player()
     new IndividualPlayerProgression_GroupScript();
     new IndividualPlayerProgression_AccountScript();
 #if defined(COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT >= 1
+#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
+    new IndividualProgressionF14Core6PositiveRndbotAdapter();
+#else
     new IndividualProgressionF14Core6NegativeActorWhoAdapter();
+#endif
 #endif
 #if defined(COSMIC_F14_OBSERVER_HOOK_VERSION)
     new IndividualProgressionF14ObserverScript();
