@@ -134,9 +134,14 @@ class ActualIPCacheOnlyReader(unittest.TestCase):
                         if release:
                             cmd += ["-DNDEBUG"]
                         cmd += [str(source_path), "-o", str(exe)]
-                        subprocess.run(cmd, cwd=ROOT, check=True, capture_output=True, text=True)
-                        run = subprocess.run([str(exe)], cwd=ROOT, check=True,
-                                             capture_output=True, text=True)
+                        build = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+                        self.assertEqual(build.returncode, 0,
+                            "ACTUAL extracted C++ compiler diagnostic (" + compiler + " " + standard +
+                            " release=" + str(release) + "):\n" + build.stderr)
+                        run = subprocess.run([str(exe)], cwd=ROOT, capture_output=True,
+                                             text=True)
+                        self.assertEqual(run.returncode, 0,
+                            "ACTUAL extracted C++ runtime diagnostic: " + run.stderr)
                         self.assertIn("0 failures; no Auth DB", run.stdout)
 
     def test_original_old_ip139_uses_blocking_auth_on_cache_miss(self):
