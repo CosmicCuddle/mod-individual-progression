@@ -1250,7 +1250,8 @@ public:
 // to ALLOW, so never forward the legacy Boolean into these callbacks.
 // The correct unified IP/Playerbots producer and restoration rights are not
 // implemented. This class is entirely absent from ordinary builds.
-// On explicit compile-only opt-in, both callbacks STILL always return FALSE.
+// On the ORIGINAL compile-only opt-in, both callbacks remain FALSE.
+// A second, explicitly gated development-only positive policy is separate.
 #if defined(COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT >= 1
 class IndividualProgressionF14Core6NegativeActorWhoAdapter final : public WorldObjectScript
 {
@@ -1328,8 +1329,8 @@ public:
         CosmicIPF14Core6PositiveRndbot::Viewer viewerFacts;
         if (!actor || !IsConservativePositiveViewer(
                 viewer, actor->GetGUID(), viewerFacts) ||
-            actor->getRace() != RACE_BLOODELF &&
-                actor->getRace() != RACE_DRAENEI)
+            (actor->getRace() != RACE_BLOODELF &&
+             actor->getRace() != RACE_DRAENEI))
             return false;
 
         WorldSession const* actorSession = actor->GetSession();
