@@ -43,6 +43,10 @@ class F14PositiveBridge(unittest.TestCase):
                                 after.index("class IndividualProgressionF14Core6NegativeActorWhoAdapter"))
         new_end = after.index("\n};\n#endif", new_start)
         after = after[:new_start] + before[old_start:old_end] + after[new_end:]
+        after = after.replace(
+            "// On the ORIGINAL compile-only opt-in, both callbacks remain FALSE.\n"
+            "// A second, explicitly gated development-only positive policy is separate.",
+            "// On explicit compile-only opt-in, both callbacks STILL always return FALSE.")
         self.assertEqual(after, before)
 
     def test_manual_positive_build_requires_both_existing_independent_proofs(self):
