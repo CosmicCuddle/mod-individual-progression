@@ -1,0 +1,96 @@
+name: IP F14 Core6 verified RNDbot actor WHO positive policy (OFF)
+
+on:
+  push:
+    branches:
+      - feature/cs01-ip137-f14-core6-positive-rndbot-policy-off-20261109
+  pull_request:
+    branches:
+      - fix/cs01-ip136-f14-stage8-invalid-cap-denial-20261108
+
+permissions:
+  contents: read
+
+jobs:
+  ip-f14-core6-positive-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout immutable IP137 parent and isolated new candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact seven changed paths, no config SQL DB schema or other module
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=7ca897e2397216405f910f46e6a12e5b4e0b987b
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort >/tmp/actual-f14
+          printf '%s\n' \
+            '.github/workflows/ip-f14-core6-positive-rndbot-policy-off-20261109.yml' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'src/IndividualProgressionF14Core6PositiveRndbotViewerPolicy.h' \
+            'tests/f14_core6_positive_rndbot_viewer_policy.cpp' \
+            'tests/test_ip_f14_core6_positive_rndbot_adapter_source.py' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/F14_CORE6_POSITIVE_RNDBOT_POLICY_20261109.md' \
+            | sort >/tmp/expected-f14
+          diff -u /tmp/expected-f14 /tmp/actual-f14
+          test -z "$(git diff --name-only "$base" HEAD -- conf data sql src/IndividualProgression.cpp src/IndividualProgression.h src/IndividualProgressionF14LifecycleScript.cpp)"
+          test "$(git rev-parse HEAD:src/IndividualProgression.cpp)" = \
+               "$(git rev-parse "$base":src/IndividualProgression.cpp)"
+          test "$(git rev-parse HEAD:src/IndividualProgression.h)" = \
+               "$(git rev-parse "$base":src/IndividualProgression.h)"
+          test -z "$(git diff --name-only "$base" HEAD -- src/IndividualProgressionF14LoginPolicy.h)"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0' conf/individualProgression.conf.dist
+
+      - name: Exact parent-byte source reconstitution and default FALSE negative paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p test_ip_f14_core6_positive_rndbot_adapter_source.py -v
+
+      - name: Actual new pure policy GCC Clang C++17 C++20 normal NDEBUG
+        shell: bash
+        run: |
+          set -euo pipefail
+          for cc in g++ clang++; do
+            for std in c++17 c++20; do
+              for mode in normal ndebug; do
+                flags=()
+                if [[ "$mode" == ndebug ]]; then flags=(-DNDEBUG); fi
+                "$cc" -std="$std" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  tests/f14_core6_positive_rndbot_viewer_policy.cpp \
+                  -o /tmp/ip-core6-verified-rndbot-policy
+                /tmp/ip-core6-verified-rndbot-policy
+              done
+            done
+          done
+
+      - name: Original IP137 invalid-stage, IP136 login and protected group/cache tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for t in \
+            test_ip_f14_stage8_invalid_cap_native.py \
+            test_ip_f14_optin_publication_login_predicate.py \
+            test_ip_f14_actor_publication_reload_generation_source.py \
+            test_ip_f14_group_floor_source.py; do
+            test -f "tests/$t"
+            python3 -B -m unittest discover -s tests -p "$t" -v
+          done
+
+      - name: Document incomplete live compatibility and off-by-default invariant
+        if: always()
+        run: |
+          echo 'No actual Core6 actor or cached WHO suppression was exercised on a running Worldserver.'
+          echo 'New adapter is DISABLED without a new compile-time positive macro and existing verified-publication macro.'
+          echo 'IP source runtime flag is also forced OFF without a genuine Core immediate refresh ABI.'
+          echo 'Human, Altbot, Unknown and non-Vanilla viewers remain visible in the synthetic policy.'
+          echo 'No trusted real Core visibility-pass token, NPC restore, combat/loot/DoT rights, client ACK or stage8 birth.'
+          echo 'No changed conf/SQL/DB/DBC/client, actor records, production, live source or owner host.'
