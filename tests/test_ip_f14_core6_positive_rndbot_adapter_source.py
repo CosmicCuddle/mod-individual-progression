@@ -85,7 +85,8 @@ class F14OptedCore6PositiveAdapter(unittest.TestCase):
             "!actor->IsGameMaster()",
             "!viewer->IsInWorld() || viewer->IsGameMaster()",
             "sIndividualProgression->TryReadF14CachedNormalHumanAccount(",
-            "GetEffectiveProgression(ordinaryViewer)",
+            "GetPlayerProgressionFromQuests(ordinaryViewer)",
+            "rawStage >= CosmicIPF14Core6PositiveRndbot::FirstTbcStage",
             "effectiveStage <= IndividualProgressionGroupPolicy::LastSupportedStage",
         ):
             self.assertIn(needle, s)
@@ -116,10 +117,10 @@ class F14OptedCore6PositiveAdapter(unittest.TestCase):
         self.assertNotIn("->GetAccountMatch(", guard)
         self.assertLess(
             guard.index("AccountMgr::IsPlayerAccount("),
-            guard.index("GetEffectiveProgression(ordinaryViewer)"))
+            guard.index("GetPlayerProgressionFromQuests(ordinaryViewer)"))
         self.assertLess(
             guard.index("TryReadF14CachedNormalHumanAccount("),
-            guard.index("GetEffectiveProgression(ordinaryViewer)"))
+            guard.index("GetPlayerProgressionFromQuests(ordinaryViewer)"))
         self.assertIn("facts.confirmedNonGM = true;", guard)
 
     def test_old_ip139_auth_db_miss_red_and_new_cache_only_green(self):
@@ -150,6 +151,41 @@ class F14OptedCore6PositiveAdapter(unittest.TestCase):
         self.assertLess(body.index("if (!accountId)"), body.index("_accountMatchCache.find"))
         self.assertIn("TryReadF14CachedNormalHumanAccount(uint32 accountId)",
                       read("src/IndividualProgression.h"))
+
+    def test_ip140_paid_effective_stage_auth_db_reentry_removed(self):
+        # Parent #140 could call GetEffectiveProgression -> paid expansion
+        # -> normal-account cache miss -> AccountMgr Auth DB after reload.
+        path = "src/IndividualProgressionF14Core6PositiveRndbotAdapter.h"
+        old = subprocess.check_output(
+            ["git", "show",
+             "428c3c46e225095cbebd3a08022be504d8fbfb10:" + path],
+            cwd=ROOT, text=True)
+        now = read(path)
+        self.assertIn("GetEffectiveProgression(ordinaryViewer)", old)
+        self.assertNotIn("GetPlayerProgressionFromQuests(ordinaryViewer)", old)
+        self.assertNotIn("GetEffectiveProgression(ordinaryViewer)", now)
+        self.assertIn("GetPlayerProgressionFromQuests(ordinaryViewer)", now)
+        begin = now.index("static bool IsConservativePositiveViewer(")
+        end = now.index("static CosmicIPF14Core6PositiveRndbot::Publication", begin)
+        guard = now[begin:end]
+        self.assertNotIn("->GetEffectiveProgression(", guard)
+        self.assertNotIn("->GetExpansionFacts(", guard)
+        self.assertNotIn("->isNormalAccount(", guard)
+        self.assertNotIn("->isGMAccount(", guard)
+        self.assertNotIn("->GetAccountMatch(", guard)
+        self.assertLess(guard.index("TryReadF14CachedNormalHumanAccount("),
+                        guard.index("GetPlayerProgressionFromQuests("))
+        self.assertLess(guard.index("GetPlayerProgressionFromQuests("),
+                        guard.index("rawStage >= CosmicIPF14Core6PositiveRndbot::FirstTbcStage"))
+        self.assertLess(guard.index("rawStage >= CosmicIPF14Core6PositiveRndbot::FirstTbcStage"),
+                        guard.index("facts.confirmedNormalHumanAccount = true;"))
+        source = read("src/IndividualProgression.cpp")
+        method = source.split("uint8 IndividualProgression::GetPlayerProgressionFromQuests(", 1)[1].split(
+            "bool IndividualProgression::hasPassedProgression(", 1)[0]
+        self.assertIn("GetQuestStatus(PROGRESSION_QUEST)", method)
+        for disallowed in ("GetAccountMatch(", "AccountMgr", "GetExpansionFacts(",
+                           "GetEffectiveProgression(", "LoginDatabase", "WorldDatabase"):
+            self.assertNotIn(disallowed, method)
 
     def test_who_is_cached_guid_race_only_and_never_target_player(self):
         s = read("src/IndividualProgressionF14Core6PositiveRndbotAdapter.h")
