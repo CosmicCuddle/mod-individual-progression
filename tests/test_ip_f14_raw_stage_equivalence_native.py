@@ -16,6 +16,7 @@ PROGRAM = r"""
 #include "IndividualProgressionExpansionPolicy.h"
 #include "IndividualProgressionF14Core6PositiveRndbotViewerPolicy.h"
 #include <cstdint>
+#include <initializer_list>
 #include <cstdio>
 namespace E = IndividualProgressionExpansionPolicy;
 namespace V = CosmicIPF14Core6PositiveRndbot;
