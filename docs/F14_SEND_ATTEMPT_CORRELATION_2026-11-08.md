@@ -62,7 +62,10 @@ The pass token is caller-supplied, opaque, nonzero and strictly increasing per v
 | Candidate or viewer capacity overflow | `Capacity`; the whole table is poisoned and drops all candidates, with no eviction or partial guess |
 | Restore owed for OUT, or not owed for CREATE | refused |
 | Global freeze, at nomination or send | `GlobalFreeze`; nothing consumed or upgraded |
-| Creature retired, map unloaded, viewer rights or era changed, session ended, pass ended or cancelled | candidates dropped, so a later send finds `NoCandidate` |
+| Creature retired, map unloaded, viewer rights or era changed, session ended | candidates dropped, so a later send finds `NoCandidate` |
+| Explicit pass end/cancel of the active token | candidate dropped; a late same-token send returns `PassClosed`, a same-token re-nomination poisons that viewer session |
+| Stale end of older pass | `StaleToken` with no mutation to the newer active pass |
+| Future/reordered end | `TokenReorderedOrReused` and viewer-only poison; no evidence upgrade |
 
 **Expiry is explicit only.** A candidate expires on an observed newer token for the same viewer session (via `ObserveSuccessorPass`, or a nomination carrying it), or on the explicit events above. Pass end and cancellation are externally supplied hypothetical events, because no Core producer exists. A send call is never treated as pass completion or delivery. A candidate can only match the viewer's current token, so it can't be matched indefinitely across passes.
 
@@ -118,3 +121,18 @@ Any future owner-approved offline test must preserve tracked, untracked **and ig
 ## Rollback
 
 Close the DRAFT or delete the branch. Nothing is compiled into the Worldserver. No host, database, config or client was touched.
+
+
+## 10 November 2026 — CS01 Maintenance temporary ownership: closed pass replay repair (DRAFT, OFF)
+
+**Context:** CosmicCuddle temporarily reassigned unfinished CS03-IP E1 work to CS01 while Claude is on break. Preserve Claude's original #131 and branch. This section documents a separate proposed six-path child, not production activation. Coordination: [Issue #13](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/13).
+
+**Old confirmed source defect:** previously, `ObservePassEnded` and `CancelPass` dropped candidates but left `lastToken` open. Later `Nominate` accepted the same closed token and a matching `Correlate` reported a successful *send-call* correlation, violating pass lifetime. An event replay is not proof of real packet delivery.
+
+**New pure-model rule:** each `ViewerPass` records `closedThrough`. A normal active `ObservePassEnded` or `CancelPass` records that token as closed and discards only that pass's candidates. A late send of the closed active token returns `PassClosed` with no match. Re-nominating or explicitly re-opening that closed token returns `TokenReorderedOrReused` and poisons **that viewer session only**. A strictly newer token remains valid if the viewer was not poisoned. Ends older than the current active token return `StaleToken` without touching the newer pass; future/reordered ends poison only that viewer. An end for an unknown viewer stores its closed token without inventing an active pass, subject to bounded capacity. Duplicate active end returns `PassClosed`. Invalid epoch, zero token and table-overflow rules remain fail closed. Multiple different creatures can be nominated under one **still open** token.
+
+**Old-RED/new-GREEN protection:** the workflow compiles exactly the same old-API C++ behavior reproducer against the pristine #131 header and the proposed header, using GCC/Clang C++17/C++20. The old build MUST compile but exit with a reproducible unsafe replay match; the new build MUST compile and exit successfully with no match. A compile failure solely from a changed enum or return signature is never accepted as old-RED. Native suite also checks unknown/stale/future end, duplicate end, cancellation, multi-creature pass and #94 restore-debt invariance. **At authoring, hosted Actions must still be independently checked for terminal success before calling these results PASS.**
+
+**Core/source limitation:** newer owner-Core draft #8/#9 proposes default-OFF notifier pass and exact batch GUID send-CALL producers, but this pure table is **unwired** and knows no verified present Core listener/refresh ABI, delivery acknowledgement, current creature incarnation or observer epoch. In particular the immediate `Player::UpdateVisibilityOf(WorldObject*)` direct `DestroyForPlayer`/`SendUpdateToPlayer` path is separate from the batch notifier and **cannot inherit its send evidence**. Never clear any #94 `PriorHiddenLedger` owed restore on Begin/SendCall/End, cancellation or this correlation. Worldserver/native, 3.3.5a two-human gameplay, owner S5 installed source/DB/SQL/DBC/client and backup restore remain release blockers. F14 and paid features OFF.
+
+**Rollback:** close this isolated DRAFT and abandon its child branch. Original #131 and #94/#103/#104 stay unchanged; no owner host, account data, SQL, config, packet format or client touched.
