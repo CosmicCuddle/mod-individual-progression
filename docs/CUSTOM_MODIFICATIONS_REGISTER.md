@@ -869,3 +869,16 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 | Config / SQL / DBC / client | None. No Core, Playerbots, Naxx or Services edit. All F14 and paid flags stay OFF. Core8/Core9 remain unwired OFF producers; this header still has no pass-token producer. |
 | Tests / evidence | Native model plus source contracts. New and tightened checks are run against unmodified `1a82d7ec` (behavioural RED) and against this head (GREEN). No Worldserver, no deploy. |
 | Rollback | Close this draft. #141 and the #94 ledger stay as they were. |
+
+
+## IP-F14-CORE9-E1-NEGATIVE-CONTRACT-CS01-20261110 — Core9-shaped refusal rehearsal (TEST ONLY)
+
+| Field | Record |
+| --- | --- |
+| Owner / status | CosmicCuddle; CS01 isolated **DRAFT test-only** child of frozen Grok [IP #143](https://github.com/CosmicCuddle/mod-individual-progression/pull/143) at `e92f6e0e4ecc81d0656d5e66e468a9b13c467478`; prior commits and runtime unchanged. |
+| Intended behavior | Core9 offers a process-global pass token and per-creature GUID **after** batched SendDirectMessage, but lacks safe prior-F14 decision/nomination with token, verified human viewer epoch, current incarnation, and a registered E1 consumer. Rehearse only the **no-evidence** outcomes for epoch zero, no prior suppression, post-send without pre-send candidate, direct route, global token gaps, hypothetical nested pass, and 257 unknown Ends. No synthetic positive correlation or restore debt discharge. |
+| Files / owner | `tests/f14_core9_e1_negative_contract.cpp`, `tests/test_ip_f14_core9_e1_negative_contract_source.py`, `.github/workflows/ip-f14-core9-e1-negative-contract-20261110.yml`, **this append-only register entry**. No new source/header/config changes. |
+| Dependencies / risks | Source model compiled against IP143 header; expected Core9 shape from [Core #9](https://github.com/CosmicCuddle/azerothcore-wotlk/pull/9). **NO CORE LISTENER**, no executable pre-send F14 nomination, incomplete session-end and direct path, no client ACK; global viewer slots may poison at 257. This tests safety refusals, not live functionality. |
+| Config / SQL / DBC / client | None. No owner host, Core, PB, Naxx, Services, SQL/DB, DBC, client, character or runtime flag change. All F14/paid flags OFF. |
+| Tests / status | New native C++ and source test workflow on isolated head, require hosted GCC/Clang C++17/20 normal/NDEBUG **terminal success** before any PASS claim. Not a Worldserver compile/link, S5 inventory, backup/restore or S6 gameplay test. |
+| Rollback | Abandon/close this unmerged test-only child. All original custom features and ledger remain unchanged; production deployment is separately gated on owner approval, exact native build, installed-source inventory and restorable backups. |
