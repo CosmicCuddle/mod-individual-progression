@@ -87,7 +87,7 @@ class F14OptedCore6PositiveAdapter(unittest.TestCase):
             "sIndividualProgression->TryReadF14CachedNormalHumanAccount(",
             "GetPlayerProgressionFromQuests(ordinaryViewer)",
             "rawStage >= CosmicIPF14Core6PositiveRndbot::FirstTbcStage",
-            "effectiveStage <= IndividualProgressionGroupPolicy::LastSupportedStage",
+            "rawStage <= IndividualProgressionGroupPolicy::LastSupportedStage",
         ):
             self.assertIn(needle, s)
 
