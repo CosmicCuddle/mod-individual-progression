@@ -1,7 +1,10 @@
 // Core9-shaped F14 E1 failure-boundary model: no production listener or packet.
 // Real Core9 provides post-send batch GUID + process-global pass token, but no
 // verified human epoch, creature incarnation, prior-F14 nomination or client ACK.
-// All checks here MUST refuse/close; a synthetic "Matched" is not acceptable.
+// All correlations in this rehearsal MUST refuse/close; actual Core9 cannot
+// supply positive provenance. The pure header WOULD match synthetic fabricated
+// positive pre-send facts fed after a send. The protection is procedural and
+// requires a real future Core producer; this test does not prove otherwise.
 #include "IndividualProgressionF14SendAttemptCorrelation.h"
 #include <cstdint>
 #include <cstdio>
@@ -36,6 +39,15 @@ namespace
         return f;
     }
 
+    // TEST-ONLY fabricated positive facts. Core9 cannot supply these honestly.
+    // Use solely to prove closed/untagged routes refuse even with candidates.
+    C::NominationFacts SyntheticPrior(P::ViewerKey viewer)
+    {
+        C::NominationFacts f = NoPrior(viewer);
+        f.priorF14SuppressionRecorded = true;
+        return f;
+    }
+
     C::SendFacts Tagged(P::ViewerKey viewer, std::uint64_t token, bool batch = true)
     {
         C::SendFacts f{};
@@ -54,6 +66,7 @@ namespace
     void NoHumanEpochCannotBecomeEvidence()
     {
         Table t;
+        // Nonzero epochs below are synthetic values, NOT Core9 authentication.
         P::ViewerKey const unknownEpoch{alice.guidRaw, 0};
         CHECK(t.ObservePassEnded(unknownEpoch, 91) == C::Result::InvalidKey);
         CHECK(t.Nominate(unknownEpoch, creature, 8, C::Direction::OutOfRange, 91,
@@ -71,11 +84,13 @@ namespace
         CHECK(t.Viewers() == 0 && t.Candidates() == 0);
     }
 
-    void PostSendGuidCannotSelfNominate()
+    void PostSendGuidWithoutNominationFindsNothing()
     {
         Table t;
         // Core9's GUID event is already AFTER the real SendDirectMessage.
         // There was no earlier token+epoch+incarnation+F14-caused nomination.
+        // This test does NOT prove the table rejects a fabricated post-send
+        // Nominate: a matching synthetic prior=true nomination WOULD match.
         CHECK(t.Correlate(Tagged(alice, 100)).result == C::Result::NoCandidate);
         CHECK(t.ObservePassEnded(alice, 100) == C::Result::PassAccepted);
         CHECK(t.Correlate(Tagged(alice, 100)).result == C::Result::PassClosed);
@@ -88,34 +103,42 @@ namespace
         Table t;
         // Direct Player::UpdateVisibilityOf(WorldObject*) has no batch pass token.
         // Do not borrow a prior batch token or mark a normal Core send as F14.
+        CHECK(t.Nominate(alice, creature, 8, C::Direction::OutOfRange, 55,
+                         SyntheticPrior(alice)) == C::Result::Nominated);
+        CHECK(t.Candidates() == 1);
         CHECK(t.Correlate(Tagged(alice, 55, false)).result == C::Result::Unattributed);
-        CHECK(t.Candidates() == 0 && t.Viewers() == 0);
+        CHECK(t.Candidates() == 1); // direct refusal did NOT consume batch candidate
+        CHECK(t.Count(C::Result::Matched) == 0);
     }
 
     void GlobalTokensAcrossViewersStayUnmatched()
     {
         Table t;
         // One process-global Core9 token sequence: not per-viewer or contiguous.
-        CHECK(t.ObservePassEnded(alice, 300) == C::Result::PassAccepted);
+        CHECK(t.Nominate(alice, creature, 8, C::Direction::OutOfRange, 300,
+                         SyntheticPrior(alice)) == C::Result::Nominated);
         CHECK(t.ObservePassEnded(bob, 301) == C::Result::PassAccepted);
         CHECK(t.ObservePassEnded(alice, 307) == C::Result::PassAccepted);
         CHECK(t.Correlate(Tagged(alice, 300)).result == C::Result::StaleToken);
         CHECK(t.Correlate(Tagged(alice, 307)).result == C::Result::PassClosed);
         CHECK(t.Correlate(Tagged(bob, 301)).result == C::Result::PassClosed);
         CHECK(!t.IsPoisoned() && t.Candidates() == 0);
+        CHECK(t.Count(C::Result::Matched) == 0);
     }
 
     void NestedPassIsFailClosedRatherThanProof()
     {
         Table t;
         // Hypothetical nested same-viewer notifier; preserve no-evidence result.
-        CHECK(t.ObserveSuccessorPass(alice, 400) == C::Result::PassAccepted);
+        CHECK(t.Nominate(alice, creature, 8, C::Direction::OutOfRange, 400,
+                         SyntheticPrior(alice)) == C::Result::Nominated);
         CHECK(t.ObserveSuccessorPass(alice, 401) == C::Result::PassAccepted);
         CHECK(t.ObservePassEnded(alice, 401) == C::Result::PassAccepted);
         CHECK(t.ObservePassEnded(alice, 400) == C::Result::StaleToken);
         CHECK(t.Correlate(Tagged(alice, 400)).result == C::Result::StaleToken);
         CHECK(t.Correlate(Tagged(alice, 401)).result == C::Result::PassClosed);
         CHECK(t.Candidates() == 0 && !t.IsPoisoned());
+        CHECK(t.Count(C::Result::Matched) == 0);
     }
 
     void UnknownEndCapacityPoisonsButNeverMatches()
@@ -139,18 +162,41 @@ namespace
 
 int main()
 {
-    P::Protocol<16> debt; // #94 protocol exists, but Core9 events do not modify it.
-    CHECK(debt.LedgerView().Size() == 0);
-    CHECK(debt.LedgerView().PendingRestores() == 0);
+    // Read-only bridge exercise only: protocol never enters Table as a mutable
+    // dependency. This does NOT establish actual Core9 ledger integration.
+    P::Protocol<16> debt;
+    std::size_t const beforeSize = debt.Size();
+    std::size_t const beforeLedger = debt.LedgerView().Size();
+    std::size_t const beforePending = debt.LedgerView().PendingRestores();
+    bool const beforeGlobal = debt.GlobalRestoreRequired();
+    C::NominationFacts protocolFacts{};
+    protocolFacts.currentViewerEpoch = alice.loginEpoch;
+    protocolFacts.currentCreatureIncarnation = 8;
+    protocolFacts.eventMapId = creature.mapId;
+    protocolFacts.eventInstanceId = creature.instanceId;
+    C::ReadProtocolFacts(debt, alice, creature, 8, protocolFacts);
+    CHECK(!protocolFacts.priorF14SuppressionRecorded);
+    CHECK(!protocolFacts.restoreOwed);
+    CHECK(protocolFacts.globalRestoreRequired == beforeGlobal);
+    Table constFactsTable;
+    CHECK(constFactsTable.Nominate(alice, creature, 8, C::Direction::OutOfRange,
+                                  700, protocolFacts) == C::Result::NoPriorF14Suppression);
+    CHECK(constFactsTable.Count(C::Result::Matched) == 0);
     NoHumanEpochCannotBecomeEvidence();
     NoPriorSuppressionCannotNominate();
-    PostSendGuidCannotSelfNominate();
+    PostSendGuidWithoutNominationFindsNothing();
     ImmediateDirectRouteHasNoBatchAttribution();
     GlobalTokensAcrossViewersStayUnmatched();
     NestedPassIsFailClosedRatherThanProof();
     UnknownEndCapacityPoisonsButNeverMatches();
-    CHECK(debt.LedgerView().Size() == 0 && debt.LedgerView().PendingRestores() == 0);
-    std::printf("F14 CORE9 E1 NEGATIVE CONTRACT %u/%u passed; ZERO SYNTHETIC MATCHES\n",
-                passed, passed + failed);
+    CHECK(debt.Size() == beforeSize);
+    CHECK(debt.LedgerView().Size() == beforeLedger);
+    CHECK(debt.LedgerView().PendingRestores() == beforePending);
+    CHECK(debt.GlobalRestoreRequired() == beforeGlobal);
+    if (failed == 0)
+        std::printf("F14 CORE9 E1 NEGATIVE CONTRACT %u/%u passed; ZERO SYNTHETIC MATCHES\n",
+                    passed, passed + failed);
+    else
+        std::printf("F14 CORE9 E1 NEGATIVE CONTRACT FAILED %u/%u\n", passed, passed + failed);
     return failed ? 1 : 0;
 }
