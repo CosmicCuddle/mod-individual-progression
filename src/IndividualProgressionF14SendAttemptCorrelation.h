@@ -54,6 +54,7 @@ namespace IndividualProgressionF14SendAttemptCorrelation
         DuplicateIgnored,
         Matched,
         PassAccepted,
+        PassClosed, // observed active pass has ended; late send proves nothing
         // Refusals (all fail closed: no evidence upgrade).
         InvalidKey,
         ZeroToken,
@@ -219,13 +220,59 @@ namespace IndividualProgressionF14SendAttemptCorrelation
             return r == Result::PassAccepted ? Accept(r) : Refuse(r);
         }
 
-        // Externally supplied hypothetical events (no Core producer yet).
-        // Dropping candidates never touches any restore obligation.
-        void ObservePassEnded(ViewerKey viewer, std::uint64_t passToken)
+        // Externally supplied pass-end events. A token closed by End/Cancel
+        // can never nominate or correlate again. Unknown-viewer ends are
+        // remembered; a stale end must not close a newer active pass.
+        // Dropping candidates NEVER changes the #94 restore obligations.
+        Result ObservePassEnded(ViewerKey viewer, std::uint64_t passToken)
         {
+            if (_poisoned)
+                return Refuse(Result::TablePoisoned);
+            if (!viewer.IsValid())
+                return Refuse(Result::InvalidKey);
+            if (passToken == 0)
+                return Refuse(Result::ZeroToken);
+
+            std::size_t const vp = FindViewerByGuid(viewer.guidRaw);
+            if (vp == MaxViewers)
+            {
+                if (_viewerCount == MaxViewers)
+                {
+                    PoisonTable();
+                    return Refuse(Result::Capacity);
+                }
+                // A late nomination for this previously unknown token must
+                // fail, rather than opening a pass after its own end event.
+                _viewers[_viewerCount++] = ViewerPass{viewer, passToken, passToken, false};
+                return Accept(Result::PassAccepted);
+            }
+
+            ViewerPass& pass = _viewers[vp];
+            if (!(pass.viewer == viewer))
+                return Refuse(Result::UnobservedSessionChange);
+            if (pass.poisoned)
+                return Refuse(Result::ViewerPoisoned);
+            if (passToken < pass.lastToken)
+                return Refuse(Result::StaleToken);
+            if (passToken > pass.lastToken)
+            {
+                // Out-of-order future end: cannot trust any further sends
+                // in this viewer session, but other viewers stay valid.
+                pass.poisoned = true;
+                DropIf([&](Candidate const& c) { return c.viewer == viewer; });
+                return Refuse(Result::TokenReorderedOrReused);
+            }
+            if (passToken <= pass.closedThrough)
+                return Refuse(Result::PassClosed); // duplicate end, no state change
+
+            pass.closedThrough = passToken;
             DropIf([&](Candidate const& c) { return c.viewer == viewer && c.passToken == passToken; });
+            return Accept(Result::PassAccepted);
         }
-        void CancelPass(ViewerKey viewer, std::uint64_t passToken) { ObservePassEnded(viewer, passToken); }
+        Result CancelPass(ViewerKey viewer, std::uint64_t passToken)
+        {
+            return ObservePassEnded(viewer, passToken);
+        }
         void ObserveViewerSessionEnded(std::uint64_t viewerGuid) { ForgetViewer(viewerGuid); }
         void ObserveViewerRightsOrEraChanged(std::uint64_t viewerGuid) { ForgetViewer(viewerGuid); }
         void ObserveCreatureRetired(CreatureKey creature)
@@ -261,6 +308,7 @@ namespace IndividualProgressionF14SendAttemptCorrelation
         {
             ViewerKey viewer{};
             std::uint64_t lastToken = 0;
+            std::uint64_t closedThrough = 0;
             bool poisoned = false;
         };
 
@@ -300,6 +348,8 @@ namespace IndividualProgressionF14SendAttemptCorrelation
                 return Result::ViewerPoisoned;
             if (f.passToken < pass.lastToken)
                 return Result::StaleToken;
+            if (f.passToken == pass.lastToken && f.passToken <= pass.closedThrough)
+                return Result::PassClosed;
             if (f.passToken > pass.lastToken)
                 return Result::NoCandidate; // never nominated; does NOT advance the pass
 
@@ -354,7 +404,7 @@ namespace IndividualProgressionF14SendAttemptCorrelation
                     PoisonTable();
                     return Result::Capacity;
                 }
-                _viewers[_viewerCount++] = ViewerPass{viewer, passToken, false};
+                _viewers[_viewerCount++] = ViewerPass{viewer, passToken, 0, false};
                 return Result::PassAccepted;
             }
             ViewerPass& pass = _viewers[vp];
@@ -363,7 +413,16 @@ namespace IndividualProgressionF14SendAttemptCorrelation
             if (pass.poisoned)
                 return Result::ViewerPoisoned;
             if (passToken == pass.lastToken)
+            {
+                if (passToken <= pass.closedThrough)
+                {
+                    // Reopening an ended or cancelled token is a replay.
+                    pass.poisoned = true;
+                    DropIf([&](Candidate const& c) { return c.viewer == viewer; });
+                    return Result::TokenReorderedOrReused;
+                }
                 return Result::PassAccepted;
+            }
             if (passToken < pass.lastToken)
             {
                 // Reused, reordered or wrapped token: fail closed for this

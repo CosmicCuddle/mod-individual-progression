@@ -144,6 +144,33 @@ class FailClosedRules(unittest.TestCase):
         correlate = method(self.src, "Result CorrelateInner(")
         self.assertIn("if (f.passToken < pass.lastToken)\n                return Result::StaleToken;", correlate)
 
+    def test_ended_pass_is_not_reopened(self):
+        body = method(self.src, "Result ObservePassEnded(")
+        self.assertIn("pass.closedThrough = passToken;", body)
+        self.assertIn("ViewerPass{viewer, passToken, passToken, false}", body)
+        self.assertIn("return Refuse(Result::StaleToken);", body)
+        self.assertIn("pass.poisoned = true;", body)
+        self.assertIn("return Refuse(Result::TokenReorderedOrReused);", body)
+        self.assertIn("return Refuse(Result::PassClosed);", body)
+        self.assertIn("DropIf(", body)
+        self.assertIn("Result CancelPass(", self.src)
+        self.assertIn("return ObservePassEnded(viewer, passToken);", self.src)
+        advance = method(self.src, "Result AdvancePass(")
+        self.assertIn("passToken <= pass.closedThrough", advance)
+        self.assertIn("return Result::TokenReorderedOrReused;", advance)
+        correlate = method(self.src, "Result CorrelateInner(")
+        self.assertIn("f.passToken <= pass.closedThrough", correlate)
+        self.assertIn("return Result::PassClosed;", correlate)
+
+    def test_old_api_behavior_red_new_green_required(self):
+        workflow = read(".github/workflows/ip-f14-send-attempt-correlation-20261108.yml")
+        self.assertIn("git show \"$old:src/IndividualProgressionF14SendAttemptCorrelation.h\"", workflow)
+        self.assertIn("OLD_UNSAFE_REPLAY_MATCHED", workflow)
+        self.assertIn("NEW_REPLAY_REFUSED", workflow)
+        self.assertIn('test "$old_status" -eq 1', workflow)
+        self.assertIn("feature/cs03-ip-f14-send-attempt-correlation-20261108", workflow)
+        self.assertIn("tests/f14_send_attempt_correlation.cpp", workflow)
+
     def test_ambiguity_and_cross_map_fail_closed(self):
         correlate = method(self.src, "Result CorrelateInner(")
         self.assertIn("if (matches > 1 || ambiguous)", correlate)

@@ -6,6 +6,7 @@ on:
   pull_request:
     branches:
       - research/cs01-f14-real-core-guid-observer-off-20261105
+      - feature/cs03-ip-f14-send-attempt-correlation-20261108
     paths:
       - "src/**"
       - "conf/**"
@@ -63,6 +64,79 @@ jobs:
           # Not re-run here: #103's own six-path scope contract already fails at the
           # frozen #104 parent (it diffs against #103's parent). Its files are pinned
           # byte-identical by the correlation contracts instead.
+      - name: "Old API behavior: parent compiles then RED by execution; fixed head GREEN"
+        shell: bash
+        run: |
+          set -euo pipefail
+          old=19af24e9d53a18b3a4c9455faf7b2fc9500def10
+          mkdir -p /tmp/f14-parent-header
+          git show "$old:src/IndividualProgressionF14SendAttemptCorrelation.h" \
+            > /tmp/f14-parent-header/IndividualProgressionF14SendAttemptCorrelation.h
+          cat > /tmp/f14-old-api-replay.cpp <<'CPP'
+          #include "IndividualProgressionF14SendAttemptCorrelation.h"
+          #include <cstdio>
+          namespace C = IndividualProgressionF14SendAttemptCorrelation;
+          namespace P = IndividualProgressionF14ViewerRestoreProtocol;
+          int main()
+          {
+              P::ViewerKey const viewer{111, 7};
+              P::CreatureKey const creature{1, 2, 555};
+              C::NominationFacts nomination{};
+              nomination.currentViewerEpoch = viewer.loginEpoch;
+              nomination.currentCreatureIncarnation = 44;
+              nomination.eventMapId = creature.mapId;
+              nomination.eventInstanceId = creature.instanceId;
+              nomination.globalRestoreRequired = false;
+              nomination.priorF14SuppressionRecorded = true;
+              nomination.restoreOwed = false;
+              C::SendFacts send{};
+              send.sourceAttributedByExactCoreF14Hook = true;
+              send.viewerGuidRaw = viewer.guidRaw;
+              send.currentViewerEpoch = viewer.loginEpoch;
+              send.creatureGuidRaw = creature.guidRaw;
+              send.eventMapId = creature.mapId;
+              send.eventInstanceId = creature.instanceId;
+              send.direction = C::Direction::OutOfRange;
+              send.passToken = 50;
+              send.globalRestoreRequired = false;
+              C::Table<8, 4> table;
+              if (table.Nominate(viewer, creature, 44, C::Direction::OutOfRange, 50, nomination)
+                  != C::Result::Nominated)
+                  return 3;
+              // The same old-API calls must compile against BOTH headers:
+              // parent behavior incorrectly matches after this explicit End.
+              table.ObservePassEnded(viewer, 50);
+              C::Result const retry =
+                  table.Nominate(viewer, creature, 44, C::Direction::OutOfRange, 50, nomination);
+              C::Correlation const correlated = table.Correlate(send);
+              if (retry == C::Result::Nominated && correlated.Matched())
+              {
+                  std::puts("OLD_UNSAFE_REPLAY_MATCHED");
+                  return 1;
+              }
+              if (retry == C::Result::TokenReorderedOrReused && !correlated.Matched())
+              {
+                  std::puts("NEW_REPLAY_REFUSED");
+                  return 0;
+              }
+              return 4; // unexpected behavior is never accepted
+          }
+          CPP
+          # Old source must COMPILE. The historical defect is a runtime
+          # assertion failure, not a missing enum or changed API.
+          ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 \
+            -I/tmp/f14-parent-header -Isrc /tmp/f14-old-api-replay.cpp -o /tmp/f14-old-replay
+          set +e
+          /tmp/f14-old-replay | tee /tmp/f14-old-output
+          old_status=${PIPESTATUS[0]}
+          set -e
+          test "$old_status" -eq 1
+          grep -Fx 'OLD_UNSAFE_REPLAY_MATCHED' /tmp/f14-old-output
+          # Identical source now compiles AND executes safely with the new header.
+          ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 \
+            -Isrc /tmp/f14-old-api-replay.cpp -o /tmp/f14-fixed-replay
+          /tmp/f14-fixed-replay | tee /tmp/f14-fixed-output
+          grep -Fx 'NEW_REPLAY_REFUSED' /tmp/f14-fixed-output
       - name: "Native model tests (${{ matrix.cxx }} ${{ matrix.std }}, with and without NDEBUG)"
         shell: bash
         run: |
