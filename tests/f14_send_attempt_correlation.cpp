@@ -214,14 +214,78 @@ namespace
         CHECK(w.Correlate(Send(kViewer, kA, Out::OutOfRange, top)).result == C::Result::ViewerPoisoned);
         CHECK(w.Correlate(Send(kViewer, kA, Out::OutOfRange, 1)).result == C::Result::ViewerPoisoned);
 
-        // Explicit pass end / cancellation drops without poisoning.
+        // End closes the active pass: late sends and same-token reopen fail.
         Table e;
         CHECK(e.Nominate(kViewer, kA, kInc, Out::OutOfRange, kPass, Facts(kViewer, kA, kInc)) == C::Result::Nominated);
-        e.ObservePassEnded(kViewer, kPass);
-        CHECK(e.Correlate(Send(kViewer, kA, Out::OutOfRange, kPass)).result == C::Result::NoCandidate);
-        CHECK(e.Nominate(kViewer, kA, kInc, Out::OutOfRange, kPass, Facts(kViewer, kA, kInc)) == C::Result::Nominated);
-        e.CancelPass(kViewer, kPass);
+        CHECK(e.ObservePassEnded(kViewer, kPass) == C::Result::PassAccepted);
+        CHECK(e.Correlate(Send(kViewer, kA, Out::OutOfRange, kPass)).result == C::Result::PassClosed);
+        CHECK(e.Nominate(kViewer, kA, kInc, Out::OutOfRange, kPass, Facts(kViewer, kA, kInc)) ==
+              C::Result::TokenReorderedOrReused);
+        CHECK(e.Correlate(Send(kViewer, kA, Out::OutOfRange, kPass)).result == C::Result::ViewerPoisoned);
         CHECK(e.Candidates() == 0);
+        // Cancellation is another end, but does not poison by itself.
+        Table cancel;
+        CHECK(cancel.Nominate(kViewer, kB, kInc, Out::OutOfRange, 80, Facts(kViewer, kB, kInc)) == C::Result::Nominated);
+        CHECK(cancel.CancelPass(kViewer, 80) == C::Result::PassAccepted);
+        CHECK(cancel.Correlate(Send(kViewer, kB, Out::OutOfRange, 80)).result == C::Result::PassClosed);
+        CHECK(cancel.Nominate(kViewer, kB, kInc, Out::OutOfRange, 81, Facts(kViewer, kB, kInc)) == C::Result::Nominated);
+        CHECK(cancel.Correlate(Send(kViewer, kB, Out::OutOfRange, 81)).Matched());
+    }
+
+    void TestEndedPassLifetimeAndOrdering()
+    {
+        // Multiple distinct nominations are valid while a pass is open.
+        Table open;
+        CHECK(open.Nominate(kViewer, kA, kInc, Out::OutOfRange, 20, Facts(kViewer, kA, kInc)) == C::Result::Nominated);
+        CHECK(open.Nominate(kViewer, kB, kInc, Out::OutOfRange, 20, Facts(kViewer, kB, kInc)) == C::Result::Nominated);
+        CHECK(open.Correlate(Send(kViewer, kA, Out::OutOfRange, 20)).Matched());
+        CHECK(open.Candidates() == 1);
+        CHECK(open.ObservePassEnded(kViewer, 20) == C::Result::PassAccepted);
+        CHECK(open.Candidates() == 0);
+        CHECK(open.Correlate(Send(kViewer, kB, Out::OutOfRange, 20)).result == C::Result::PassClosed);
+        CHECK(open.ObservePassEnded(kViewer, 20) == C::Result::PassClosed);
+        // A valid newer pass still works after end; stale end may not close it.
+        CHECK(open.Nominate(kViewer, kA, kInc, Out::OutOfRange, 21, Facts(kViewer, kA, kInc)) == C::Result::Nominated);
+        CHECK(open.ObservePassEnded(kViewer, 20) == C::Result::StaleToken);
+        CHECK(open.Correlate(Send(kViewer, kA, Out::OutOfRange, 21)).Matched());
+
+        // Unknown-viewer end reserves that exact token, including cancellation.
+        Table unseen;
+        CHECK(unseen.ObservePassEnded(kViewer, 43) == C::Result::PassAccepted);
+        CHECK(unseen.Viewers() == 1 && unseen.Candidates() == 0);
+        CHECK(unseen.Correlate(Send(kViewer, kA, Out::OutOfRange, 43)).result == C::Result::PassClosed);
+        CHECK(unseen.ObservePassEnded(kViewer, 43) == C::Result::PassClosed);
+        CHECK(unseen.Nominate(kViewer, kA, kInc, Out::OutOfRange, 43, Facts(kViewer, kA, kInc)) ==
+              C::Result::TokenReorderedOrReused);
+        CHECK(unseen.Nominate(kViewer, kA, kInc, Out::OutOfRange, 44, Facts(kViewer, kA, kInc)) ==
+              C::Result::ViewerPoisoned);
+        CHECK(unseen.Candidates() == 0 && !unseen.IsPoisoned());
+        unseen.ObserveViewerSessionEnded(kViewer.guidRaw);
+        CHECK(unseen.Nominate(kViewer, kA, kInc, Out::OutOfRange, 1, Facts(kViewer, kA, kInc)) == C::Result::Nominated);
+
+        // Future/reordered end poisons this viewer only, not a second one.
+        Table future;
+        CHECK(future.Nominate(kViewer, kA, kInc, Out::OutOfRange, 3, Facts(kViewer, kA, kInc)) == C::Result::Nominated);
+        CHECK(future.Nominate(kOther, kB, kInc, Out::OutOfRange, 3, Facts(kOther, kB, kInc)) == C::Result::Nominated);
+        CHECK(future.ObservePassEnded(kViewer, 4) == C::Result::TokenReorderedOrReused);
+        CHECK(future.Correlate(Send(kViewer, kA, Out::OutOfRange, 3)).result == C::Result::ViewerPoisoned);
+        CHECK(future.Correlate(Send(kOther, kB, Out::OutOfRange, 3)).Matched());
+        CHECK(!future.IsPoisoned());
+
+        // An end for another login epoch cannot retire the active session.
+        Table epoch;
+        CHECK(epoch.Nominate(kViewer, kA, kInc, Out::OutOfRange, 6, Facts(kViewer, kA, kInc)) == C::Result::Nominated);
+        CHECK(epoch.ObservePassEnded(kRelog, 6) == C::Result::UnobservedSessionChange);
+        CHECK(epoch.Correlate(Send(kViewer, kA, Out::OutOfRange, 6)).Matched());
+        CHECK(epoch.ObservePassEnded({}, 6) == C::Result::InvalidKey);
+        CHECK(epoch.CancelPass(kViewer, 0) == C::Result::ZeroToken);
+
+        // Unknown-end overflow cannot evict evidence or silently forget a close.
+        C::Table<2, 1> bound;
+        CHECK(bound.CancelPass(kViewer, 9) == C::Result::PassAccepted);
+        CHECK(bound.ObservePassEnded(kOther, 9) == C::Result::Capacity);
+        CHECK(bound.IsPoisoned() && bound.Candidates() == 0);
+        CHECK(bound.ObservePassEnded(kViewer, 9) == C::Result::TablePoisoned);
     }
 
     void TestAmbiguityAndCrossMap()
@@ -385,6 +449,16 @@ namespace
         CHECK(p.NeedsRestore(kViewer, kA));
         CHECK(p.LedgerView().Size() == 1 && p.LedgerView().PendingRestores() == 1);
 
+        // Closing/cancelling correlation passes never reduces #94 restore debt.
+        Table ended;
+        CHECK(ended.Nominate(kViewer, kA, kInc, Out::Create, 91, f) == C::Result::Nominated);
+        CHECK(ended.ObservePassEnded(kViewer, 91) == C::Result::PassAccepted);
+        CHECK(ended.Correlate(Send(kViewer, kA, Out::Create, 91)).result == C::Result::PassClosed);
+        CHECK(ended.CancelPass(kViewer, 91) == C::Result::PassClosed);
+        CHECK(ended.Nominate(kViewer, kA, kInc, Out::Create, 91, f) == C::Result::TokenReorderedOrReused);
+        CHECK(p.LedgerView().Size() == 1 && p.LedgerView().PendingRestores() == 1);
+        CHECK(p.NeedsRestore(kViewer, kA));
+
         // Global freeze (B4): nominations refused; #103 refuses too.
         p.ObserveConfigDisabled();
         f = Facts(kViewer, kB, kInc, true);
@@ -456,6 +530,7 @@ int main()
     TestUniqueMatchIsConsumedOnce();
     TestEpochAndSessionChanges();
     TestPassTokens();
+    TestEndedPassLifetimeAndOrdering();
     TestAmbiguityAndCrossMap();
     TestInvalidationsAndFreeze();
     TestOverflowPoisons();
