@@ -23,7 +23,11 @@ class Core9E1NegativeOnlySource(unittest.TestCase):
 
     def test_no_positive_match_claim_in_new_model(self) -> None:
         self.assertNotIn(".Matched()", self.cpp)
-        self.assertNotIn("C::Result::Matched", self.cpp)
+        # The only permitted use of Matched is an explicit zero-counter
+        # assertion; returning/expecting a positive match remains forbidden.
+        self.assertIn("t.Count(C::Result::Matched) == 0", self.cpp)
+        self.assertNotRegex(self.cpp, r"==\s*C::Result::Matched")
+        self.assertIn("if (failed == 0)", self.cpp)
         self.assertIn("ZERO SYNTHETIC MATCHES", self.cpp)
         self.assertIn("!C::IsSendCallClientPresentation()", self.cpp)
 
@@ -31,7 +35,7 @@ class Core9E1NegativeOnlySource(unittest.TestCase):
         for case in (
             "NoHumanEpochCannotBecomeEvidence",
             "NoPriorSuppressionCannotNominate",
-            "PostSendGuidCannotSelfNominate",
+            "PostSendGuidWithoutNominationFindsNothing",
             "ImmediateDirectRouteHasNoBatchAttribution",
             "GlobalTokensAcrossViewersStayUnmatched",
             "NestedPassIsFailClosedRatherThanProof",
@@ -44,16 +48,22 @@ class Core9E1NegativeOnlySource(unittest.TestCase):
         ):
             self.assertIn("C::Result::" + result, self.cpp)
 
-    def test_untouched_ledger_is_immutable_under_model(self) -> None:
+    def test_readonly_protocol_bridge_not_a_live_ledger_claim(self) -> None:
         self.assertIn("P::Protocol<16> debt;", self.cpp)
-        self.assertIn("debt.LedgerView().PendingRestores()", self.cpp)
+        self.assertIn("C::ReadProtocolFacts(debt, alice, creature, 8, protocolFacts)", self.cpp)
+        self.assertIn("debt.Size() == beforeSize", self.cpp)
+        self.assertIn("debt.LedgerView().PendingRestores() == beforePending", self.cpp)
+        self.assertIn("protocol never enters Table as a mutable", self.cpp)
         self.assertNotIn("ObserveF14SuppressionDecision(", self.cpp)
         self.assertNotIn("ObserveLinkTransition(", self.cpp)
 
     def test_model_header_still_unwired(self) -> None:
         self.assertIn("constexpr bool IsSendCallClientPresentation() { return false; }", self.header)
         self.assertIn("constexpr bool HasCorePassTokenProducer() { return false; }", self.header)
-        sources = list((ROOT / "src").rglob("*.cpp"))
+        sources = [
+            path for path in (ROOT / "src").rglob("*")
+            if path.is_file() and path.suffix in {".cpp", ".c", ".cc", ".cxx", ".h", ".hpp", ".hxx"}
+        ]
         self.assertTrue(sources)
         live_inclusions = [
             str(path.relative_to(ROOT)) for path in sources
@@ -65,6 +75,8 @@ class Core9E1NegativeOnlySource(unittest.TestCase):
     def test_workflow_is_pinned_and_isolated(self) -> None:
         self.assertIn("e92f6e0e4ecc81d0656d5e66e468a9b13c467478", self.workflow)
         self.assertIn("git diff --name-only", self.workflow)
+        self.assertIn("diff -u /tmp/allowed /tmp/actual", self.workflow)
+        self.assertIn("test ! -s /tmp/removed", self.workflow)
         self.assertIn("g++", self.workflow)
         self.assertIn("clang++", self.workflow)
         self.assertIn("c++17", self.workflow)
@@ -75,6 +87,8 @@ class Core9E1NegativeOnlySource(unittest.TestCase):
         reg = REGISTER.read_text(encoding="utf-8")
         self.assertIn("IP-F14-CORE9-E1-NEGATIVE-CONTRACT-CS01-20261110", reg)
         self.assertIn("NO CORE LISTENER", reg)
+        self.assertIn("post-send self-nomination", reg)
+        self.assertIn("map-thread", reg)
 
 
 if __name__ == "__main__":
