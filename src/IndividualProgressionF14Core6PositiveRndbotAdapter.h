@@ -40,8 +40,8 @@ private:
         CosmicIPF14Core6PositiveRndbot::Viewer& facts)
     {
         // Runtime pilot is still forced OFF without a *real* Core refresh.
-        // Existing IP enabled, pilot flag and paid effective-stage reads are
-        // NOT proven concurrent-map/WHO safe; do not enable this adapter.
+        // Existing IP enabled and pilot config reads are NOT proven safe
+        // across map/WHO workers and .reload; keep this pilot forced OFF.
         if (!sIndividualProgression->enabled ||
             !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
             !viewer || !targetGuid || viewer->GetGUID() == targetGuid ||
@@ -58,20 +58,27 @@ private:
                 viewer->GetSession()->GetAccountId()))
             return false;
 
-        // Existing IP login-time account classification warms the cache.
-        // A missing/invalidated account entry is unknown; do NOT call the
-        // blocking GetAccountMatch/isGMAccount/isNormalAccount here.
+        // Account cache was read positively above. GetEffectiveProgression
+        // can re-enter GetExpansionFacts -> isNormalAccount -> GetAccountMatch
+        // and blocking Auth DB after a concurrent cache clear. For THIS
+        // Vanilla-only decision, the paid policy can cap only raw stage 13
+        // to stage 12: both are non-Vanilla. Thus effective<8 iff raw<8.
+        // Read the in-memory rewarded-quest stage only; fail VISIBLE for
+        // any TBC/Wrath/unknown value without touching paid/account DB.
         Player* ordinaryViewer = const_cast<Player*>(viewer);
-        uint8 const effectiveStage =
-            sIndividualProgression->GetEffectiveProgression(ordinaryViewer);
+        uint8 const rawStage =
+            sIndividualProgression->GetPlayerProgressionFromQuests(ordinaryViewer);
+        if (rawStage >= CosmicIPF14Core6PositiveRndbot::FirstTbcStage)
+            return false;
+
         facts.confirmedNormalHumanAccount = true;
         facts.confirmedNonGM = true;
         facts.activeNonHeadlessSession = true;
         facts.inWorld = true;
         facts.confirmedNotSelf = true;
         facts.effectiveStageKnown =
-            effectiveStage <= IndividualProgressionGroupPolicy::LastSupportedStage;
-        facts.effectiveStage = effectiveStage;
+            rawStage <= IndividualProgressionGroupPolicy::LastSupportedStage;
+        facts.effectiveStage = rawStage;
         return CosmicIPF14Core6PositiveRndbot::ViewerIsVanilla(facts);
     }
 
