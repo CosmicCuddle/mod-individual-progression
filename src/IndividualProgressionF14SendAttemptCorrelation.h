@@ -221,9 +221,13 @@ namespace IndividualProgressionF14SendAttemptCorrelation
         }
 
         // Externally supplied pass-end events. A token closed by End/Cancel
-        // can never nominate or correlate again. Unknown-viewer ends are
-        // remembered; a stale end must not close a newer active pass.
-        // Dropping candidates NEVER changes the #94 restore obligations.
+        // can never nominate or correlate again. A strictly newer end closes
+        // through that token and does not poison the viewer: an empty or
+        // never-nominated pass is ordinary, not proof the session is corrupt.
+        // Unknown-viewer ends are remembered; a stale end must not close a
+        // newer active pass. A fully closed, candidate-free, unpoisoned
+        // tombstone may be replaced by a strictly newer login epoch. Live
+        // evidence may not. Dropping candidates NEVER changes the #94 ledger.
         Result ObservePassEnded(ViewerKey viewer, std::uint64_t passToken)
         {
             if (_poisoned)
@@ -249,18 +253,26 @@ namespace IndividualProgressionF14SendAttemptCorrelation
 
             ViewerPass& pass = _viewers[vp];
             if (!(pass.viewer == viewer))
-                return Refuse(Result::UnobservedSessionChange);
+            {
+                if (!MayReplaceWithNewerEpoch(pass, viewer))
+                    return Refuse(Result::UnobservedSessionChange);
+                // The previous epoch left only a closed tombstone. Remember
+                // this epoch's end in the same slot; do not keep the old one.
+                _viewers[vp] = ViewerPass{viewer, passToken, passToken, false};
+                return Accept(Result::PassAccepted);
+            }
             if (pass.poisoned)
                 return Refuse(Result::ViewerPoisoned);
             if (passToken < pass.lastToken)
                 return Refuse(Result::StaleToken);
             if (passToken > pass.lastToken)
             {
-                // Out-of-order future end: cannot trust any further sends
-                // in this viewer session, but other viewers stay valid.
-                pass.poisoned = true;
+                // Close through the newer token. Superseded candidates for
+                // this viewer cannot match afterwards. Other viewers stay.
+                pass.lastToken = passToken;
+                pass.closedThrough = passToken;
                 DropIf([&](Candidate const& c) { return c.viewer == viewer; });
-                return Refuse(Result::TokenReorderedOrReused);
+                return Accept(Result::PassAccepted);
             }
             if (passToken <= pass.closedThrough)
                 return Refuse(Result::PassClosed); // duplicate end, no state change
@@ -322,6 +334,22 @@ namespace IndividualProgressionF14SendAttemptCorrelation
         {
             return c.viewer == viewer && c.creature.guidRaw == guidRaw &&
                 c.direction == direction && c.passToken == passToken;
+        }
+
+        // Replacement is allowed only for a strictly newer login epoch and
+        // only when the stored record is a fully closed tombstone: the pass
+        // was ended, nothing is poisoned, and no candidate remains for that
+        // viewer GUID. An open pass, a poison flag or any candidate is live
+        // evidence and stays until ObserveViewerSessionEnded.
+        bool MayReplaceWithNewerEpoch(ViewerPass const& pass, ViewerKey incoming) const
+        {
+            if (!(incoming.loginEpoch > pass.viewer.loginEpoch) || pass.poisoned ||
+                pass.lastToken == 0 || pass.closedThrough < pass.lastToken)
+                return false;
+            for (std::size_t i = 0; i < _size; ++i)
+                if (_candidates[i].viewer.guidRaw == pass.viewer.guidRaw)
+                    return false;
+            return true;
         }
 
         Result CorrelateInner(SendFacts const& f, Correlation& out)
@@ -409,7 +437,12 @@ namespace IndividualProgressionF14SendAttemptCorrelation
             }
             ViewerPass& pass = _viewers[vp];
             if (!(pass.viewer == viewer))
-                return Result::UnobservedSessionChange; // explicit session end required
+            {
+                if (!MayReplaceWithNewerEpoch(pass, viewer))
+                    return Result::UnobservedSessionChange; // live evidence stays until session end
+                pass = ViewerPass{viewer, passToken, 0, false};
+                return Result::PassAccepted;
+            }
             if (pass.poisoned)
                 return Result::ViewerPoisoned;
             if (passToken == pass.lastToken)
@@ -491,9 +524,11 @@ namespace IndividualProgressionF14SendAttemptCorrelation
             return r;
         }
 
-        // Overflow: never evict to make room or guess a partial match.
-        // Every candidate is dropped and every later nomination and
-        // correlation is refused. Obligations live only in #94's ledger.
+        // Overflow of candidates or of viewer slots (default 256): never
+        // evict to make room or guess a partial match. Every candidate is
+        // dropped and every later nomination, correlation, successor, end
+        // and cancel is refused. Viewer records are not reused. Obligations
+        // live only in #94's ledger; this poison does not clear them.
         void PoisonTable()
         {
             _poisoned = true;

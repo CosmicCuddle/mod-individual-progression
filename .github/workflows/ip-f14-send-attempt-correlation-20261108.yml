@@ -7,6 +7,7 @@ on:
     branches:
       - research/cs01-f14-real-core-guid-observer-off-20261105
       - feature/cs03-ip-f14-send-attempt-correlation-20261108
+      - fix/cs01-f14-e1-pass-ended-replay-20261110
     paths:
       - "src/**"
       - "conf/**"

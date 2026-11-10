@@ -65,7 +65,9 @@ The pass token is caller-supplied, opaque, nonzero and strictly increasing per v
 | Creature retired, map unloaded, viewer rights or era changed, session ended | candidates dropped, so a later send finds `NoCandidate` |
 | Explicit pass end/cancel of the active token | candidate dropped; a late same-token send returns `PassClosed`, a same-token re-nomination poisons that viewer session |
 | Stale end of older pass | `StaleToken` with no mutation to the newer active pass |
-| Future/reordered end | `TokenReorderedOrReused` and viewer-only poison; no evidence upgrade |
+| Strictly newer end, including an empty or never-nominated pass | `PassAccepted`. `lastToken` and `closedThrough` move to that token. That viewer's candidates are dropped. The viewer is **not** poisoned, so a later token can still nominate. Replaying the ended token still poisons that viewer session |
+| Newer login epoch vs a fully closed, candidate-free, unpoisoned tombstone | the tombstone is replaced. Live evidence (open pass, any candidate, or a poison flag) is not |
+| Older-epoch end against a newer epoch's record | `UnobservedSessionChange`. No poison and no deletion |
 
 **Expiry is explicit only.** A candidate expires on an observed newer token for the same viewer session (via `ObserveSuccessorPass`, or a nomination carrying it), or on the explicit events above. Pass end and cancellation are externally supplied hypothetical events, because no Core producer exists. A send call is never treated as pass completion or delivery. A candidate can only match the viewer's current token, so it can't be matched indefinitely across passes.
 
@@ -129,10 +131,61 @@ Close the DRAFT or delete the branch. Nothing is compiled into the Worldserver. 
 
 **Old confirmed source defect:** previously, `ObservePassEnded` and `CancelPass` dropped candidates but left `lastToken` open. Later `Nominate` accepted the same closed token and a matching `Correlate` reported a successful *send-call* correlation, violating pass lifetime. An event replay is not proof of real packet delivery.
 
-**New pure-model rule:** each `ViewerPass` records `closedThrough`. A normal active `ObservePassEnded` or `CancelPass` records that token as closed and discards only that pass's candidates. A late send of the closed active token returns `PassClosed` with no match. Re-nominating or explicitly re-opening that closed token returns `TokenReorderedOrReused` and poisons **that viewer session only**. A strictly newer token remains valid if the viewer was not poisoned. Ends older than the current active token return `StaleToken` without touching the newer pass; future/reordered ends poison only that viewer. An end for an unknown viewer stores its closed token without inventing an active pass, subject to bounded capacity. Duplicate active end returns `PassClosed`. Invalid epoch, zero token and table-overflow rules remain fail closed. Multiple different creatures can be nominated under one **still open** token.
+**New pure-model rule:** each `ViewerPass` records `closedThrough`. A normal active `ObservePassEnded` or `CancelPass` records that token as closed and discards only that pass's candidates. A late send of the closed active token returns `PassClosed` with no match. Re-nominating or explicitly re-opening that closed token returns `TokenReorderedOrReused` and poisons **that viewer session only**. A strictly newer token remains valid if the viewer was not poisoned. Ends older than the current active token return `StaleToken` without touching the newer pass. An end for an unknown viewer stores its closed token without inventing an active pass, subject to bounded capacity. Duplicate active end returns `PassClosed`. Invalid epoch, zero token and table-overflow rules remain fail closed. Multiple different creatures can be nominated under one **still open** token.
+
+The 10 November CS02 child below changes one part of that rule: a strictly newer end closes through the new token instead of poisoning the viewer. Same-token replay of an ended pass is unchanged.
 
 **Old-RED/new-GREEN protection:** the workflow compiles exactly the same old-API C++ behavior reproducer against the pristine #131 header and the proposed header, using GCC/Clang C++17/C++20. The old build MUST compile but exit with a reproducible unsafe replay match; the new build MUST compile and exit successfully with no match. A compile failure solely from a changed enum or return signature is never accepted as old-RED. Native suite also checks unknown/stale/future end, duplicate end, cancellation, multi-creature pass and #94 restore-debt invariance. **At authoring, hosted Actions must still be independently checked for terminal success before calling these results PASS.**
 
 **Core/source limitation:** newer owner-Core draft #8/#9 proposes default-OFF notifier pass and exact batch GUID send-CALL producers, but this pure table is **unwired** and knows no verified present Core listener/refresh ABI, delivery acknowledgement, current creature incarnation or observer epoch. In particular the immediate `Player::UpdateVisibilityOf(WorldObject*)` direct `DestroyForPlayer`/`SendUpdateToPlayer` path is separate from the batch notifier and **cannot inherit its send evidence**. Never clear any #94 `PriorHiddenLedger` owed restore on Begin/SendCall/End, cancellation or this correlation. Worldserver/native, 3.3.5a two-human gameplay, owner S5 installed source/DB/SQL/DBC/client and backup restore remain release blockers. F14 and paid features OFF.
 
 **Rollback:** close this isolated DRAFT and abandon its child branch. Original #131 and #94/#103/#104 stay unchanged; no owner host, account data, SQL, config, packet format or client touched.
+
+## 10 November 2026 — CS02 pass liveness (DRAFT child of #141, OFF, not wired)
+
+This section is a pure-model correction on top of the closed-pass replay rule above. It does not register a listener, does not define a Core macro, and does not turn any F14 or paid flag on. `HasCorePassTokenProducer()` stays false.
+
+### Strictly newer end
+
+`ObservePassEnded` / `CancelPass` of a token strictly above `lastToken` now sets both `lastToken` and `closedThrough` to that token, drops only that viewer's candidates, and returns `PassAccepted`. The viewer is not poisoned. A later higher token can nominate. A same-token nominate of the ended token still returns `TokenReorderedOrReused` and poisons **that viewer session only**. A late send of the ended token returns `PassClosed` and does not match. An older end still returns `StaleToken` and does not change the newer pass.
+
+Backwards, reused or wrapped tokens on `Nominate` / `ObserveSuccessorPass`, and re-opening a closed token, still poison that viewer only. Another viewer's candidates are left alone. Several creatures may still be nominated under one open token; ending that token, or a newer one, drops them together.
+
+### Logged-out epoch and tombstones
+
+Viewer slots are keyed by raw GUID. A different `loginEpoch` is a different session. Replacement is allowed only when all of these hold: the incoming epoch is strictly greater, the stored pass is fully closed (`closedThrough >= lastToken` and `lastToken != 0`), the record is not poisoned, and no candidate remains for that GUID. That record is a tombstone. The same slot is overwritten. An open pass, any candidate, or a poison flag is live evidence and still returns `UnobservedSessionChange` until `ObserveViewerSessionEnded`.
+
+A late end from an older epoch, including one that arrives after logout recreated a tombstone and the new epoch has since stored live evidence or its own tombstone, does not poison and does not delete the newer record. Logout itself still forgets the slot. The hole this closes is the end that arrives **after** that forget and installs a closed tombstone for the old epoch, which previously made every later epoch return `UnobservedSessionChange` for the rest of the table's life.
+
+### Unknown-viewer capacity (default 256)
+
+The 256-slot unknown-viewer table is `DefaultMaxViewers` (256). Each distinct viewer GUID occupies one slot, whether it got there by nomination or by an end for a GUID the table had not seen. A new login epoch of a GUID that already has a slot does not take a second slot.
+
+When all 256 slots are full, the next end or nomination for a GUID that is not already stored calls `PoisonTable()`:
+
+- the table's poison flag is set and is never cleared (there is no reset);
+- every candidate is dropped, including candidates that belonged to viewers already in the table;
+- no slot is evicted and no closed tombstone is reused to make room;
+- every later `Nominate`, `Correlate`, `ObserveSuccessorPass`, `ObservePassEnded` and `CancelPass` returns `TablePoisoned`;
+- `ObserveViewerSessionEnded` can still forget a GUID, but that does not unpoison the table or free a usable slot for new evidence.
+
+Filling the 256 slots with unknown-viewer closed tombstones is enough. The 257th distinct GUID's end poisons **every** viewer, not only the new one. This does not touch the #94 prior-hidden ledger. That ledger is a different object. This table never holds restore debt and never calls a ledger clear.
+
+Candidate overflow (default 1024) is a separate counter and poisons the same way.
+
+### What Core8 and Core9 actually do (not consumed here)
+
+Read from Michael's Core fork, not from this header:
+
+- Core draft [#8](https://github.com/CosmicCuddle/azerothcore-wotlk/pull/8) head `2e2a21ae2224a9738cd92abf00bab957dbfb7604` is default **OFF**. The new calls exist only when `COSMIC_F14_NOTIFIER_PASS_LIFECYCLE_EXPERIMENT>=1`. Nothing in that PR registers a script listener.
+- `VisibleNotifier`'s constructor calls `BeginF14NotifierPass()` after `m_newVisible.clear()` and before the near/far scans, and only for an in-world player with a non-headless session. `VisibilityPassTokenSource::Issue()` hands out one process-global nonzero token via atomic CAS, starting at 1. It saturates: after `UINT64_MAX` the next issue returns 0 and the constructor records no pass. Tokens are not per viewer and do not wrap.
+- `SendToSelf` emits `OnF14ViewerVisibilityPassBatchSendAttempt` only after `SendDirectMessage`, and only when the batch had data and a token was born. An empty batch returns before that call and emits no send event.
+- The destructor always emits `OnF14ViewerVisibilityPassEnd` for a born token, including an empty batch, an early return, and stack unwinding. The notifier is non-copyable under the macro, so one stack object ends its own token once.
+- Those three callbacks carry `(Player const*, token)` only. They do not carry a login epoch, a creature GUID, an incarnation, or a client ACK. `Player::UpdateVisibilityOf(WorldObject*)` is not on this path and is not given a token.
+- Core draft [#9](https://github.com/CosmicCuddle/azerothcore-wotlk/pull/9) head `865724cee8d0fb94d7496854c0f426f60bac2232` adds per-creature CREATE/OUT GUID candidates only when **both** its macro and the Core8 macro are set. The GUID event is dispatched after the same `SendDirectMessage`, and only with the real Core8 token. It still has no registered consumer, no login epoch, and no incarnation. Pass end remains the Core8 destructor, including for passes that nominated nothing.
+
+So a real Core8 pass is begin, then an optional batch send, then end, including when the pass is empty. A later pass for the same viewer has a strictly greater token, not necessarily the previous token plus one. This table does not receive those callbacks. The liveness rule above is only so that a future consumer can forward an empty end without killing the viewer session. It is not a claim that Core8 already calls `ObservePassEnded`, and it is not evidence of packet delivery or of a cleared #94 debt.
+
+### #94 debt check
+
+The native composition test snapshots ledger size, pending restores, poison, freeze, `NeedsRestore`, and the found evidence's incarnation and restore stage **before** end, cancel, same-token replay and a strictly newer empty end, then requires the same values afterwards. Pending is required to be at least one, so the comparison is not an empty ledger matching itself. A correlate of the ended token must not be `Matched`. The #94 ledger and its blobs are unchanged.

@@ -857,3 +857,15 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 | Risks / dependencies | Pure model **not wired**. A pass token and per-creature send-call source do not demonstrate delivery/ACK or immediate direct-path coverage; current login epoch/incarnation, concurrent worker safety, refresh and gameplay rights are distinct unresolved release gates. F14 never enabled by this change. |
 | Tests / evidence | New old-API-compatible old-RED (runtime failure, NOT compile error) / new-GREEN CI and four-compiler native model/source regression suite prepared. **No PASS claimed until original exact-head Actions jobs are verified terminal successful.** No Worldserver or 3.3.5a gameplay test, no owner host access. |
 | Deployment / rollback | DRAFT only; no merge/install. Abandon this separate branch/PR to roll back; preserve original Claude source, custom SQL, character data and restore ledger. Before any future production change: installed-source inventory, restorable backups, owner approval, offline composite native and actual gameplay checks. |
+
+## IP-F14-E1-PASS-LIVENESS-CS02-20261110 — empty end, tombstone epoch, debt check (DRAFT, OFF)
+
+| Field | Record |
+| --- | --- |
+| Owner / coordination | CosmicCuddle. CS02-IP child of frozen CS01 [IP #141](https://github.com/CosmicCuddle/mod-individual-progression/pull/141) `1a82d7ecce16d203059c679bfe16da709ed21aab`. No writes to that branch, to Claude #131, or to #142. |
+| Intended behaviour | A strictly newer pass end, including an empty or never-nominated one, closes through that token and does not poison the viewer. Same-token replay of an ended pass still poisons that viewer only. A late end from an older login epoch may replace only a fully closed, candidate-free, unpoisoned tombstone; it must not poison or delete live evidence, and it must not permanently block the newer epoch. Backwards, reused and wrapped tokens still poison that viewer. The #94 ledger is untouched. |
+| 256-slot unknown-viewer capacity | `DefaultMaxViewers` is 256. The 257th distinct viewer GUID, including an unknown-viewer end, poisons the whole table (`TablePoisoned`), drops every candidate, and does not evict a tombstone. Session-end forget does not unpoison it. This does not clear #94 restore debt. |
+| Owning source | Branch `fix/cs02-f14-e1-pass-liveness-20261110`, base `fix/cs01-f14-e1-pass-ended-replay-20261110`. Same six paths only. |
+| Config / SQL / DBC / client | None. No Core, Playerbots, Naxx or Services edit. All F14 and paid flags stay OFF. Core8/Core9 remain unwired OFF producers; this header still has no pass-token producer. |
+| Tests / evidence | Native model plus source contracts. New and tightened checks are run against unmodified `1a82d7ec` (behavioural RED) and against this head (GREEN). No Worldserver, no deploy. |
+| Rollback | Close this draft. #141 and the #94 ledger stay as they were. |
