@@ -1061,7 +1061,7 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 | Known risks / limits | IP pilot config plain booleans, current login epoch and target identity still require global concurrency/refresh review. The **legacy separate `COSMIC_F14_OBSERVER_HOOK_VERSION` class** is still dormant and must be addressed before enabling any such Core macro. It does not fix NPC restore/attack/DoT/loot/pet/assist/tap/group rights or real Core direct visibility path. Raw stage lookup still depends on thread-safe established in-memory Player access and is not an executable five-owner runtime test. |
 | Evidence | Source proof and exact paid-policy native equivalence tests prepared, no PASS claimed until original exact-head GitHub Actions terminal result. New Core9/PB15/IP child + Naxx/Services full Worldserver link and owner-installed source/SQL/DBC/client + backup/game validation remain separate gates. |
 | Merge / live / rollback | Isolated DRAFT only; no merge, config enable, deployment or owner host operation. Abandon child branch/PR and preserve frozen IP140 and all custom code/data. Owner approval, restorable backups, full composite native and actual two-human 3.3.5a game tests remain mandatory before any live use. |
- 
+
 ## IP-F14-E1-IP142-COMPOSITION-CS01-20261111 — safe model-only source union (DRAFT/OFF)
 
 | Field | Record |
