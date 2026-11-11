@@ -190,7 +190,7 @@ So a real Core8 pass is begin, then an optional batch send, then end, including 
 
 The native composition test snapshots ledger size, pending restores, poison, freeze, `NeedsRestore`, and the found evidence's incarnation and restore stage **before** end, cancel, same-token replay and a strictly newer empty end, then requires the same values afterwards. Pending is required to be at least one, so the comparison is not an empty ledger matching itself. A correlate of the ended token must not be `Matched`. The #94 ledger and its blobs are unchanged.
 
- 
+
 ### IP142 compatibility composition — 11 November 2026 (separate DRAFT)
 This exact original E1 pure header and native model is copied unchanged into a new child of
 IP142 `f259c859`, which retains later raw-stage/cache-only human observer safeguards
