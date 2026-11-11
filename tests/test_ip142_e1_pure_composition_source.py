@@ -19,7 +19,7 @@ ALLOWED={
 def git(*args):
     return subprocess.check_output(["git", "-C", str(ROOT), *args])
 def blob(data):
-    return hashlib.sha1(b"blob %d\\0" % len(data)+data).hexdigest()
+    return hashlib.sha1(b"blob %d\0" % len(data)+data).hexdigest()
 
 class SourceOnlyE1Composition(unittest.TestCase):
     def test_header_unmodified_from_grok_frozen_ip143(self):
