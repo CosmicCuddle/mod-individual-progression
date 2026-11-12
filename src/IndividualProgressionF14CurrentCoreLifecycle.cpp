@@ -195,6 +195,8 @@ namespace
     }
 
 #if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+    void RequestActorKeyCreatureRefresh(Map* map, Combat::ActorKey const& actor,
+        IndividualProgressionF14CurrentRightsRefresh::Reason reason);
     void RequestActorCurrentCreatureRefresh(
         Player const* player, IndividualProgressionF14CurrentRightsRefresh::Reason reason);
 #endif
@@ -224,7 +226,7 @@ namespace
         if (!actor)
             return;
 #if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
-        RequestActorCurrentCreatureRefresh(player,
+        RequestActorKeyCreatureRefresh(player->GetMap(), actor,
             IndividualProgressionF14CurrentRightsRefresh::Reason::CombatStateChanged);
 #endif
         CombatTracker().EndActor(actor);
@@ -251,7 +253,7 @@ namespace
         if (actor)
         {
 #if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
-            RequestActorCurrentCreatureRefresh(player,
+            RequestActorKeyCreatureRefresh(player->GetMap(), actor,
                 IndividualProgressionF14CurrentRightsRefresh::Reason::CombatStateChanged);
 #endif
             CombatTracker().EndActor(actor);
@@ -322,16 +324,23 @@ namespace
         return live && live == key ? creature : nullptr;
     }
 
-    void RequestActorCurrentCreatureRefresh(Player const* player, RightsRefresh::Reason reason)
+    void RequestActorKeyCreatureRefresh(Map* map, Combat::ActorKey const& actor, RightsRefresh::Reason reason)
     {
-        Combat::ActorKey const actor = ReadCombatActor(player);
-        if (!actor || !player || !player->GetMap())
+        if (!map || !actor)
             return;
         Combat::ActorState const state = CombatTracker().InspectActor(actor.guid);
         if (!state.found || !state.active || !(state.actor == actor))
             return;
-        if (Creature* creature = ResolveCurrentCombatCreature(player->GetMap(), state.creature))
+        if (Creature* creature = ResolveCurrentCombatCreature(map, state.creature))
             RequestCreatureRightsRefresh(creature, reason);
+    }
+
+    void RequestActorCurrentCreatureRefresh(Player const* player, RightsRefresh::Reason reason)
+    {
+        Combat::ActorKey const actor = ReadCombatActor(player);
+        if (!actor || !player)
+            return;
+        RequestActorKeyCreatureRefresh(player->GetMap(), actor, reason);
     }
 
     void RequestParticipantRightsRefresh(Unit* unit, RightsRefresh::Reason reason)
