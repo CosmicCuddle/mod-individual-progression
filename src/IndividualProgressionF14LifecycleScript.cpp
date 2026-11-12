@@ -814,7 +814,21 @@ public:
         current->stamp.Bind(player->GetGUID().GetRawValue(), epoch);
     }
 
+    // Core LogoutPlayer invokes this before loot/death/map teardown,
+    // including redirecting logout where OnPlayerLogout is skipped.
+    // Revoke only observer identity; no restoration debt is retired here.
+    void OnPlayerBeforeLogout(Player* player) override
+    {
+        RevokeViewerStamp(player);
+    }
+
     void OnPlayerLogout(Player* player) override
+    {
+        RevokeViewerStamp(player);
+    }
+
+private:
+    static void RevokeViewerStamp(Player* player)
     {
         if (player)
             if (HumanViewerSessionStamp* state =
