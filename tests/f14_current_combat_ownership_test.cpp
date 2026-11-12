@@ -82,6 +82,7 @@ int main()
     CHECK(maps.Observe(a,C::CreatureKey{c.guid,c.incarnation,{1,9}}) == C::ObserveResult::Refused);
     CHECK(maps.ActiveAttackers(c) == 1);
 
-    std::cout << "PASS current combat ownership: multiple attackers, target/map changes, relog stale rejection, exact creature retirement, session slot reuse and fail-visible poison\n";
+    std::cout << "PASS current combat ownership: multiple attackers, target/map changes, relog stale rejection, exact creature retirement and fail-visible poison\n";
+    std::cout << "PASS session slot release/reuse and poisoned InspectActor refusal\n";
     return EXIT_SUCCESS;
 }
