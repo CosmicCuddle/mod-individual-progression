@@ -1,11 +1,11 @@
-name: IP142 plus frozen IP143 pure E1 model source composition (OFF)
+name: IP145 N1 same-epoch rights and era replay fence (OFF)
 on:
   push:
     branches:
-      - integrate/cs01-ip142-e1-pure-correlation-off-20261111
+      - fix/cs01-ip145-e1-rights-era-pass-tombstone-20261112
   pull_request:
     branches:
-      - fix/cs01-f14-viewer-raw-stage-no-authdb-20261110
+      - integrate/cs01-ip142-e1-pure-correlation-off-20261111
 permissions:
   contents: read
 jobs:
@@ -45,6 +45,22 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B -m unittest discover -s tests -p test_ip142_e1_pure_composition_source.py -v
+      - name: Reproduce executable old-RED rights/era replay with exact parent header
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=65d0110ec7b34a6d284833e235cb0a98f2e50f55
+          mkdir -p /tmp/ip145-old
+          git show "$parent:src/IndividualProgressionF14SendAttemptCorrelation.h" > /tmp/ip145-old/IndividualProgressionF14SendAttemptCorrelation.h
+          ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 -I/tmp/ip145-old -Isrc tests/f14_send_attempt_correlation.cpp -o /tmp/ip145-old-test
+          set +e
+          /tmp/ip145-old-test > /tmp/ip145-old-result
+          status=$?
+          set -e
+          test "$status" = 1
+          grep -Fq 'closed.Nominate(kViewer, kA, kInc, Out::Create, 70, Facts(kViewer, kA, kInc, true)) == C::Result::TokenReorderedOrReused' /tmp/ip145-old-result
+          grep -Fq '!closed.Correlate(Send(kViewer, kA, Out::Create, 70)).Matched()' /tmp/ip145-old-result
+          echo 'PASS old exact header compiled and reproduced stale replay; new full suite must now pass'
       - name: Compile and run E1, original protocol and adapter pure C++
         shell: bash
         run: |

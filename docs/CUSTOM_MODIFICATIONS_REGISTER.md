@@ -1074,3 +1074,14 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 | Dependencies and risks | IP142's `ViewerRestoreProtocol.h` has an extra read-only snapshot vs IP143, but common E1 methods are unchanged. Native pure model must compile at this exact tuple; a synthetically correlated send is NOT an authenticated human login epoch, cause, incarnation, true Core packet placement or client receipt. IP E1 still has no runtime listener; R2 #94 unacknowledgeable client restore, L1 cross-map debt handoff and positive rights remain unresolved. Separate Core14 real guarded OUT source is **not** an enabled IP producer. |
 | Tests and evidence | Focused GCC/Clang C++17/20 native pure E1 correlation, original #94 Protocol/adapter tests, source/registration and strict six-path GitHub CI. Do not claim success until exact hosted Action run is terminal GREEN. Full five-owner Worldserver compatibility and actual gameplay are separate. |
 | Live / decisions / rollback | DRAFT/UNMERGED/OFF; no install/host/database. Abandon this independent child without changing the source fork, core, custom SQL or live server. Requires independent reviewer, S5 actual owner-host inventories + restorable offline backups and owner-approved 3.3.5a S6 before release. |
+
+## IP-F14-E1-N1-RIGHTS-ERA-TOMBSTONE-20261112 — same-epoch replay fence (DRAFT/OFF)
+
+| Field | Record |
+| --- | --- |
+| Owner / source | CosmicCuddle; CS01 isolated child of IP145 `65d0110ec7b34a6d284833e235cb0a98f2e50f55`. Grok's [N1 review](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/11#issuecomment-6820076182) confirmed model replay gap. |
+| Intended behavior | Rights/era invalidation closes the observed current pass, drops that viewer's candidates and keeps its tombstone and poison. No same-epoch reopening or capacity reset; authentic new login epoch replacement and explicit logout rules preserved. |
+| Paths / dependencies | Pure correlation header, original native correlation test, existing exact-source test and workflow, append-only register. Original #94/#85, IP142 runtime, other modules and config/SQL/client unchanged. |
+| Limits / risks | Unknown viewer events cannot establish a local last token; a future authenticated consumer must check actual Core pass, login epoch and map ownership generation on every callback. Logout revocation, global retention and atomic reservation, R2 and L1 runtime remain unimplemented. No client ACK or authority to conceal. |
+| Tests | Focused exact old-header executable RED and corrected full native suite GCC/Clang C++17/20 normal/NDEBUG; no PASS until hosted evidence. Existing source-composition tests verify frozen header provenance and exact method-only correction. |
+| Live / rollback | DRAFT/OFF. Preserve IP145/IP143 and original model/protocol. No install, merge, DB, client or deployment; abandon child if needed. |

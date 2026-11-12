@@ -467,7 +467,7 @@ namespace
         // Rights / era revoked before the send.
         CHECK(t.Nominate(kViewer, kA, kInc, Out::OutOfRange, kPass, Facts(kViewer, kA, kInc)) == C::Result::Nominated);
         t.ObserveViewerRightsOrEraChanged(kViewer.guidRaw);
-        CHECK(t.Correlate(Send(kViewer, kA, Out::OutOfRange, kPass)).result == C::Result::NoCandidate);
+        CHECK(t.Correlate(Send(kViewer, kA, Out::OutOfRange, kPass)).result == C::Result::PassClosed);
 
         // Global freeze refuses both directions at both ends.
         Table f;
@@ -476,6 +476,49 @@ namespace
         s.globalRestoreRequired = true;
         CHECK(f.Correlate(s).result == C::Result::GlobalFreeze);
         CHECK(f.Candidates() == 1); // nothing consumed, nothing upgraded
+    }
+
+    // N1: same-login rights/era invalidation must not reopen a closed pass.
+    // Synthetic evidence only. An actual callback must authenticate its epoch
+    // and ownership generation, including for previously unknown viewers.
+    void TestRightsEraInvalidationKeepsReplayFence()
+    {
+        Table closed;
+        CHECK(closed.Nominate(kViewer, kA, kInc, Out::OutOfRange, 70, Facts(kViewer, kA, kInc)) == C::Result::Nominated);
+        CHECK(closed.ObservePassEnded(kViewer, 70) == C::Result::PassAccepted);
+        closed.ObserveViewerRightsOrEraChanged(kViewer.guidRaw);
+        CHECK(closed.Viewers() == 1 && closed.Candidates() == 0);
+        CHECK(closed.Correlate(Send(kViewer, kA, Out::Create, 70)).result == C::Result::PassClosed);
+        CHECK(closed.Nominate(kViewer, kA, kInc, Out::Create, 70, Facts(kViewer, kA, kInc, true)) == C::Result::TokenReorderedOrReused);
+        CHECK(!closed.Correlate(Send(kViewer, kA, Out::Create, 70)).Matched());
+        closed.ObserveViewerRightsOrEraChanged(kViewer.guidRaw);
+        CHECK(closed.Nominate(kViewer, kA, kInc, Out::Create, 71, Facts(kViewer, kA, kInc, true)) == C::Result::ViewerPoisoned);
+
+        Table open;
+        CHECK(open.Nominate(kViewer, kA, kInc, Out::OutOfRange, 80, Facts(kViewer, kA, kInc)) == C::Result::Nominated);
+        CHECK(open.Nominate(kViewer, kB, kInc, Out::OutOfRange, 80, Facts(kViewer, kB, kInc)) == C::Result::Nominated);
+        CHECK(open.Nominate(kOther, kB, kInc, Out::OutOfRange, 81, Facts(kOther, kB, kInc)) == C::Result::Nominated);
+        open.ObserveViewerRightsOrEraChanged(kViewer.guidRaw);
+        open.ObserveViewerRightsOrEraChanged(kViewer.guidRaw); // idempotent
+        open.ObserveViewerRightsOrEraChanged(0);
+        open.ObserveViewerRightsOrEraChanged(999); // unknown does not allocate
+        CHECK(open.Viewers() == 2 && open.Candidates() == 1);
+        CHECK(open.Correlate(Send(kViewer, kA, Out::OutOfRange, 80)).result == C::Result::PassClosed);
+        CHECK(open.Correlate(Send(kOther, kB, Out::OutOfRange, 81)).Matched());
+        CHECK(open.Nominate(kViewer, kA, kInc, Out::Create, 82, Facts(kViewer, kA, kInc, true)) == C::Result::Nominated);
+        CHECK(open.Correlate(Send(kViewer, kA, Out::Create, 82)).Matched());
+
+        // New login epoch replacement is still allowed for a clean closed
+        // tombstone; an old-epoch callback cannot touch the new session.
+        open.ObserveViewerRightsOrEraChanged(kViewer.guidRaw);
+        CHECK(open.Nominate(kRelog, kA, kInc, Out::OutOfRange, 83, Facts(kRelog, kA, kInc)) == C::Result::Nominated);
+        CHECK(open.Correlate(Send(kViewer, kA, Out::Create, 82)).result == C::Result::StaleEpoch);
+        CHECK(open.Correlate(Send(kRelog, kA, Out::OutOfRange, 83)).Matched());
+
+        // True logout retains its previous explicitly-scoped behavior.
+        open.ObserveViewerSessionEnded(kRelog.guidRaw);
+        CHECK(open.Viewers() == 1 && open.Candidates() == 0);
+        CHECK(open.Correlate(Send(kRelog, kA, Out::OutOfRange, 83)).result == C::Result::NoCandidate);
     }
 
     void TestOverflowPoisons()
@@ -720,6 +763,7 @@ int main()
     TestPassLiveness();
     TestAmbiguityAndCrossMap();
     TestInvalidationsAndFreeze();
+    TestRightsEraInvalidationKeepsReplayFence();
     TestOverflowPoisons();
     TestComposesWithUnchangedProtocolAndAdapter();
     TestRandomisedInvariants();

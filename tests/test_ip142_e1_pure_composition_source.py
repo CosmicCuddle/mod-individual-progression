@@ -1,4 +1,4 @@
-"""IP142 plus frozen IP143 E1 model: add-only pure source composition."""
+"""IP145 N1 child: exact model-only same-epoch invalidation correction."""
 from pathlib import Path
 import hashlib
 import subprocess
@@ -22,8 +22,20 @@ def blob(data):
     return hashlib.sha1(b"blob %d\0" % len(data)+data).hexdigest()
 
 class SourceOnlyE1Composition(unittest.TestCase):
-    def test_header_unmodified_from_grok_frozen_ip143(self):
-        self.assertEqual(blob(HEADER.read_bytes()),E1_ORIGINAL)
+    def test_frozen_ip145_header_and_exact_n1_method_only(self):
+        parent="65d0110ec7b34a6d284833e235cb0a98f2e50f55"
+        original=git("show",parent+":src/IndividualProgressionF14SendAttemptCorrelation.h")
+        self.assertEqual(blob(original),E1_ORIGINAL)
+        current=HEADER.read_text()
+        start=current.index("        // Rights/era changes do not end")
+        stop=current.index("        void ObserveCreatureRetired",start)
+        body=current[start:stop]
+        self.assertIn("pass.closedThrough = pass.lastToken;",body)
+        self.assertIn("DropIf([&](Candidate const& c) { return c.viewer == pass.viewer; });",body)
+        self.assertNotIn("ForgetViewer(",body)
+        self.assertNotIn("pass.poisoned =",body)
+        reconstructed=current[:start]+("        void ObserveViewerRightsOrEraChanged(std::uint64_t viewerGuid) { ForgetViewer(viewerGuid); }\n")+current[stop:]
+        self.assertEqual(reconstructed.encode(),original)
 
     def test_unchanged_ip142_runtime_protocol_ledger_and_configs(self):
         names=git("ls-tree","-r","--name-only",PARENT).decode().splitlines()
@@ -40,6 +52,11 @@ class SourceOnlyE1Composition(unittest.TestCase):
         after=(ROOT/"docs/CUSTOM_MODIFICATIONS_REGISTER.md").read_bytes()
         self.assertTrue(after.startswith(before.rstrip()))
         self.assertIn(b"IP-F14-E1-IP142-COMPOSITION-CS01-20261111",after)
+        parent="65d0110ec7b34a6d284833e235cb0a98f2e50f55"
+        changed_child=set(git("diff","--name-only",parent,"HEAD").decode().splitlines())
+        self.assertEqual(changed_child, ALLOWED-{"docs/F14_SEND_ATTEMPT_CORRELATION_2026-11-08.md"})
+        self.assertTrue(after.startswith(git("show",parent+":docs/CUSTOM_MODIFICATIONS_REGISTER.md")))
+        self.assertIn(b"IP-F14-E1-N1-RIGHTS-ERA-TOMBSTONE-20261112",after)
 
     def test_unwired_no_fake_client_ack_or_core_token(self):
         src=HEADER.read_text()
