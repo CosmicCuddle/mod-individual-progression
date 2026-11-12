@@ -1085,3 +1085,24 @@ Also carry the pre-existing F14_MULTI_ATTACKER_LIFECYCLE_POLICY and F14_COMBAT_V
 | Limits / risks | Unknown viewer events cannot establish a local last token; a future authenticated consumer must check actual Core pass, login epoch and map ownership generation on every callback. Logout revocation, global retention and atomic reservation, R2 and L1 runtime remain unimplemented. No client ACK or authority to conceal. |
 | Tests | Focused exact old-header executable RED and corrected full native suite GCC/Clang C++17/20 normal/NDEBUG; no PASS until hosted evidence. Existing source-composition tests verify frozen header provenance and exact method-only correction. |
 | Live / rollback | DRAFT/OFF. Preserve IP145/IP143 and original model/protocol. No install, merge, DB, client or deployment; abandon child if needed. |
+
+
+## IP-F14-L1-RESERVATION-GATE-20261112 — bounded reservation accounting (DRAFT/OFF)
+
+| Field | Record |
+| --- | --- |
+| Owner / source | CosmicCuddle; CS01. [IP #149](https://github.com/CosmicCuddle/mod-individual-progression/pull/149) exact `30ef8f13dda33d2117aa48674c9f1d400a10ec05`, child of IP146 `0392fc48`. |
+| Intended behavior | Bound active/retained shard slots, serialize positive reservation against sticky fence closure, reject stale generation/token and preserve retained obligations including in-flight state. No actual payload or runtime admission authority. |
+| Paths / dependencies | `src/IndividualProgressionF14ReservationGate.h`, `tests/f14_reservation_gate_test.cpp`, `.github/workflows/f14-reservation-gate-model.yml`; standard C++ mutex/array only. No existing runtime, config, SQL, DBC or client changes. |
+| Risks / limits | Caller preallocation/clean/quiescence inputs are external; shard count is not creature pair capacity or actual byte bound. No R2 clear or client ACK. A single process-lifetime owner and actual payload ownership are required before runtime wiring. |
+| Tests / live / rollback | [Exact hosted run 43200708031](https://github.com/CosmicCuddle/mod-individual-progression/actions/runs/43200708031) four jobs SUCCESS (GCC/Clang C++17/20 normal and NDEBUG; 256 concurrent reservation/fence trials per execution). DRAFT/unmerged/OFF; no Worldserver or gameplay claim; abandon child. |
+
+## IP-F14-L1-OWNED-RESTORE-SHARDS-20261112 — whole-protocol ownership (DRAFT/OFF)
+
+| Field | Record |
+| --- | --- |
+| Owner / source | CosmicCuddle; CS01 isolated child of IP149 `30ef8f13dda33d2117aa48674c9f1d400a10ec05`, branch `feature/cs01-ip149-f14-owned-retention-model-20261112`. |
+| Intended behavior | Preallocate actual bounded `Protocol<Pairs>` payload before admission; bind reservation to exact map/instance/viewer epoch/creature/incarnation; preserve entire prior-hidden ledger, suppression/restore packet evidence and pending identity by moving exclusive ownership to immutable retained storage on seal. No allocation on seal, no mutable alias, no eviction or debt completion. |
+| Paths / dependencies | `src/IndividualProgressionF14OwnedRestoreShards.h`, focused native test and workflow, append-only register. Reuses unchanged IP149 accounting and original #94/#85 protocol/ledger; no existing runtime, config, SQL, DBC or client changes. |
+| Limits / risks | Pure model; one future process-lifetime owner required, actual map generation/epoch, positive Core decision attribution, quiescence and no-effect cancellation facts are external. Compile-time shard/pair budget is not approved production sizing; allocator overhead not included in MaxPayloadBytes. No runtime E1, existing-hide read routing, actual callback placement, R2 policy, client ACK, map handoff or shutdown guarantee. Invalid/uncertain positive effects fence globally; no permission to conceal. |
+| Tests / live / rollback | Focused GCC/Clang C++17/20 normal/NDEBUG native model and inherited accounting tests, exact retained evidence, capacity, stale/uncertain identity, pre-effect cancellation, nonquiescent seal. No PASS until exact hosted run. DRAFT/unmerged/OFF; preserve IP149 and IP146, abandon independent child. S5/S6 and owner approval before any installation. |
