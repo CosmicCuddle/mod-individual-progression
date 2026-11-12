@@ -309,6 +309,7 @@ Current status after the Part 46 review/build advances:
 - IP170 isolates the current Grimfeather optional-SQL context fix and is deliberately excluded from this Phase A runtime tuple; no optional SQL has been executed;
 - IP171 was independently PASSed as negative-only; its pre-adapter completeness/threat/service findings were isolated in unwired IP172;
 - IP172 focused completeness gate is 4/4 GREEN and CosmicScript02/Grok independently PASSed it as still negative-only/unwired. IP172 remains evidence-model work only and is **not** part of the active runtime candidate;
+- Core25/PB19 real upstream-restack candidate is under separate Services71 native validation; do not substitute it into Phase A until that exact run is terminal GREEN;
 - positive concealment remains hard-FALSE and Core23 registers no positive CREATE listener;
 - R2 #42 remains unanswered;
 - no gameplay acceptance has been claimed;
