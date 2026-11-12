@@ -15,6 +15,18 @@ static Risk::Facts Baseline()
     f.creatureInWorld = true;
     f.sameMapAndInstance = true;
     f.creatureAlive = true;
+
+    f.viewerEligibilityEvidenceComplete = true;
+    f.creatureEligibilityEvidenceComplete = true;
+    f.directInteractionEvidenceComplete = true;
+    f.ownedUnitEvidenceComplete = true;
+    f.creatureRoleEvidenceComplete = true;
+    f.groupLootEvidenceComplete = true;
+    f.auraEvidenceComplete = true;
+    f.pendingSpellEvidenceComplete = true;
+    f.serviceInteractionEvidenceComplete = true;
+    f.scriptedRewardEvidenceComplete = true;
+    f.questEvidenceComplete = true;
     return f;
 }
 
@@ -22,11 +34,51 @@ int main()
 {
     using R = Risk::Result;
 
+    // A fully evidenced clean negative snapshot is still not authority.
     {
         auto f = Baseline();
         CHECK(Risk::Evaluate(f) == R::NoKnownVeto_NotAuthority);
         CHECK(!Risk::MustRemainVisible(f));
         CHECK(!Risk::IsConcealmentAuthorized(f));
+    }
+
+    // A lifecycle-valid snapshot with omitted evidence families fails visible.
+    {
+        Risk::Facts f;
+        f.viewerPresent = true;
+        f.creaturePresent = true;
+        f.viewerInWorld = true;
+        f.creatureInWorld = true;
+        f.sameMapAndInstance = true;
+        f.creatureAlive = true;
+        CHECK(Risk::Evaluate(f) == R::EvidenceIncomplete);
+        CHECK(Risk::MustRemainVisible(f));
+    }
+
+    // Every completeness family is independently mandatory.
+    {
+        bool Risk::Facts::* const complete[] = {
+            &Risk::Facts::viewerEligibilityEvidenceComplete,
+            &Risk::Facts::creatureEligibilityEvidenceComplete,
+            &Risk::Facts::directInteractionEvidenceComplete,
+            &Risk::Facts::ownedUnitEvidenceComplete,
+            &Risk::Facts::creatureRoleEvidenceComplete,
+            &Risk::Facts::groupLootEvidenceComplete,
+            &Risk::Facts::auraEvidenceComplete,
+            &Risk::Facts::pendingSpellEvidenceComplete,
+            &Risk::Facts::serviceInteractionEvidenceComplete,
+            &Risk::Facts::scriptedRewardEvidenceComplete,
+            &Risk::Facts::questEvidenceComplete,
+        };
+
+        for (auto member : complete)
+        {
+            auto f = Baseline();
+            f.*member = false;
+            CHECK(Risk::Evaluate(f) == R::EvidenceIncomplete);
+            CHECK(Risk::MustRemainVisible(f));
+            CHECK(!Risk::IsConcealmentAuthorized(f));
+        }
     }
 
     // Invalid/lifecycle/GM/dead facts always veto.
@@ -47,27 +99,57 @@ int main()
         CHECK(Risk::Evaluate(f) == R::CreatureNotLiveEligibleTarget);
     }
 
-    // Historical #99 direct/player-owned/loot negative evidence.
-    for (std::uint32_t bit = 0; bit < 7; ++bit)
+    // Direct viewer and threat/combat-reference evidence.
     {
-        auto f = Baseline();
-        switch (bit)
-        {
-            case 0: f.viewerTargetsCreature = true; break;
-            case 1: f.viewerAttacksCreature = true; break;
-            case 2: f.creatureAttacksViewer = true; break;
-            case 3: f.ownedUnitTargetsOrAttacksCreature = true; break;
-            case 4: f.creatureAttacksOwnedUnit = true; break;
-            case 5: f.viewerIsLootRecipient = true; break;
-            case 6: f.anyGroupLootRecipient = true; break;
-        }
-        CHECK(Risk::MustRemainVisible(f));
-        CHECK(!Risk::IsConcealmentAuthorized(f));
+        auto f = Baseline(); f.viewerTargetsCreature = true;
+        CHECK(Risk::Evaluate(f) == R::DirectViewerInteraction);
+    }
+    {
+        auto f = Baseline(); f.viewerAttacksCreature = true;
+        CHECK(Risk::Evaluate(f) == R::DirectViewerInteraction);
+    }
+    {
+        auto f = Baseline(); f.creatureAttacksViewer = true;
+        CHECK(Risk::Evaluate(f) == R::DirectViewerInteraction);
+    }
+    {
+        auto f = Baseline(); f.viewerOnCreatureThreatOrCombatReferences = true;
+        CHECK(Risk::Evaluate(f) == R::DirectViewerInteraction);
     }
 
-    // Historical #100 group/aura negative evidence.
+    // Player-owned/control-unit and creature-role evidence.
+    {
+        auto f = Baseline(); f.ownedUnitTargetsOrAttacksCreature = true;
+        CHECK(Risk::Evaluate(f) == R::PlayerOwnedUnitInteraction);
+    }
+    {
+        auto f = Baseline(); f.creatureAttacksOwnedUnit = true;
+        CHECK(Risk::Evaluate(f) == R::PlayerOwnedUnitInteraction);
+    }
+    {
+        auto f = Baseline(); f.ownedUnitOnCreatureThreatOrCombatReferences = true;
+        CHECK(Risk::Evaluate(f) == R::PlayerOwnedUnitInteraction);
+    }
+    {
+        auto f = Baseline(); f.creatureIsPlayerOwnedOrSummoned = true;
+        CHECK(Risk::Evaluate(f) == R::CreatureOwnershipOrVehicleInterest);
+    }
+    {
+        auto f = Baseline(); f.creatureIsVehicleOrHasPlayerPassenger = true;
+        CHECK(Risk::Evaluate(f) == R::CreatureOwnershipOrVehicleInterest);
+    }
+
+    // Group/loot and aura evidence.
     {
         auto f = Baseline(); f.viewerIsGrouped = true;
+        CHECK(Risk::Evaluate(f) == R::GroupOrLootInterest);
+    }
+    {
+        auto f = Baseline(); f.viewerIsLootRecipient = true;
+        CHECK(Risk::Evaluate(f) == R::GroupOrLootInterest);
+    }
+    {
+        auto f = Baseline(); f.anyGroupLootRecipient = true;
         CHECK(Risk::Evaluate(f) == R::GroupOrLootInterest);
     }
     {
@@ -82,8 +164,31 @@ int main()
         auto f = Baseline(); f.anyPlayerCastAura = true;
         CHECK(Risk::Evaluate(f) == R::AuraEvidenceUncertainOrPlayerCast);
     }
+    {
+        auto f = Baseline(); f.creatureCastAuraOnViewer = true;
+        CHECK(Risk::Evaluate(f) == R::AuraEvidenceUncertainOrPlayerCast);
+    }
 
-    // Historical #101/#102 quest negative evidence.
+    // Grok #171 L2 omitted-interaction categories now veto explicitly.
+    {
+        auto f = Baseline();
+        f.viewerOrOwnedUnitHasPendingSpellOrChannelOnCreature = true;
+        CHECK(Risk::Evaluate(f) == R::PendingSpellOrChannelInterest);
+    }
+    {
+        auto f = Baseline(); f.viewerUsesCreatureServiceOrEscort = true;
+        CHECK(Risk::Evaluate(f) == R::ServiceOrEscortInteraction);
+    }
+    {
+        auto f = Baseline(); f.skinningOrScriptedRewardInterest = true;
+        CHECK(Risk::Evaluate(f) == R::ScriptedOrRewardInterest);
+    }
+    {
+        auto f = Baseline(); f.encounterOrScriptedInteractionInterest = true;
+        CHECK(Risk::Evaluate(f) == R::ScriptedOrRewardInterest);
+    }
+
+    // Historical quest negative evidence.
     {
         auto f = Baseline(); f.activeQuestTemplateMissing = true;
         CHECK(Risk::Evaluate(f) == R::ActiveQuestTemplateUncertain);
@@ -97,11 +202,20 @@ int main()
         CHECK(Risk::Evaluate(f) == R::QuestLootInterest);
     }
 
-    // Multiple facts choose a conservative veto; no combination can authorize.
+    // Known veto wins diagnostically even if another family is incomplete.
+    {
+        auto f = Baseline();
+        f.directInteractionEvidenceComplete = false;
+        f.viewerOnCreatureThreatOrCombatReferences = true;
+        CHECK(Risk::Evaluate(f) == R::DirectViewerInteraction);
+        CHECK(Risk::MustRemainVisible(f));
+    }
+
+    // Multiple facts remain conservative; no combination can authorize.
     {
         auto f = Baseline();
         f.viewerIsGrouped = true;
-        f.anyPlayerCastAura = true;
+        f.creatureCastAuraOnViewer = true;
         f.viewerHasQuestLootForCreature = true;
         CHECK(Risk::MustRemainVisible(f));
         CHECK(!Risk::IsConcealmentAuthorized(f));

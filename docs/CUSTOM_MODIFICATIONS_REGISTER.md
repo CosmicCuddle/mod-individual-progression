@@ -1235,3 +1235,18 @@ The value-only model can require ordinary visibility for: invalid/out-of-world/w
 The terminal clean result is deliberately named `NoKnownVeto_NotAuthority`. It does **not** prove complete rights and cannot be converted into a positive listener. Pending spells/missiles, complete shared group rewards, all controlled-unit sources, skinning/scripted rewards, encounter reach and any unrepresented rights remain unresolved and therefore still require a separate independent authority. `IsConcealmentAuthorized` is permanently FALSE.
 
 No Core pointers/headers, Playerbots lookup, DB, packets, Store Reserve/Commit, visibility mutation, config, SQL, client or host behavior. Existing `IndividualProgressionF14ViewerRightsGate.h` remains byte-identical and still requires an independent full human-pair-rights proof before even returning its hypothetical model result. Focused GCC/Clang C++17/C++20 normal/NDEBUG tests are separate from full Worldserver/gameplay acceptance. Rollback: abandon/revert this pure child; no live-state rollback is required.
+
+
+## IP-F14-PAIR-RIGHTS-COMPLETENESS-20261112 — omitted veto evidence fails visible before any adapter (DRAFT/OFF)
+
+Owner CosmicCuddle; CS01 child of IP171 `5ed525802273178a721f4eec9f4fb05bdac59964`, responding to CosmicScript02/Grok review comment `6828936771`.
+
+IP171 was independently PASSed as pure, unwired and permanently unable to authorize concealment. The review nevertheless identified a latent pre-adapter hazard: represented veto facts defaulted FALSE, so a future adapter that forgot or could not compute one family could reach `NoKnownVeto_NotAuthority` without proving that family had been examined. IP172 preserves the negative-only architecture and makes that omission fail visible.
+
+The value-only `Facts` model now requires explicit evidence-complete proofs for viewer eligibility, creature eligibility, direct interaction, owned-unit interaction, creature ownership/vehicle role, group/loot, aura, pending-spell/channel, service/escort, scripted/reward and quest families. Every completeness bit defaults FALSE. After all known vetoes are checked, any missing family returns `EvidenceIncomplete`; only an explicitly complete clean snapshot may reach `NoKnownVeto_NotAuthority`, which still is not concealment authority. `IsConcealmentAuthorized` remains unconditional FALSE.
+
+The review's omitted negative categories are also represented explicitly: viewer and owned-unit threat/combat references; player-owned/summoned creature or vehicle/passenger state; creature-cast aura on the viewer; pending spell/channel targeting; gossip/vendor/trainer/flight/quest-giver/escort service interaction; skinning/scripted rewards and encounter/scripted interaction. These are conservative veto facts only.
+
+No Core pointers/headers, runtime adapter, hook registration, Playerbots lookup, Store Open/Reserve/Commit, packet action, visibility mutation, restoration completion, config, SQL, DB, DBC, client, host or deployment behavior is added. The existing joint viewer-rights gate remains byte-identical to IP171. IP168 remains the active runtime candidate; IP172 is evidence hardening only. F14/Paid remain OFF and R2 Coordination #42/global restoration recovery remain blockers before any positive concealment.
+
+Focused native tests require every completeness family independently, exercise the new threat/ownership/service/aura/spell/reward vetoes, preserve lifecycle/quest/group cases and prove no combination can authorize concealment. Full Worldserver/gameplay evidence is intentionally not claimed for this unwired pure model. Rollback: abandon/revert this child; no migration or live-state rollback is required.
