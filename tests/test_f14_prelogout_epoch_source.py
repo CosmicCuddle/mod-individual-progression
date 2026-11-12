@@ -43,7 +43,17 @@ def require(ok, message):
 
 parent = subprocess.check_output(["git", "show", PARENT + ":" + PATH], cwd=ROOT).decode()
 current = (ROOT / PATH).read_text()
-require(parent.count(OLD) == 1 and current == parent.replace(OLD, NEW), "non-exact observer-only change")
+require(parent.count(OLD) == 1, "unexpected frozen prelogout parent")
+expected = parent.replace(OLD, NEW)
+# IP153 adds one independent current-Core observer registration. Preserve
+# the exact legacy prelogout body and permit only this explicit composition.
+entry = "void AddSC_mod_individual_progression_f14_lifecycle()\n{\n"
+current_entry = ("void AddSC_mod_individual_progression_f14_current_core_lifecycle();\n\n" +
+                 entry + "    AddSC_mod_individual_progression_f14_current_core_lifecycle();\n")
+if (ROOT / "src/IndividualProgressionF14CurrentCoreLifecycle.cpp").is_file():
+    require(expected.count(entry) == 1, "unexpected old registration entry")
+    expected = expected.replace(entry, current_entry)
+require(current == expected, "non-exact legacy prelogout/current observer composition")
 require("void OnPlayerBeforeLogout(Player* player) override" not in parent, "old regression absent")
 core = pathlib.Path(sys.argv[1])
 session = (core / "src/server/game/Server/WorldSession.cpp").read_text()
