@@ -45,10 +45,36 @@ int main()
     CHECK(t.Inspect().poisoned);
     CHECK(t.ActiveAttackers(C::CreatureKey{300,50,{9,9}}) == 0);
 
+    {
+        C::Tracker<2> reusable;
+        C::ActorKey third{102,12,1002,{1,2}};
+        CHECK(reusable.Observe(a,c) == C::ObserveResult::Recorded);
+        CHECK(reusable.Observe(b,c) == C::ObserveResult::Recorded);
+        CHECK(reusable.EndActor(a));
+        CHECK(reusable.ReleaseActor(a));
+        CHECK(!reusable.InspectActor(a.guid).found);
+        CHECK(reusable.Observe(third,c) == C::ObserveResult::Recorded);
+        CHECK(!reusable.Inspect().poisoned);
+        CHECK(reusable.Inspect().actors == 2);
+    }
+
+    {
+        C::Tracker<1> reusedGuid;
+        C::ActorKey newerA{100,20,2000,{1,2}};
+        CHECK(reusedGuid.Observe(a,c) == C::ObserveResult::Recorded);
+        CHECK(reusedGuid.EndActor(a));
+        CHECK(reusedGuid.ReleaseActor(a));
+        CHECK(reusedGuid.Observe(newerA,c) == C::ObserveResult::Recorded);
+        CHECK(!reusedGuid.ReleaseActor(a));
+        C::ActorState const current = reusedGuid.InspectActor(newerA.guid);
+        CHECK(current.found && current.active && current.actor == newerA);
+    }
+
     C::Tracker<1> tiny;
     CHECK(tiny.Observe(a,c) == C::ObserveResult::Recorded);
     CHECK(tiny.Observe(b,c) == C::ObserveResult::Poisoned);
     CHECK(tiny.Inspect().poisoned);
+    CHECK(!tiny.InspectActor(a.guid).found);
     CHECK(tiny.RetireCreature(c) == 1);
 
     T maps;
@@ -56,6 +82,6 @@ int main()
     CHECK(maps.Observe(a,C::CreatureKey{c.guid,c.incarnation,{1,9}}) == C::ObserveResult::Refused);
     CHECK(maps.ActiveAttackers(c) == 1);
 
-    std::cout << "PASS current combat ownership: multiple attackers, target/map changes, relog stale rejection, exact creature retirement and fail-visible poison\n";
+    std::cout << "PASS current combat ownership: multiple attackers, target/map changes, relog stale rejection, exact creature retirement, session slot reuse and fail-visible poison\n";
     return EXIT_SUCCESS;
 }
