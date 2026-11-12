@@ -15,6 +15,7 @@ int main()
         CHECK(t.Begin(500,a) == P::Result::Recorded);
         CHECK(t.IsActive(500,a));
         CHECK(t.ObserveBatch(500,a) == P::Result::BatchObserved);
+        CHECK(t.BatchWasObserved(500,a));
         CHECK(t.Begin(501,b) == P::Result::Recorded);
         CHECK(t.Inspect().active == 2);
         CHECK(t.End(500,a) == P::Result::Ended);
