@@ -162,6 +162,49 @@ namespace IndividualProgressionF14OwnedRestoreShards
             return true;
         }
 
+        // Negative-only pre-removal/logout fanout. Source callbacks do not
+        // prove a shard generation. Invalidate every active record for this
+        // raw viewer GUID (all epochs), rather than guessing the source map.
+        // Never create a shard, clear debt, seal a live map, or authorize a
+        // hide. Unknown attribution fences before any mutation.
+        bool BeforeViewerDeparture(std::uint64_t viewerGuid)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            bool affected = false;
+            for (Slot& s : _slots)
+            {
+                if (!s.active)
+                    continue;
+                auto const& ledger = s.active->LedgerView();
+                bool const unknown = s.uncertain || s.active->UnattributedHideRisk() ||
+                    ledger.IsPoisoned() || ledger.Size() != s.active->Size();
+                bool const any = s.pending || s.active->Size() || ledger.Size() || unknown;
+                bool const matching = viewerGuid &&
+                    (s.active->HasRecordedViewer(viewerGuid) ||
+                     (s.pending && s.pending.viewer.guidRaw == viewerGuid));
+                if (!matching && !unknown && (viewerGuid || !any))
+                    continue;
+                // Close the process-wide admission gate before invalidation.
+                // Earlier reservations still settle or remain as uncertainty.
+                _gate.CloseFence();
+                affected = true;
+                if (!viewerGuid || unknown)
+                {
+                    _unattributedCommitRisk = true;
+                    s.active->ObserveConfigDisabled();
+                    if (s.pending)
+                        s.pending.invalidated = true;
+                }
+                else
+                {
+                    if (s.pending && s.pending.viewer.guidRaw == viewerGuid)
+                        s.pending.invalidated = true;
+                    s.active->ObserveViewerSessionEnded(viewerGuid);
+                }
+            }
+            return affected;
+        }
+
         VRP::Outcome ObserveLink(Handle h, VRP::ViewerKey viewer, VRP::CreatureKey creature,
                                  std::uint64_t incarnation, bool nowLinked,
                                  VRP::VisibilityPath path, VRP::TransitionFacts const& facts)

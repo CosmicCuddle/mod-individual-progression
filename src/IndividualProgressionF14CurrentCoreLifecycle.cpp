@@ -13,6 +13,7 @@
 #include "IndividualProgression.h"
 #include "IndividualProgressionF14CurrentViewerSession.h"
 #include "IndividualProgressionF14HumanViewerEpoch.h"
+#include "IndividualProgressionF14OwnedRestoreShards.h"
 #include "AllMapScript.h"
 #include "DataMap.h"
 #include "Map.h"
@@ -36,6 +37,26 @@ namespace
     };
     Epoch::Issuer& LoginIssuer() { static Epoch::Issuer issuer; return issuer; }
     Epoch::Issuer& MapIssuer() { static Epoch::Issuer issuer; return issuer; }
+
+    // Experimental sizing ONLY. No payload is allocated by these callbacks:
+    // there is deliberately no runtime Open/Reserve/Commit path. One owner
+    // survives Map lifetime; future positive wiring requires approved sizing,
+    // authenticated map ownership, R2 and a separate integration review.
+    using DepartureStore = IndividualProgressionF14OwnedRestoreShards::Store<8, 64>;
+    DepartureStore& RestorationStore()
+    {
+        static DepartureStore store;
+        return store;
+    }
+    void BeforeDeparture(Player const* player)
+    {
+        if (!player)
+            return;
+        // Negative invalidation uses full raw GUID, not a stale cached map
+        // generation or normal-account proof. It never grants bot/human rights.
+        RestorationStore().BeforeViewerDeparture(
+            player->GetGUID().IsPlayer() ? player->GetGUID().GetRawValue() : 0);
+    }
 
     Marker const* GetMarker(Player const* player)
     {
@@ -93,8 +114,16 @@ namespace
             if (player->IsInWorld())
                 Enter(player, player->GetMap());
         }
-        void OnPlayerBeforeLogout(Player* player) override { Logout(player); }
-        void OnPlayerLogout(Player* player) override { Logout(player); }
+        void OnPlayerBeforeLogout(Player* player) override
+        {
+            BeforeDeparture(player);
+            Logout(player);
+        }
+        void OnPlayerLogout(Player* player) override
+        {
+            BeforeDeparture(player);
+            Logout(player);
+        }
     };
 
     class CurrentViewerMap final : public AllMapScript
@@ -105,6 +134,7 @@ namespace
         void OnPlayerEnterAll(Map* map, Player* player) override { Enter(player, map); }
         void OnF14BeforePlayerMapRemoval(Map const* map, Player const* player, bool /*remove*/) override
         {
+            BeforeDeparture(player);
             if (Marker const* marker = GetMarker(player))
             {
                 if (!map || !player->IsInWorld() || player->GetMap() != map)

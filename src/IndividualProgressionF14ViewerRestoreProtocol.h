@@ -276,6 +276,18 @@ namespace IndividualProgressionF14ViewerRestoreProtocol
         }
         bool GlobalRestoreRequired() const { return _unattributedHideRisk || _ledger.IsFrozen(); }
         bool UnattributedHideRisk() const { return _unattributedHideRisk; }
+
+        // Read-only negative lifecycle routing. A raw GUID deliberately
+        // matches every retained login epoch, never grants visibility rights.
+        bool HasRecordedViewer(std::uint64_t viewerGuid) const
+        {
+            if (!viewerGuid)
+                return false;
+            for (std::size_t i = 0; i < _size; ++i)
+                if (_records[i].viewer.guidRaw == viewerGuid)
+                    return true;
+            return false;
+        }
         std::size_t Size() const { return _size; }
         std::uint64_t Duplicates() const { return _duplicates; }
         std::uint64_t Failures(FailReason reason) const
