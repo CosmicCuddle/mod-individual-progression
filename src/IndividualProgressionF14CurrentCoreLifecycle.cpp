@@ -6,6 +6,11 @@
 #error "Current F14 session-rebind observer requires the Core reconnect hook"
 #endif
 #endif
+#if defined(COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT) && COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT >= 1
+#if !defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) || COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT < 1
+#error "Current F14 pass identity correlation requires reconnect-safe current viewer identity"
+#endif
+#endif
 #if !defined(COSMIC_F14_PRE_MAP_REMOVAL_EXPERIMENT) || COSMIC_F14_PRE_MAP_REMOVAL_EXPERIMENT < 1
 #error "Current F14 lifecycle observer requires the Core pre-map-removal hook"
 #endif
@@ -19,6 +24,9 @@
 #include "IndividualProgressionF14CurrentViewerSession.h"
 #include "IndividualProgressionF14HumanViewerEpoch.h"
 #include "IndividualProgressionF14OwnedRestoreShards.h"
+#if defined(COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT) && COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT >= 1
+#include "IndividualProgressionF14CurrentPassIdentity.h"
+#endif
 #if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
 #if !defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) || COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT < 1
 #error "Current F14 combat ownership requires login-thread verified actor publication"
@@ -320,6 +328,32 @@ namespace
         return marker && map ? marker->state.Read(player->GetGUID().GetRawValue(), Key(map)) : Session::Identity{};
     }
 
+#if defined(COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT) && COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT >= 1
+    namespace PassIdentity = IndividualProgressionF14CurrentPassIdentity;
+    using CurrentPassTracker = PassIdentity::Tracker<64>;
+
+    CurrentPassTracker& PassTracker()
+    {
+        static CurrentPassTracker tracker;
+        return tracker;
+    }
+
+    PassIdentity::ViewerIdentity CurrentPassViewer(Player const* viewer)
+    {
+        Session::Identity const identity = Current(viewer);
+        if (!identity)
+            return {};
+        return {identity.guid, identity.epoch, identity.generation,
+            {identity.map.mapId, identity.map.instanceId}};
+    }
+
+    void RevokePassViewer(Player const* viewer)
+    {
+        if (viewer && viewer->GetGUID().IsPlayer())
+            PassTracker().RevokeViewer(viewer->GetGUID().GetRawValue());
+    }
+#endif
+
     class CurrentViewerLogin final : public PlayerScript
     {
     public:
@@ -392,6 +426,67 @@ namespace
     private:
         std::atomic<std::uint64_t> _observed{0};
     };
+#if defined(COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT) && COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT >= 1
+    class CurrentPassIdentityObserver final : public WorldObjectScript
+    {
+    public:
+        CurrentPassIdentityObserver() : WorldObjectScript("IndividualProgression_F14CurrentPassIdentity",
+            {WORLDOBJECTHOOK_ON_F14_VIEWER_VISIBILITY_PASS_BEGIN,
+             WORLDOBJECTHOOK_ON_F14_VIEWER_VISIBILITY_PASS_BATCH_SEND_ATTEMPT,
+             WORLDOBJECTHOOK_ON_F14_VIEWER_VISIBILITY_PASS_END}) { }
+
+        void OnF14ViewerVisibilityPassBegin(Player const* viewer, uint64 token) override
+        {
+            auto const result = PassTracker().Begin(token, CurrentPassViewer(viewer));
+            if (result == PassIdentity::Result::Recorded &&
+                _first.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_INFO("module", "IP F14 current pass identity correlated first notifier token to exact viewer epoch/map generation; no concealment authority");
+            LogPoisonOnce(result);
+        }
+
+        void OnF14ViewerVisibilityPassBatchSendAttempt(Player const* viewer, uint64 token) override
+        {
+            LogPoisonOnce(PassTracker().ObserveBatch(token, CurrentPassViewer(viewer)));
+        }
+
+        void OnF14ViewerVisibilityPassEnd(Player const* viewer, uint64 token) override
+        {
+            LogPoisonOnce(PassTracker().End(token, CurrentPassViewer(viewer)));
+        }
+
+    private:
+        void LogPoisonOnce(PassIdentity::Result result)
+        {
+            if ((result == PassIdentity::Result::Mismatch ||
+                 result == PassIdentity::Result::Poisoned) &&
+                _poisonLogged.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_ERROR("module", "IP F14 current pass identity correlation became uncertain; future concealment must remain fail-visible");
+        }
+        std::atomic<std::uint64_t> _first{0};
+        std::atomic<std::uint64_t> _poisonLogged{0};
+    };
+
+    class CurrentPassIdentityLifecycle final : public PlayerScript
+    {
+    public:
+        CurrentPassIdentityLifecycle() : PlayerScript("IndividualProgression_F14CurrentPassIdentityLifecycle",
+            {PLAYERHOOK_ON_BEFORE_LOGOUT, PLAYERHOOK_ON_LOGOUT, PLAYERHOOK_ON_F14_SESSION_REBOUND}) { }
+        void OnPlayerBeforeLogout(Player* player) override { RevokePassViewer(player); }
+        void OnPlayerLogout(Player* player) override { RevokePassViewer(player); }
+        void OnF14PlayerSessionRebound(Player* player) override { RevokePassViewer(player); }
+    };
+
+    class CurrentPassIdentityMap final : public AllMapScript
+    {
+    public:
+        CurrentPassIdentityMap() : AllMapScript("IndividualProgression_F14CurrentPassIdentityMap",
+            {ALLMAPHOOK_ON_F14_BEFORE_PLAYER_MAP_REMOVAL}) { }
+        void OnF14BeforePlayerMapRemoval(Map const* /*map*/, Player const* player, bool /*remove*/) override
+        {
+            RevokePassViewer(player);
+        }
+    };
+#endif
 #if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
     class CurrentViewerSessionRebind final : public PlayerScript
     {
@@ -492,6 +587,11 @@ void AddSC_mod_individual_progression_f14_current_core_lifecycle()
 #endif
     new CurrentViewerMap();
     new CurrentViewerPass();
+#if defined(COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT) && COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT >= 1
+    new CurrentPassIdentityObserver();
+    new CurrentPassIdentityLifecycle();
+    new CurrentPassIdentityMap();
+#endif
 #if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
     new CurrentCombatPlayer();
     new CurrentCombatUnit();
