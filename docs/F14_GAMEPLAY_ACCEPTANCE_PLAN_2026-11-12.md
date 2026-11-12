@@ -309,7 +309,8 @@ Current status after the Part 46 review/build advances:
 - IP170 isolates the current Grimfeather optional-SQL context fix and is deliberately excluded from this Phase A runtime tuple; no optional SQL has been executed;
 - IP171 was independently PASSed as negative-only; its pre-adapter completeness/threat/service findings were isolated in unwired IP172;
 - IP172 focused completeness gate is 4/4 GREEN and CosmicScript02/Grok independently PASSed it as still negative-only/unwired. IP172 remains evidence-model work only and is **not** part of the active runtime candidate;
-- Core25/PB19 real upstream-restack candidate is under separate Services71 native validation; do not substitute it into Phase A until that exact run is terminal GREEN;
+- **Services71 is full native GREEN** for the real Core25/PB19 upstream-restacked tuple with IP168/Naxx292/WPS/public AutoBalance, including actual Worldserver compile+link and binary verification without server start;
+- Services73 is the expanded-module restack gate. Its first run exposed a historical Core23 exact-scope test being replayed on the descendant and was corrected without weakening the guard; the corrected run passed source regressions but encountered a transient ALE Lua 5.2 download TLS reset during CMake. The exact failed job is being retried unchanged;
 - positive concealment remains hard-FALSE and Core23 registers no positive CREATE listener;
 - R2 #42 remains unanswered;
 - no gameplay acceptance has been claimed;
