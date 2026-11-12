@@ -14,6 +14,17 @@
 #include "IndividualProgressionF14CurrentViewerSession.h"
 #include "IndividualProgressionF14HumanViewerEpoch.h"
 #include "IndividualProgressionF14OwnedRestoreShards.h"
+#if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
+#if !defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) || COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT < 1
+#error "Current F14 combat ownership requires login-thread verified actor publication"
+#endif
+#include "IndividualProgressionF14CurrentCombatOwnership.h"
+#include "AllCreatureScript.h"
+#include "Creature.h"
+#include "Unit.h"
+#include "UnitScript.h"
+#include <mutex>
+#endif
 #include "AllMapScript.h"
 #include "DataMap.h"
 #include "Map.h"
@@ -58,6 +69,272 @@ namespace
             player->GetGUID().IsPlayer() ? player->GetGUID().GetRawValue() : 0);
     }
 
+#if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
+    namespace Combat = IndividualProgressionF14CurrentCombatOwnership;
+    constexpr char const* CombatActorMarkerKey = "IndividualProgression.F14.CurrentCombatActor";
+    constexpr char const* CombatCreatureMarkerKey = "IndividualProgression.F14.CurrentCombatCreature";
+
+    struct CombatActorMarker final : DataMap::Base
+    {
+        mutable std::mutex lock;
+        mutable std::uint64_t guid = 0;
+        mutable std::uint64_t loginEpoch = 0;
+        mutable std::uint64_t mapGeneration = 0;
+        mutable Combat::MapKey map{};
+    };
+
+    struct CombatCreatureMarker final : DataMap::Base
+    {
+        std::uint64_t incarnation = 0;
+    };
+
+    Epoch::Issuer& CombatMapIssuer() { static Epoch::Issuer issuer; return issuer; }
+    Epoch::Issuer& CombatCreatureIssuer() { static Epoch::Issuer issuer; return issuer; }
+
+    using CurrentCombatTracker = Combat::Tracker<64>;
+    CurrentCombatTracker& CombatTracker()
+    {
+        static CurrentCombatTracker tracker;
+        return tracker;
+    }
+
+    Combat::MapKey CombatMap(Map const* map)
+    {
+        return map ? Combat::MapKey{map->GetId(), map->GetInstanceId()} : Combat::MapKey{};
+    }
+
+    bool PotentialCombatActor(Player const* player)
+    {
+        return player && player->GetGUID().IsPlayer() && player->IsInWorld() &&
+            player->GetSession() && player->GetSession()->IsHeadless() &&
+            !player->IsGameMaster() &&
+            (player->getRace() == RACE_BLOODELF || player->getRace() == RACE_DRAENEI);
+    }
+
+    Combat::ActorKey CurrentCombatActor(Player* player)
+    {
+        if (!PotentialCombatActor(player) || !player->GetMap())
+            return {};
+
+        IndividualProgression::F14VerifiedActorPublication published;
+        if (!sIndividualProgression->TryReadF14VerifiedActorPublication(player->GetGUID(), published) ||
+            published.fullGuid != player->GetGUID() || !published.loginEpoch || !published.accountId ||
+            published.accountId != player->GetSession()->GetAccountId() ||
+            published.race != player->getRace())
+            return {};
+
+        CombatActorMarker* marker =
+            player->CustomData.GetDefault<CombatActorMarker>(CombatActorMarkerKey);
+        std::lock_guard<std::mutex> guard(marker->lock);
+        Combat::MapKey const map = CombatMap(player->GetMap());
+        if (marker->guid != player->GetGUID().GetRawValue() ||
+            marker->loginEpoch != published.loginEpoch)
+        {
+            marker->guid = player->GetGUID().GetRawValue();
+            marker->loginEpoch = published.loginEpoch;
+            marker->mapGeneration = 0;
+            marker->map = {};
+        }
+
+        if (!marker->mapGeneration || !(marker->map == map))
+        {
+            std::uint64_t const generation = CombatMapIssuer().Issue();
+            if (!generation)
+                return {};
+            marker->mapGeneration = generation;
+            marker->map = map;
+        }
+        return {marker->guid, marker->loginEpoch, marker->mapGeneration, marker->map};
+    }
+
+    Combat::ActorKey ReadCombatActor(Player const* player)
+    {
+        if (!player)
+            return {};
+        CombatActorMarker const* marker =
+            player->CustomData.Get<CombatActorMarker>(CombatActorMarkerKey);
+        if (!marker)
+            return {};
+        std::lock_guard<std::mutex> guard(marker->lock);
+        return {marker->guid, marker->loginEpoch, marker->mapGeneration, marker->map};
+    }
+
+    void EndCombatActorTarget(Player const* player)
+    {
+        Combat::ActorKey const actor = ReadCombatActor(player);
+        if (actor)
+            CombatTracker().EndActor(actor);
+    }
+
+    void LeaveCombatActorMap(Player const* player, Map const* map)
+    {
+        if (!player)
+            return;
+        CombatActorMarker const* marker =
+            player->CustomData.Get<CombatActorMarker>(CombatActorMarkerKey);
+        if (!marker)
+            return;
+        std::lock_guard<std::mutex> guard(marker->lock);
+        Combat::ActorKey const actor{marker->guid, marker->loginEpoch,
+            marker->mapGeneration, marker->map};
+        if (!actor)
+            return;
+        CombatTracker().EndActor(actor);
+        if (!map || !(marker->map == CombatMap(map)))
+        {
+            marker->guid = 0;
+            marker->loginEpoch = 0;
+        }
+        marker->mapGeneration = 0;
+        marker->map = {};
+    }
+
+    void EndCombatActorSession(Player const* player)
+    {
+        if (!player)
+            return;
+        CombatActorMarker const* marker =
+            player->CustomData.Get<CombatActorMarker>(CombatActorMarkerKey);
+        if (!marker)
+            return;
+        std::lock_guard<std::mutex> guard(marker->lock);
+        Combat::ActorKey const actor{marker->guid, marker->loginEpoch,
+            marker->mapGeneration, marker->map};
+        if (actor)
+            CombatTracker().EndActor(actor);
+        marker->guid = 0;
+        marker->loginEpoch = 0;
+        marker->mapGeneration = 0;
+        marker->map = {};
+    }
+
+    Creature* CurrentCombatCreature(Player const* actor, Unit* target)
+    {
+        if (!actor || !target || !actor->GetMap() || !target->IsInWorld())
+            return nullptr;
+        Creature* creature = target->ToCreature();
+        if (!creature || !creature->IsAlive() || creature->IsPet() ||
+            creature->IsTotem() || creature->IsControlledByPlayer() ||
+            creature->GetCharmerOrOwnerPlayerOrPlayerItself() ||
+            creature->GetMap() != actor->GetMap())
+            return nullptr;
+        return creature;
+    }
+
+    Combat::CreatureKey CombatCreatureKey(Creature* creature, bool create)
+    {
+        if (!creature)
+            return {};
+        CombatCreatureMarker* marker = create
+            ? creature->CustomData.GetDefault<CombatCreatureMarker>(CombatCreatureMarkerKey)
+            : creature->CustomData.Get<CombatCreatureMarker>(CombatCreatureMarkerKey);
+        if (!marker)
+            return {};
+        if (create && !marker->incarnation)
+            marker->incarnation = CombatCreatureIssuer().Issue();
+        return {creature->GetGUID().GetRawValue(), marker->incarnation,
+            {creature->GetMapId(), creature->GetInstanceId()}};
+    }
+
+    void ObserveCombatTarget(Player* player, Unit* target)
+    {
+        Combat::ActorKey const actor = CurrentCombatActor(player);
+        if (!actor)
+        {
+            EndCombatActorSession(player);
+            return;
+        }
+
+        Creature* creature = CurrentCombatCreature(player, target);
+        if (!creature)
+        {
+            CombatTracker().EndActor(actor);
+            return;
+        }
+
+        Combat::CreatureKey const key = CombatCreatureKey(creature, true);
+        if (!key || !(key.map == actor.map))
+        {
+            CombatTracker().EndActor(actor);
+            return;
+        }
+
+        static std::atomic<std::uint64_t> first{0};
+        Combat::ObserveResult const result = CombatTracker().Observe(actor, key);
+        if ((result == Combat::ObserveResult::Recorded ||
+             result == Combat::ObserveResult::Replaced) &&
+            first.fetch_add(1, std::memory_order_relaxed) == 0)
+            LOG_INFO("module", "IP F14 current combat observer recorded first authenticated RandomBot target; no concealment or restoration authority");
+    }
+
+    void RetireCombatCreature(Creature* creature)
+    {
+        Combat::CreatureKey const key = CombatCreatureKey(creature, false);
+        if (!key)
+            return;
+        CombatTracker().RetireCreature(key);
+        if (CombatCreatureMarker* marker =
+                creature->CustomData.Get<CombatCreatureMarker>(CombatCreatureMarkerKey))
+            marker->incarnation = 0;
+    }
+
+    class CurrentCombatPlayer final : public PlayerScript
+    {
+    public:
+        CurrentCombatPlayer() : PlayerScript("IndividualProgression_F14CurrentCombatPlayer",
+            {PLAYERHOOK_ON_PLAYER_ENTER_COMBAT, PLAYERHOOK_ON_PLAYER_LEAVE_COMBAT,
+             PLAYERHOOK_ON_UPDATE, PLAYERHOOK_ON_PLAYER_JUST_DIED,
+             PLAYERHOOK_ON_BEFORE_LOGOUT, PLAYERHOOK_ON_LOGOUT}) { }
+
+        void OnPlayerEnterCombat(Player* player, Unit* enemy) override
+        {
+            ObserveCombatTarget(player, enemy);
+        }
+
+        void OnPlayerUpdate(Player* player, uint32 /*diff*/) override
+        {
+            if (!PotentialCombatActor(player) &&
+                !player->CustomData.Get<CombatActorMarker>(CombatActorMarkerKey))
+                return;
+            if (Unit* victim = player->GetVictim())
+                ObserveCombatTarget(player, victim);
+            else if (!player->IsInCombat())
+                EndCombatActorTarget(player);
+        }
+
+        void OnPlayerLeaveCombat(Player* player) override { EndCombatActorTarget(player); }
+        void OnPlayerJustDied(Player* player) override { EndCombatActorTarget(player); }
+        void OnPlayerBeforeLogout(Player* player) override { EndCombatActorSession(player); }
+        void OnPlayerLogout(Player* player) override { EndCombatActorSession(player); }
+    };
+
+    class CurrentCombatUnit final : public UnitScript
+    {
+    public:
+        CurrentCombatUnit() : UnitScript("IndividualProgression_F14CurrentCombatUnit",
+            true, {UNITHOOK_ON_UNIT_DEATH}) { }
+
+        void OnUnitDeath(Unit* unit, Unit* /*killer*/) override
+        {
+            if (!unit)
+                return;
+            if (Player* player = unit->ToPlayer())
+                EndCombatActorTarget(player);
+            if (Creature* creature = unit->ToCreature())
+                RetireCombatCreature(creature);
+        }
+    };
+
+    class CurrentCombatCreature final : public AllCreatureScript
+    {
+    public:
+        CurrentCombatCreature() : AllCreatureScript("IndividualProgression_F14CurrentCombatCreature") { }
+        void OnCreatureRemoveWorld(Creature* creature) override
+        {
+            RetireCombatCreature(creature);
+        }
+    };
+#endif
     Marker const* GetMarker(Player const* player)
     {
         return player ? player->CustomData.Get<Marker>(MarkerKey) : nullptr;
@@ -134,6 +411,9 @@ namespace
         void OnPlayerEnterAll(Map* map, Player* player) override { Enter(player, map); }
         void OnF14BeforePlayerMapRemoval(Map const* map, Player const* player, bool /*remove*/) override
         {
+#if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
+            LeaveCombatActorMap(player, map);
+#endif
             BeforeDeparture(player);
             if (Marker const* marker = GetMarker(player))
             {
@@ -171,5 +451,10 @@ void AddSC_mod_individual_progression_f14_current_core_lifecycle()
     new CurrentViewerLogin();
     new CurrentViewerMap();
     new CurrentViewerPass();
+#if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
+    new CurrentCombatPlayer();
+    new CurrentCombatUnit();
+    new CurrentCombatCreature();
+#endif
 #endif
 }
