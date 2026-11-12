@@ -1,6 +1,11 @@
 // CosmicCuddle F14 current Core lifecycle observer. DEFAULT OFF.
 // Does not register any positive visibility query or touch restoration debt.
 #if defined(COSMIC_IP_F14_CURRENT_CORE_LIFECYCLE_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_CURRENT_CORE_LIFECYCLE_OBSERVER_EXPERIMENT >= 1
+#if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
+#if !defined(COSMIC_F14_SESSION_REBIND_EXPERIMENT) || COSMIC_F14_SESSION_REBIND_EXPERIMENT < 1
+#error "Current F14 session-rebind observer requires the Core reconnect hook"
+#endif
+#endif
 #if !defined(COSMIC_F14_PRE_MAP_REMOVAL_EXPERIMENT) || COSMIC_F14_PRE_MAP_REMOVAL_EXPERIMENT < 1
 #error "Current F14 lifecycle observer requires the Core pre-map-removal hook"
 #endif
@@ -335,6 +340,7 @@ namespace
             if (player->IsInWorld())
                 Enter(player, player->GetMap());
         }
+
         void OnPlayerBeforeLogout(Player* player) override
         {
             BeforeDeparture(player);
@@ -386,6 +392,34 @@ namespace
     private:
         std::atomic<std::uint64_t> _observed{0};
     };
+#if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
+    class CurrentViewerSessionRebind final : public PlayerScript
+    {
+    public:
+        CurrentViewerSessionRebind() : PlayerScript("IndividualProgression_F14CurrentViewerSessionRebind",
+            {PLAYERHOOK_ON_F14_SESSION_REBOUND}) { }
+
+        void OnF14PlayerSessionRebound(Player* player) override
+        {
+            // A different authenticated client now owns this same in-world
+            // Player object. Preserve old restoration obligations before
+            // invalidating identity; then authenticate and issue a fresh
+            // viewer login epoch/map generation for the new session.
+            BeforeDeparture(player);
+            Logout(player);
+            if (!EligibleSession(player) || !sIndividualProgression->isNormalAccount(player))
+                return;
+            std::uint64_t const epoch = LoginIssuer().Issue();
+            if (!epoch)
+                return;
+            Marker* marker = player->CustomData.GetDefault<Marker>(MarkerKey);
+            marker->state.BindLogin(player->GetGUID().GetRawValue(), epoch);
+            if (player->IsInWorld())
+                Enter(player, player->GetMap());
+        }
+    };
+#endif
+
 #if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
     class CurrentCombatPlayer final : public PlayerScript
     {
@@ -453,6 +487,9 @@ void AddSC_mod_individual_progression_f14_current_core_lifecycle()
 {
 #if defined(COSMIC_IP_F14_CURRENT_CORE_LIFECYCLE_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_CURRENT_CORE_LIFECYCLE_OBSERVER_EXPERIMENT >= 1
     new CurrentViewerLogin();
+#if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
+    new CurrentViewerSessionRebind();
+#endif
     new CurrentViewerMap();
     new CurrentViewerPass();
 #if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1

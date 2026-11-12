@@ -827,6 +827,17 @@ public:
         RevokeViewerStamp(player);
     }
 
+#if defined(COSMIC_F14_SESSION_REBIND_EXPERIMENT) && COSMIC_F14_SESSION_REBIND_EXPERIMENT >= 1
+    void OnF14PlayerSessionRebound(Player* player) override
+    {
+        // Legacy diagnostic epoch must not cross an authenticated-client
+        // reconnect either. OnPlayerLogin rechecks human/account/session
+        // eligibility and issues a fresh non-reused epoch.
+        RevokeViewerStamp(player);
+        OnPlayerLogin(player);
+    }
+#endif
+
 private:
     static void RevokeViewerStamp(Player* player)
     {
