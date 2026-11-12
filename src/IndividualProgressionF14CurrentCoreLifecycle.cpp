@@ -353,33 +353,6 @@ namespace
         }
     };
 
-#if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
-    class CurrentViewerSessionRebind final : public PlayerScript
-    {
-    public:
-        CurrentViewerSessionRebind() : PlayerScript("IndividualProgression_F14CurrentViewerSessionRebind",
-            {PLAYERHOOK_ON_F14_SESSION_REBOUND}) { }
-
-        void OnF14PlayerSessionRebound(Player* player) override
-        {
-            // A different authenticated client now owns this same in-world
-            // Player object. Preserve old restoration obligations before
-            // invalidating identity; then authenticate and issue a fresh
-            // viewer login epoch/map generation for the new session.
-            BeforeDeparture(player);
-            Logout(player);
-            if (!EligibleSession(player) || !sIndividualProgression->isNormalAccount(player))
-                return;
-            std::uint64_t const epoch = LoginIssuer().Issue();
-            if (!epoch)
-                return;
-            Marker* marker = player->CustomData.GetDefault<Marker>(MarkerKey);
-            marker->state.BindLogin(player->GetGUID().GetRawValue(), epoch);
-            if (player->IsInWorld())
-                Enter(player, player->GetMap());
-        }
-    };
-#endif
     class CurrentViewerMap final : public AllMapScript
     {
     public:
@@ -419,6 +392,34 @@ namespace
     private:
         std::atomic<std::uint64_t> _observed{0};
     };
+#if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
+    class CurrentViewerSessionRebind final : public PlayerScript
+    {
+    public:
+        CurrentViewerSessionRebind() : PlayerScript("IndividualProgression_F14CurrentViewerSessionRebind",
+            {PLAYERHOOK_ON_F14_SESSION_REBOUND}) { }
+
+        void OnF14PlayerSessionRebound(Player* player) override
+        {
+            // A different authenticated client now owns this same in-world
+            // Player object. Preserve old restoration obligations before
+            // invalidating identity; then authenticate and issue a fresh
+            // viewer login epoch/map generation for the new session.
+            BeforeDeparture(player);
+            Logout(player);
+            if (!EligibleSession(player) || !sIndividualProgression->isNormalAccount(player))
+                return;
+            std::uint64_t const epoch = LoginIssuer().Issue();
+            if (!epoch)
+                return;
+            Marker* marker = player->CustomData.GetDefault<Marker>(MarkerKey);
+            marker->state.BindLogin(player->GetGUID().GetRawValue(), epoch);
+            if (player->IsInWorld())
+                Enter(player, player->GetMap());
+        }
+    };
+#endif
+
 #if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
     class CurrentCombatPlayer final : public PlayerScript
     {
