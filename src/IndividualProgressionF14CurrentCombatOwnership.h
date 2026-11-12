@@ -156,6 +156,21 @@ namespace IndividualProgressionF14CurrentCombatOwnership
             slot->creature = {};
             return changed;
         }
+        // Session-lifetime release only. The full actor key must still match
+        // so a stale callback cannot free a slot already reused by a newer
+        // login epoch or map generation. This never clears sticky poison.
+        bool ReleaseActor(ActorKey actor)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            Slot* slot = FindActor(actor.guid);
+            if (!slot || !(slot->actor == actor))
+                return false;
+            slot->used = false;
+            slot->active = false;
+            slot->actor = {};
+            slot->creature = {};
+            return true;
+        }
 
         std::size_t RetireCreature(CreatureKey creature)
         {
@@ -190,6 +205,8 @@ namespace IndividualProgressionF14CurrentCombatOwnership
         ActorState InspectActor(std::uint64_t guid) const
         {
             std::lock_guard<std::mutex> lock(_mutex);
+            if (_poisoned)
+                return {};
             ActorState out;
             Slot const* slot = FindActorConst(guid);
             if (!slot)
