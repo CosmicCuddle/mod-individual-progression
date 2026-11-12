@@ -11,6 +11,17 @@
 #error "Current F14 pass identity correlation requires reconnect-safe current viewer identity"
 #endif
 #endif
+#if defined(COSMIC_IP_F14_TOKEN_BOUND_INITIAL_OUT_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TOKEN_BOUND_INITIAL_OUT_OBSERVER_EXPERIMENT >= 1
+#if !defined(COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT) || COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT < 1
+#error "Token-bound initial OUT observer requires exact current pass identity correlation"
+#endif
+#if !defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) || COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT < 1
+#error "Token-bound initial OUT observer requires current verified RandomBot combat ownership"
+#endif
+#if !defined(COSMIC_F14_TOKEN_BOUND_CREATURE_OUT_QUERY_EXPERIMENT) || COSMIC_F14_TOKEN_BOUND_CREATURE_OUT_QUERY_EXPERIMENT < 1
+#error "Token-bound initial OUT observer requires the Core18 token-bearing query ABI"
+#endif
+#endif
 #if !defined(COSMIC_F14_PRE_MAP_REMOVAL_EXPERIMENT) || COSMIC_F14_PRE_MAP_REMOVAL_EXPERIMENT < 1
 #error "Current F14 lifecycle observer requires the Core pre-map-removal hook"
 #endif
@@ -487,6 +498,50 @@ namespace
         }
     };
 #endif
+#if defined(COSMIC_IP_F14_TOKEN_BOUND_INITIAL_OUT_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TOKEN_BOUND_INITIAL_OUT_OBSERVER_EXPERIMENT >= 1
+    class CurrentTokenBoundInitialOutObserver final : public WorldObjectScript
+    {
+    public:
+        CurrentTokenBoundInitialOutObserver() : WorldObjectScript("IndividualProgression_F14TokenBoundInitialOutObserver",
+            {WORLDOBJECTHOOK_ON_F14_VIEWER_CREATURE_INITIAL_OUT_TOKEN_QUERY}) { }
+
+        bool OnF14ShouldSuppressCreatureInitialOutForViewer(
+            Player const* viewer, WorldObject const* target, uint64 passToken) override
+        {
+            // This bridge is intentionally OBSERVER-ONLY. It proves that the
+            // Core18 nomination carries the exact currently active notifier
+            // token and that the target has current verified RandomBot attack
+            // ownership. Complete pair rights + restoration reservation remain
+            // absent, therefore the answer is ALWAYS FALSE (visible).
+            if (!viewer || !target || !passToken)
+                return false;
+
+            PassIdentity::ViewerIdentity const identity = CurrentPassViewer(viewer);
+            if (!PassTracker().IsActive(passToken, identity))
+                return false;
+
+            Creature const* creature = target->ToCreature();
+            if (!creature || !creature->IsAlive() || !viewer->GetMap() ||
+                creature->GetMap() != viewer->GetMap())
+                return false;
+
+            Combat::CreatureKey const key =
+                CombatCreatureKey(const_cast<Creature*>(creature), false);
+            if (!key || key.map.mapId != identity.map.mapId ||
+                key.map.instanceId != identity.map.instanceId ||
+                CombatTracker().ActiveAttackers(key) == 0)
+                return false;
+
+            if (_observed.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_INFO("module", "IP F14 observed first token-bound initial OUT nomination with exact viewer identity and current verified RandomBot attack ownership; concealment still forced FALSE");
+            return false;
+        }
+
+    private:
+        std::atomic<std::uint64_t> _observed{0};
+    };
+#endif
+
 #if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
     class CurrentViewerSessionRebind final : public PlayerScript
     {
@@ -591,6 +646,9 @@ void AddSC_mod_individual_progression_f14_current_core_lifecycle()
     new CurrentPassIdentityObserver();
     new CurrentPassIdentityLifecycle();
     new CurrentPassIdentityMap();
+#endif
+#if defined(COSMIC_IP_F14_TOKEN_BOUND_INITIAL_OUT_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TOKEN_BOUND_INITIAL_OUT_OBSERVER_EXPERIMENT >= 1
+    new CurrentTokenBoundInitialOutObserver();
 #endif
 #if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
     new CurrentCombatPlayer();
