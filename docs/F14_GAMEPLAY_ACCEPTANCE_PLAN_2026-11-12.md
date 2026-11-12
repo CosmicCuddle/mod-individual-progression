@@ -14,6 +14,7 @@ Current source candidate at preparation time:
 - Playerbots15: `4b355ea3a8fd00a0b116681bf9db4c7a3eb0e051`
 - IP168: `455597329f2578c634091b8c3a79d83b31181d40`
 - Naxx292: `51d0611476358286505aed3ca806ea250f644f66`
+- Character Services runtime: `48e2f73795f82dd45b1a067b64754cb31f234bc7` (later Services integration PRs add CI/docs/tests only; no later `src/`/`conf/` delta)
 - merged WPS main: `36ad573c0ee22e24abf3f48b6e40c4bc360ec8e8`
 - public AutoBalance coexistence reference: `1d707cb61a0962ab01e4123681e2d3b66cc558a2`
 - Character Services newest native child: Services70
