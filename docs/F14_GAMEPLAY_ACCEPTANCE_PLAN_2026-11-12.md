@@ -10,12 +10,15 @@ This plan is the acceptance checklist for the Blood Elf / Draenei Individual Pro
 
 Current source candidate at preparation time:
 
-- Core21: `991f2c86c928222d501a559a61434cfd15055dc8`
+- Core23: `dbb1dd5150f330d88522a10b85e93546fff72bad`
 - Playerbots15: `4b355ea3a8fd00a0b116681bf9db4c7a3eb0e051`
 - IP168: `455597329f2578c634091b8c3a79d83b31181d40`
 - Naxx292: `51d0611476358286505aed3ca806ea250f644f66`
-- Character Services newest native child: Services68
-- WPS gameplay patch: `016999b24c5698b83fefb7f1919061cfd156f9c4`
+- merged WPS main: `36ad573c0ee22e24abf3f48b6e40c4bc360ec8e8`
+- public AutoBalance coexistence reference: `1d707cb61a0962ab01e4123681e2d3b66cc558a2`
+- Character Services newest native child: Services70
+
+Services70 is a disposable compatibility target, not an installed-host baseline. The AutoBalance SHA is a public upstream reference only; CosmicCuddle's exact installed AutoBalance revision remains unverified.
 
 Do not silently replace any pin during testing. If upstream sync is integrated first, record a new exact tuple and rerun source/native gates before gameplay.
 
@@ -94,9 +97,17 @@ Observe CPU/map-thread behavior and logs.
 
 ### A5. Capacity / poison fail-visible checks
 
-In a disposable environment, exercise enough distinct verified bot sessions to stress the fixed actor/pass trackers, including release/reuse.
+In a disposable environment, run the exact IP167 liveness regression as gameplay:
 
-**Pass:** valid session release permits slot reuse; stale epochs cannot release newer sessions; any deliberately induced uncertainty/poison fails visible and never grants concealment.
+1. positively verified RandomBot enters combat and obtains current combat actor state;
+2. bot teleports or changes map/instance;
+3. bot logs out **before another combat sample** can refresh the full ActorKey;
+4. repeat with at least **65 distinct sessions** so the test crosses the fixed tracker capacity rather than merely exercising one release;
+5. verify released slots are reused, no ordinary sequence sets the sticky poison flag, and stale older login epochs cannot release a newer same-GUID session.
+
+Also stress the pass/viewer trackers with repeated valid session creation/revocation.
+
+**Pass:** valid session release permits slot reuse beyond capacity; stale epochs cannot release newer sessions; no ordinary sequence poisons the tracker; any deliberately induced uncertainty/poison fails visible and never grants concealment.
 
 ## 4. Phase B — positive concealment acceptance
 
@@ -243,13 +254,16 @@ Do not repair production state ad hoc. Roll back to the prepared baseline and in
 
 ## 8. Current acceptance status
 
-At creation of this plan:
+Current status after the Part 46 review/build advances:
 
-- source/model safety has progressed through IP168;
-- Services64 and Services65 are full native GREEN;
-- later Services native descendants remain under validation;
-- IP168 focused compiler matrix is GREEN;
-- positive concealment remains hard-FALSE;
+- source/model safety has progressed through IP168 and Core23's token-bound initial CREATE provenance seam;
+- Services64, Services65, Services66 and Services67 are full native GREEN;
+- IP165/Core20 observer scope has an independent CosmicScript02/Grok PASS;
+- IP167 has an independent Grok PASS; the #163 N1 slot-leak finding is closed at source/review/native-build level, with gameplay proof still outstanding;
+- IP168 focused compiler matrix is GREEN and Grok's narrow #168 performance follow-up remains pending;
+- Services68, Services69 and Services70 are later native descendants under validation at this document revision;
+- Services69/70 include merged WPS; their AutoBalance pin is public coexistence evidence only, not installed-host proof;
+- positive concealment remains hard-FALSE and Core23 registers no positive CREATE listener;
 - R2 #42 remains unanswered;
 - no gameplay acceptance has been claimed;
 - no production deployment has been authorised.
