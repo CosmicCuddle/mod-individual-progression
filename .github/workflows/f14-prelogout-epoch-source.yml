@@ -1,0 +1,24 @@
+name: F14 human viewer prelogout source guard
+on:
+  push:
+    branches:
+      - feature/cs01-ip150-f14-prelogout-epoch-revoke-20261112
+  pull_request:
+    paths:
+      - src/IndividualProgressionF14LifecycleScript.cpp
+      - tests/test_f14_prelogout_epoch_source.py
+      - .github/workflows/f14-prelogout-epoch-source.yml
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/azerothcore-wotlk
+          ref: ee13e1edfdbccd56895f3adefc2b32df94ef19e9
+          path: pinned-core
+      - name: Verify source-only change against actual pinned Core logout and dispatcher
+        run: python3 tests/test_f14_prelogout_epoch_source.py pinned-core
