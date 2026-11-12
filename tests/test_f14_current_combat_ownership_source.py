@@ -44,6 +44,10 @@ for needle in (
 ):
     require(needle in cpp, "missing current combat source contract: " + needle)
 
+enter = cpp.split("void OnPlayerEnterCombat(Player* player", 1)[1].split("void OnPlayerUpdate", 1)[0]
+require("ObserveCombatTarget(player, player ? player->GetVictim() : nullptr);" in enter,
+        "enter-combat must not treat the enemy argument as proof that the bot initiated an attack")
+
 for forbidden in (
     ".Open(", ".Reserve(", ".Commit(",
     "UpdateObjectVisibility(", "DestroyForPlayer(",
