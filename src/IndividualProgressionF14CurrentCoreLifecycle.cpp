@@ -620,10 +620,10 @@ namespace
         }
     };
 
-    class CurrentCombatCreature final : public AllCreatureScript
+    class CurrentCombatCreatureRemoval final : public AllCreatureScript
     {
     public:
-        CurrentCombatCreature() : AllCreatureScript("IndividualProgression_F14CurrentCombatCreature") { }
+        CurrentCombatCreatureRemoval() : AllCreatureScript("IndividualProgression_F14CurrentCombatCreature") { }
         void OnCreatureRemoveWorld(Creature* creature) override
         {
             RetireCombatCreature(creature);
@@ -653,7 +653,7 @@ void AddSC_mod_individual_progression_f14_current_core_lifecycle()
 #if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
     new CurrentCombatPlayer();
     new CurrentCombatUnit();
-    new CurrentCombatCreature();
+    new CurrentCombatCreatureRemoval();
 #endif
 #endif
 }
