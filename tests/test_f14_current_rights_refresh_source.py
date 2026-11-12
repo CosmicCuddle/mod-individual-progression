@@ -76,9 +76,13 @@ for forbidden in (".Open(", ".Reserve(", ".Commit(", "DestroyForPlayer(",
     require(forbidden not in added, "IP164 added forbidden positive/debt action: " + forbidden)
 
 # Target stop/session/map teardown must request old-target reevaluation before retirement.
-for fn in ("void EndCombatActorTarget", "void LeaveCombatActorMap", "void EndCombatActorSession"):
-    piece = cpp.split(fn,1)[1].split("\n    }",1)[0]
-    require("RequestActorCurrentCreatureRefresh" in piece, fn + " lacks old-target refresh request")
+end_target = cpp.split("void EndCombatActorTarget",1)[1].split("void LeaveCombatActorMap",1)[0]
+require("RequestActorCurrentCreatureRefresh" in end_target, "ordinary combat end lacks old-target refresh request")
+leave_map = cpp.split("void LeaveCombatActorMap",1)[1].split("void EndCombatActorSession",1)[0]
+session_end = cpp.split("void EndCombatActorSession",1)[1].split("Creature* CurrentCombatCreature",1)[0]
+for name, piece in (("map leave", leave_map), ("session end", session_end)):
+    require("RequestActorKeyCreatureRefresh" in piece, name + " must use already-held actor key")
+    require("RequestActorCurrentCreatureRefresh" not in piece, name + " must not re-lock combat actor marker")
 retire = section(cpp, "void RetireCombatCreature", "#endif\n    Marker const* GetMarker")
 require(retire.index("RequestCreatureRightsRefresh") < retire.index("CombatTracker().RetireCreature"),
         "creature death must mark reevaluation before incarnation retirement")
