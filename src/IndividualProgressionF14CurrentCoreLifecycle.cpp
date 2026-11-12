@@ -286,9 +286,11 @@ namespace
              PLAYERHOOK_ON_UPDATE, PLAYERHOOK_ON_PLAYER_JUST_DIED,
              PLAYERHOOK_ON_BEFORE_LOGOUT, PLAYERHOOK_ON_LOGOUT}) { }
 
-        void OnPlayerEnterCombat(Player* player, Unit* enemy) override
+        void OnPlayerEnterCombat(Player* player, Unit* /*enemy*/) override
         {
-            ObserveCombatTarget(player, enemy);
+            // Entering combat is not proof that the bot initiated an attack.
+            // Only Unit::Attack current victim is positive target ownership.
+            ObserveCombatTarget(player, player ? player->GetVictim() : nullptr);
         }
 
         void OnPlayerUpdate(Player* player, uint32 /*diff*/) override
