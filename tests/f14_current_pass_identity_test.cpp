@@ -43,6 +43,16 @@ int main()
 
     {
         P::Tracker<4> t;
+        CHECK(t.Begin(750,a) == P::Result::Recorded);
+        CHECK(t.End(750,{}) == P::Result::Mismatch);
+        auto const s = t.Inspect();
+        CHECK(s.poisoned && s.active == 0 && s.mismatches == 1);
+        CHECK(t.Begin(751,a) == P::Result::Poisoned);
+        CHECK(t.Inspect().active == 0);
+    }
+
+    {
+        P::Tracker<4> t;
         CHECK(t.Begin(800,a) == P::Result::Recorded);
         CHECK(t.RevokeViewer(a.guid) == 1);
         CHECK(t.Inspect().active == 0 && t.Inspect().revocations == 1);
