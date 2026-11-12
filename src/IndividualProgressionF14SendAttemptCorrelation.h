@@ -286,7 +286,22 @@ namespace IndividualProgressionF14SendAttemptCorrelation
             return ObservePassEnded(viewer, passToken);
         }
         void ObserveViewerSessionEnded(std::uint64_t viewerGuid) { ForgetViewer(viewerGuid); }
-        void ObserveViewerRightsOrEraChanged(std::uint64_t viewerGuid) { ForgetViewer(viewerGuid); }
+        // Rights/era changes do not end the authenticated login epoch.
+        // Close through the last observed pass, retaining its replay fence
+        // and any poison. Never forget a same-epoch viewer to free capacity.
+        // Unknown viewers have no local pass to close; the future Core
+        // consumer must independently fence its actual pass/generation.
+        void ObserveViewerRightsOrEraChanged(std::uint64_t viewerGuid)
+        {
+            if (!viewerGuid)
+                return;
+            std::size_t const vp = FindViewerByGuid(viewerGuid);
+            if (vp == MaxViewers)
+                return;
+            ViewerPass& pass = _viewers[vp];
+            pass.closedThrough = pass.lastToken;
+            DropIf([&](Candidate const& c) { return c.viewer == pass.viewer; });
+        }
         void ObserveCreatureRetired(CreatureKey creature)
         {
             DropIf([&](Candidate const& c) { return c.creature == creature; });
