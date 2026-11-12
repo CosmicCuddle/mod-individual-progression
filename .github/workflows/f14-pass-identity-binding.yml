@@ -1,0 +1,47 @@
+name: F14 pure visibility-pass identity binding
+on:
+  push:
+    branches:
+      - feature/cs01-ip159-f14-pass-identity-binding-pure-20261112
+  pull_request:
+    paths:
+      - src/IndividualProgressionF14PassIdentityBinding.h
+      - tests/f14_pass_identity_binding_test.cpp
+      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
+      - .github/workflows/f14-pass-identity-binding.yml
+jobs:
+  model:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact pure-model-only scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=f66190f67cf231addf1331d5d5ce7b67a6fa8981
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --name-only "$parent" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            '.github/workflows/f14-pass-identity-binding.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'src/IndividualProgressionF14PassIdentityBinding.h' \
+            'tests/f14_pass_identity_binding_test.cpp' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src/*.cpp conf data optional sql)"
+      - name: Compile and run pure binding model
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in normal ndebug; do
+            extra=()
+            if [ "$mode" = ndebug ]; then extra+=(-DNDEBUG); fi
+            ${{ matrix.compiler }} -std=${{ matrix.standard }} -Wall -Wextra -Werror -pthread "${extra[@]}" -Isrc tests/f14_pass_identity_binding_test.cpp -o /tmp/f14-pass-binding
+            /tmp/f14-pass-binding
+          done
