@@ -1203,3 +1203,15 @@ IP166 keeps the conservative fail-visible policy: zero tokens are still refused;
 The historical IP159 source-contract workflow is also made descendant-safe by running the original IP159 source guard against immutable reviewed head `013a2e0e63e41bbd7b21ddf31c6fa4f6fc8ea554` in a detached worktree, while current descendant models compile from the current checkout. This is CI evidence hygiene only.
 
 No Store Open/Reserve/Commit, positive suppression, packet, visibility refresh, client ACK, debt retirement, config, SQL, DB, DBC, client or host change. IP160 remains hard-FALSE. R2 #42 and sticky restoration-fence recovery remain blockers before positive use. Full macro-ON descendant Worldserver compilation and gameplay remain separate gates. Rollback: abandon this child.
+
+
+### IP-F14 current combat actor session-release liveness correction (12 Nov 2026; DRAFT)
+
+| Field | Record |
+| --- | --- |
+| Owner/component | CosmicCuddle; Server-Side-Maintenance child of IP #166 after CosmicScript02/Grok review of IP #163. |
+| Intended behaviour | Preserve the current fail-visible combat ownership tracker while ensuring a verified RandomBot actor slot can still be released when map-leave invalidation clears the exact map-generation key before logout. |
+| Source changes | Adds an exact `{full GUID, verified login epoch}` session-release path to `IndividualProgressionF14CurrentCombatOwnership.h`. `CombatActorMarker` retains separate release-only GUID/epoch fields across map leave; session end consumes them and clears them. Existing exact `ActorKey` release, target retirement, map invalidation and sticky poison remain unchanged. |
+| Safety boundary | Session release requires an exact login epoch match. A stale older logout cannot release a slot already reused by a newer login epoch. No positive concealment, Store Reserve/Commit, packet action, restoration completion, fence reset, SQL/config/client/host action. IP160 positive suppression remains hard-FALSE and R2 #42 remains a blocker. |
+| Tests | Pure tracker regression covers combat sample -> target end/map-key loss model -> session release -> capacity reuse without poison, plus stale old-epoch refusal against a newer session. Source contract requires the release-only identity to survive map leave and be cleared only at session end. Full Worldserver macro-ON link remains a separate Services gate. |
+| Rollback | Revert this child branch/PR. No migration or live-state rollback is required because the feature remains experimental/OFF and no production action is authorised. |

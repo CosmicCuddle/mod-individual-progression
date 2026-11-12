@@ -70,6 +70,26 @@ int main()
         CHECK(current.found && current.active && current.actor == newerA);
     }
 
+    {
+        C::Tracker<1> mapLeaveThenLogout;
+        C::ActorKey nextSession{102,13,1004,{1,2}};
+        CHECK(mapLeaveThenLogout.Observe(a,c) == C::ObserveResult::Recorded);
+        CHECK(mapLeaveThenLogout.EndActor(a));
+        CHECK(mapLeaveThenLogout.ReleaseActorSession(a.guid, a.loginEpoch));
+        CHECK(mapLeaveThenLogout.Inspect().actors == 0);
+        CHECK(mapLeaveThenLogout.Observe(nextSession,c) == C::ObserveResult::Recorded);
+        CHECK(!mapLeaveThenLogout.Inspect().poisoned);
+    }
+
+    {
+        C::Tracker<1> staleSession;
+        C::ActorKey newerSession{100,20,2000,{1,2}};
+        CHECK(staleSession.Observe(newerSession,c) == C::ObserveResult::Recorded);
+        CHECK(!staleSession.ReleaseActorSession(a.guid, a.loginEpoch));
+        C::ActorState const current = staleSession.InspectActor(newerSession.guid);
+        CHECK(current.found && current.actor == newerSession);
+    }
+
     C::Tracker<1> tiny;
     CHECK(tiny.Observe(a,c) == C::ObserveResult::Recorded);
     CHECK(tiny.Observe(b,c) == C::ObserveResult::Poisoned);
@@ -84,5 +104,6 @@ int main()
 
     std::cout << "PASS current combat ownership: multiple attackers, target/map changes, relog stale rejection, exact creature retirement and fail-visible poison\n";
     std::cout << "PASS session slot release/reuse and poisoned InspectActor refusal\n";
+    std::cout << "PASS map-leave then logout session release and stale-epoch refusal\n";
     return EXIT_SUCCESS;
 }

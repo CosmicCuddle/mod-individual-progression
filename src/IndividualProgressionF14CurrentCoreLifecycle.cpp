@@ -119,6 +119,10 @@ namespace
         mutable std::mutex lock;
         mutable std::uint64_t guid = 0;
         mutable std::uint64_t loginEpoch = 0;
+        // Session-release identity survives map-generation invalidation so a
+        // map leave followed by logout can still free the actor tracker slot.
+        mutable std::uint64_t releaseGuid = 0;
+        mutable std::uint64_t releaseLoginEpoch = 0;
         mutable std::uint64_t mapGeneration = 0;
         mutable Combat::MapKey map{};
     };
@@ -169,6 +173,8 @@ namespace
         CombatActorMarker* marker =
             player->CustomData.GetDefault<CombatActorMarker>(CombatActorMarkerKey);
         std::lock_guard<std::mutex> guard(marker->lock);
+        marker->releaseGuid = player->GetGUID().GetRawValue();
+        marker->releaseLoginEpoch = published.loginEpoch;
         Combat::MapKey const map = CombatMap(player->GetMap());
         if (marker->guid != player->GetGUID().GetRawValue() ||
             marker->loginEpoch != published.loginEpoch)
@@ -267,8 +273,13 @@ namespace
             CombatTracker().EndActor(actor);
             CombatTracker().ReleaseActor(actor);
         }
+        // The exact map key can be unavailable here after pre-map-removal.
+        // The separately retained session identity closes that liveness gap.
+        CombatTracker().ReleaseActorSession(marker->releaseGuid, marker->releaseLoginEpoch);
         marker->guid = 0;
         marker->loginEpoch = 0;
+        marker->releaseGuid = 0;
+        marker->releaseLoginEpoch = 0;
         marker->mapGeneration = 0;
         marker->map = {};
     }
