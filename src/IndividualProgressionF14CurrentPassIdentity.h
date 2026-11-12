@@ -122,6 +122,15 @@ namespace IndividualProgressionF14CurrentPassIdentity
             return slot && slot->identity == identity;
         }
 
+        bool BatchWasObserved(std::uint64_t token, ViewerIdentity identity) const
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            if (_poisoned || !token || !identity)
+                return false;
+            Slot const* slot = FindTokenConst(token);
+            return slot && slot->identity == identity && slot->batchObserved;
+        }
+
         Result End(std::uint64_t token, ViewerIdentity identity)
         {
             std::lock_guard<std::mutex> lock(_mutex);
