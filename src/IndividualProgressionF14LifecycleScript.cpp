@@ -1047,8 +1047,11 @@ private:
 };
 #endif
 
+void AddSC_mod_individual_progression_f14_current_core_lifecycle();
+
 void AddSC_mod_individual_progression_f14_lifecycle()
 {
+    AddSC_mod_individual_progression_f14_current_core_lifecycle();
 #if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION) && COSMIC_F14_ATTACK_EVENT_HOOK_VERSION >= 1
     new IndividualProgressionF14LifecycleScript();
     new IndividualProgressionF14LifecycleRemovalScript();
