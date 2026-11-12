@@ -74,12 +74,13 @@
 #include "WorldSession.h"
 #include "Log.h"
 #include <atomic>
+#include <string>
 
 namespace
 {
     namespace Session = IndividualProgressionF14CurrentViewerSession;
     namespace Epoch = IndividualProgressionF14HumanViewerEpoch;
-    constexpr char const* MarkerKey = "IndividualProgression.F14.CurrentCoreViewerSession";
+    std::string const MarkerKey = "IndividualProgression.F14.CurrentCoreViewerSession";
     struct Marker final : DataMap::Base
     {
         // Only observer-owned metadata is mutable through a const Player
@@ -111,8 +112,8 @@ namespace
 
 #if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
     namespace Combat = IndividualProgressionF14CurrentCombatOwnership;
-    constexpr char const* CombatActorMarkerKey = "IndividualProgression.F14.CurrentCombatActor";
-    constexpr char const* CombatCreatureMarkerKey = "IndividualProgression.F14.CurrentCombatCreature";
+    std::string const CombatActorMarkerKey = "IndividualProgression.F14.CurrentCombatActor";
+    std::string const CombatCreatureMarkerKey = "IndividualProgression.F14.CurrentCombatCreature";
 
     struct CombatActorMarker final : DataMap::Base
     {
@@ -791,7 +792,6 @@ namespace
         CurrentRightsRefreshUnit() : UnitScript("IndividualProgression_F14CurrentRightsRefreshUnit", true,
             {UNITHOOK_ON_HEAL, UNITHOOK_ON_DAMAGE,
              UNITHOOK_MODIFY_PERIODIC_DAMAGE_AURAS_TICK,
-             UNITHOOK_MODIFY_SPELL_DAMAGE_TAKEN, UNITHOOK_MODIFY_HEAL_RECEIVED,
              UNITHOOK_ON_AURA_APPLY, UNITHOOK_ON_AURA_REMOVE, UNITHOOK_ON_UNIT_UPDATE,
              UNITHOOK_ON_UNIT_ENTER_EVADE_MODE, UNITHOOK_ON_UNIT_ENTER_COMBAT,
              UNITHOOK_ON_UNIT_EXIT_COMBAT, UNITHOOK_ON_UNIT_DEATH}) { }
@@ -811,16 +811,6 @@ namespace
             RequestInteractionRightsRefresh(attacker, target, RightsRefresh::Reason::PeriodicOrSpellDamage);
         }
 
-        void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& /*damage*/, SpellInfo const* /*spellInfo*/) override
-        {
-            RequestInteractionRightsRefresh(attacker, target, RightsRefresh::Reason::PeriodicOrSpellDamage);
-        }
-
-        void ModifyHealReceived(Unit* target, Unit* healer, uint32& /*heal*/, SpellInfo const* /*spellInfo*/) override
-        {
-            RequestInteractionRightsRefresh(healer, target, RightsRefresh::Reason::HealOrAssist);
-        }
-
         void OnAuraApply(Unit* unit, Aura* /*aura*/) override
         {
             RequestParticipantRightsRefresh(unit, RightsRefresh::Reason::AuraChanged);
@@ -837,9 +827,11 @@ namespace
             if (!creature || !creature->IsInWorld() || !ConsumeCreatureRightsRefresh(creature))
                 return;
             // Map-thread only: no lifecycle/tracker lock is held here.
-            // This requests ordinary Core reevaluation; it is not client ACK
-            // and does not clear restoration debt or authorize concealment.
-            creature->UpdateObjectVisibility(true);
+            // Unit's forced=false override coalesces through
+            // NOTIFY_VISIBILITY_CHANGED instead of sweeping the grid now.
+            // This remains server-side reevaluation, not client ACK,
+            // restoration success or concealment authority.
+            creature->UpdateObjectVisibility(false);
             if (_first.fetch_add(1, std::memory_order_relaxed) == 0)
                 LOG_INFO("module", "IP F14 current rights-change observer requested first owning-map creature visibility reevaluation; concealment remains forced FALSE");
         }
