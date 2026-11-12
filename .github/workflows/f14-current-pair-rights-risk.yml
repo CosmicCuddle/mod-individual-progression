@@ -1,0 +1,39 @@
+name: F14 current pair-rights negative risk model
+on:
+  push:
+    branches:
+      - feature/cs01-ip171-f14-current-pair-rights-risk-20261112
+  pull_request:
+    paths:
+      - 'src/IndividualProgressionF14CurrentPairRightsRisk.h'
+      - 'tests/f14_current_pair_rights_risk_test.cpp'
+      - 'tests/test_f14_current_pair_rights_risk_source.py'
+      - 'docs/CUSTOM_MODIFICATIONS_REGISTER.md'
+      - '.github/workflows/f14-current-pair-rights-risk.yml'
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact pure negative-evidence scope
+        run: python3 tests/test_f14_current_pair_rights_risk_source.py
+      - name: Compile and execute current pair-rights risk model
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in normal ndebug; do
+            extra=()
+            if [ "$mode" = ndebug ]; then extra+=(-DNDEBUG); fi
+            ${{ matrix.compiler }} -std=${{ matrix.standard }} -Wall -Wextra -Werror "${extra[@]}" \
+              -Isrc tests/f14_current_pair_rights_risk_test.cpp -o /tmp/f14_current_pair_rights_risk
+            /tmp/f14_current_pair_rights_risk
+          done
