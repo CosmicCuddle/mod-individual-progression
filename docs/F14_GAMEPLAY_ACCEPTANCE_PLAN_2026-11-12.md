@@ -287,7 +287,7 @@ Current status after the Part 46 review/build advances:
 - IP167 has an independent Grok PASS; the #163 N1 slot-leak finding is closed at source/review/native-build level, with gameplay proof still outstanding;
 - IP168 focused compiler matrix is GREEN and CosmicScript02/Grok has independently **PASSed** the #168 performance correction; #164 M1/L1/L2 are closed at source-review level;
 - **Services69 is full native GREEN** at exact Core21 + PB15 + IP168 + Naxx292 + merged WPS + pinned public AutoBalance, including actual Worldserver compile+link and binary verification without server start;
-- Services70 has passed tuple/source/regression/macro checks and is currently in the actual Core23 Worldserver compile+link step at this document revision;
+- **Services70 is full native GREEN** at exact Core23 + PB15 + IP168 + Naxx292 + merged WPS + pinned public AutoBalance, including actual Worldserver compile+link and binary verification without server start;
 - Services69/70 include merged WPS; their AutoBalance pin is public coexistence evidence only, not installed-host proof;
 - IP170 isolates the current Grimfeather optional-SQL context fix and is deliberately excluded from this Phase A runtime tuple; no optional SQL has been executed;
 - IP171's dedicated negative pair-rights workflow is GREEN; inherited historical exact-scope workflows reject the later descendant by design. IP171 remains unwired/not the active candidate and is awaiting independent review;
