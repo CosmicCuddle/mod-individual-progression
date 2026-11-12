@@ -172,6 +172,25 @@ namespace IndividualProgressionF14CurrentCombatOwnership
             return true;
         }
 
+        // Session cleanup may occur after map leave has deliberately invalidated
+        // the map-generation key. Release only the slot owned by the exact
+        // verified login epoch; a stale prior session cannot free a newer one.
+        // This is cleanup only and never clears sticky poison.
+        bool ReleaseActorSession(std::uint64_t guid, std::uint64_t loginEpoch)
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            if (!guid || !loginEpoch)
+                return false;
+            Slot* slot = FindActor(guid);
+            if (!slot || slot->actor.loginEpoch != loginEpoch)
+                return false;
+            slot->used = false;
+            slot->active = false;
+            slot->actor = {};
+            slot->creature = {};
+            return true;
+        }
+
         std::size_t RetireCreature(CreatureKey creature)
         {
             std::lock_guard<std::mutex> lock(_mutex);
