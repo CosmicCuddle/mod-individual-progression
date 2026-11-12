@@ -39,7 +39,7 @@ for needle in (
 ):
     require(needle in cpp, "missing current rebind contract: " + needle)
 
-body = cpp.split("void OnF14PlayerSessionRebound(Player* player) override",1)[1].split("void OnPlayerBeforeLogout",1)[0]
+body = cpp.split("class CurrentViewerSessionRebind final",1)[1].split("class CurrentCombatPlayer final",1)[0]
 require(body.count("BeforeDeparture(player);") == 1, "rebind must preserve old restoration obligations first")
 require(body.count("Logout(player);") == 1, "rebind must invalidate old current viewer identity")
 require(body.index("BeforeDeparture(player);") < body.index("Logout(player);"), "departure must precede identity teardown")
