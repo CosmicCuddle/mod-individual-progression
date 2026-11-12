@@ -23,8 +23,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify exact current-lineage source boundary
-        run: python3 tests/test_f14_current_rights_refresh_source.py
+      - name: Verify immutable IP164 source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach /tmp/ip164 2b46cc76a23d97a0de66274b4a496a30a57c810f
+          python3 /tmp/ip164/tests/test_f14_current_rights_refresh_source.py
+          git worktree remove --force /tmp/ip164
       - name: Compile pure pending model plus inherited safety models
         shell: bash
         run: |
