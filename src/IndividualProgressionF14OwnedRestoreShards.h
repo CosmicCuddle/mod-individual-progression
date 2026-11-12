@@ -30,6 +30,12 @@ namespace IndividualProgressionF14OwnedRestoreShards
         using SealResult = typename Accounting::SealResult;
         using Snapshot = typename Accounting::Snapshot;
         enum class CommitResult { Recorded, Uncertain, Rejected };
+        enum class EvidenceState { Missing, Known, Uncertain };
+        struct EvidenceRead
+        {
+            EvidenceState state = EvidenceState::Missing;
+            VRP::Evidence evidence{};
+        };
         struct Status
         {
             bool found = false, retained = false, pending = false, uncertain = false;
@@ -57,6 +63,8 @@ namespace IndividualProgressionF14OwnedRestoreShards
             for (Slot const& s : _slots)
                 if ((s.active || s.retained) && s.mapId == mapId && s.instanceId == instanceId)
                     return {};
+            // Keep allocation serialized until a provisional-slot budget is
+            // implemented: allocating outside this lock could exceed Shards.
             std::unique_ptr<Protocol> payload(new (std::nothrow) Protocol{});
             if (!payload)
                 return {};
@@ -99,6 +107,7 @@ namespace IndividualProgressionF14OwnedRestoreShards
             Slot* s = Active(r.shard);
             if (!s || !Matches(*s, r))
             {
+                _unattributedCommitRisk = true;
                 _gate.CloseFence();
                 return CommitResult::Rejected;
             }
@@ -177,6 +186,8 @@ namespace IndividualProgressionF14OwnedRestoreShards
             s->active->ObserveMapUnloaded(s->mapId, s->instanceId);
             if (s->pending || !quiescent)
             {
+                // A possibly applied effect may exist only in pending metadata.
+                _unattributedCommitRisk = true;
                 s->uncertain = true;
                 s->active->ObserveConfigDisabled();
             }
@@ -210,14 +221,28 @@ namespace IndividualProgressionF14OwnedRestoreShards
                 ledger.PendingRestores(), s->pending.viewer, s->pending.creature,
                 s->pending.incarnation};
         }
-        VRP::Evidence ReadEvidence(Handle h, VRP::ViewerKey viewer, VRP::CreatureKey creature) const
+        // Retained evidence is the whole tuple: original Protocol, pending
+        // identity, uncertain flag and process-wide unknown-effect risk.
+        // A missing Protocol record alone cannot prove a hide did not occur.
+        // Known evidence remains available even if its classification is uncertain.
+        EvidenceRead ReadEvidence(Handle h, VRP::ViewerKey viewer, VRP::CreatureKey creature) const
         {
             std::lock_guard<std::mutex> lock(_mutex);
             Slot const* s = Find(h);
             if (!s)
-                return {};
+                return {_unattributedCommitRisk ? EvidenceState::Uncertain : EvidenceState::Missing, {}};
             Protocol const& p = s->active ? *s->active : *s->retained;
-            return p.Find(viewer, creature);
+            auto const evidence = p.Find(viewer, creature);
+            bool const uncertain = _unattributedCommitRisk || s->uncertain || p.UnattributedHideRisk() ||
+                (s->pending && s->pending.viewer == viewer && s->pending.creature == creature);
+            return {uncertain ? EvidenceState::Uncertain :
+                evidence.found ? EvidenceState::Known : EvidenceState::Missing, evidence};
+        }
+
+        bool HasUnattributedCommitRisk() const
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            return _unattributedCommitRisk;
         }
 
     private:
@@ -261,6 +286,7 @@ namespace IndividualProgressionF14OwnedRestoreShards
         }
         CommitResult FailCommit(Slot& s, Reservation r)
         {
+            _unattributedCommitRisk = true;
             s.uncertain = true;
             s.active->ObserveConfigDisabled();
             _gate.Settle(r, Accounting::Settlement::Uncertain);
@@ -272,6 +298,7 @@ namespace IndividualProgressionF14OwnedRestoreShards
         mutable std::mutex _mutex;
         Accounting _gate{};
         std::array<Slot, Shards> _slots{};
+        bool _unattributedCommitRisk = false;
     };
 }
 #endif
