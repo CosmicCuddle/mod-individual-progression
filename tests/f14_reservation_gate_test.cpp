@@ -58,6 +58,14 @@ int main()
         CHECK(g.Seal(a, true, false) == G::SealResult::Retained);
         CHECK(g.Inspect().fenced);
     }
+    {
+        G g;
+        auto a = g.Open(true), b = g.Open(true);
+        auto r = g.Reserve(a);
+        CHECK(r && g.Settle(r, static_cast<G::Settlement>(255)));
+        CHECK(g.Inspect().fenced && !g.Reserve(b));
+        CHECK(g.Seal(a, true, true) == G::SealResult::Retained);
+    }
     // Both orders of the serialized reservation/closure race must be safe.
     for (int i = 0; i < 256; ++i)
     {

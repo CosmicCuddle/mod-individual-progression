@@ -93,7 +93,9 @@ namespace IndividualProgressionF14ReservationGate
             s->pending = 0;
             if (outcome == Settlement::Recorded)
                 s->debt = true;
-            else if (outcome == Settlement::Uncertain)
+            // Only an explicitly unused reservation may release without debt.
+            // Invalid enum values are uncertain, never an implicit cancellation.
+            else if (outcome != Settlement::Unused)
             {
                 s->debt = true;
                 _fenced = true;
