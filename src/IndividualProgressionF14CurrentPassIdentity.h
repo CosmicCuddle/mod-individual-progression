@@ -134,12 +134,12 @@ namespace IndividualProgressionF14CurrentPassIdentity
         Result End(std::uint64_t token, ViewerIdentity identity)
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            if (!token || !identity)
+            if (!token)
                 return Result::Refused;
             Slot* slot = FindToken(token);
             if (!slot)
                 return _poisoned ? Result::Poisoned : Result::Refused;
-            if (!(slot->identity == identity))
+            if (!identity || !(slot->identity == identity))
             {
                 *slot = {};
                 return MismatchLocked();

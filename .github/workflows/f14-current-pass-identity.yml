@@ -23,8 +23,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify additive observer-only source boundary
-        run: python3 tests/test_f14_current_pass_identity_source.py
+      - name: Verify immutable IP159 additive observer-only source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          hist="$(mktemp -d)/ip159"
+          git worktree add --detach "$hist" 013a2e0e63e41bbd7b21ddf31c6fa4f6fc8ea554
+          python3 "$hist/tests/test_f14_current_pass_identity_source.py"
+          git worktree remove --force "$hist"
       - name: Compile and run pass identity plus inherited pure safety models
         shell: bash
         run: |
