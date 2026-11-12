@@ -324,11 +324,7 @@ namespace
     {
     public:
         CurrentViewerLogin() : PlayerScript("IndividualProgression_F14CurrentViewerLogin",
-            {PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_BEFORE_LOGOUT, PLAYERHOOK_ON_LOGOUT
-#if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
-             , PLAYERHOOK_ON_F14_SESSION_REBOUND
-#endif
-            }) { }
+            {PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_BEFORE_LOGOUT, PLAYERHOOK_ON_LOGOUT}) { }
         void OnPlayerLogin(Player* player) override
         {
             Logout(player);
@@ -344,7 +340,26 @@ namespace
             if (player->IsInWorld())
                 Enter(player, player->GetMap());
         }
+
+        void OnPlayerBeforeLogout(Player* player) override
+        {
+            BeforeDeparture(player);
+            Logout(player);
+        }
+        void OnPlayerLogout(Player* player) override
+        {
+            BeforeDeparture(player);
+            Logout(player);
+        }
+    };
+
 #if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
+    class CurrentViewerSessionRebind final : public PlayerScript
+    {
+    public:
+        CurrentViewerSessionRebind() : PlayerScript("IndividualProgression_F14CurrentViewerSessionRebind",
+            {PLAYERHOOK_ON_F14_SESSION_REBOUND}) { }
+
         void OnF14PlayerSessionRebound(Player* player) override
         {
             // A different authenticated client now owns this same in-world
@@ -363,19 +378,8 @@ namespace
             if (player->IsInWorld())
                 Enter(player, player->GetMap());
         }
-#endif
-        void OnPlayerBeforeLogout(Player* player) override
-        {
-            BeforeDeparture(player);
-            Logout(player);
-        }
-        void OnPlayerLogout(Player* player) override
-        {
-            BeforeDeparture(player);
-            Logout(player);
-        }
     };
-
+#endif
     class CurrentViewerMap final : public AllMapScript
     {
     public:
@@ -482,6 +486,9 @@ void AddSC_mod_individual_progression_f14_current_core_lifecycle()
 {
 #if defined(COSMIC_IP_F14_CURRENT_CORE_LIFECYCLE_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_CURRENT_CORE_LIFECYCLE_OBSERVER_EXPERIMENT >= 1
     new CurrentViewerLogin();
+#if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
+    new CurrentViewerSessionRebind();
+#endif
     new CurrentViewerMap();
     new CurrentViewerPass();
 #if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
