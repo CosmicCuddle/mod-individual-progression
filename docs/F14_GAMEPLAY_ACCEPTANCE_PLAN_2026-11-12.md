@@ -20,6 +20,10 @@ Current source candidate at preparation time:
 
 Services70 is a disposable compatibility target, not an installed-host baseline. The AutoBalance SHA is a public upstream reference only; CosmicCuddle's exact installed AutoBalance revision remains unverified.
 
+**Explicitly excluded from this pinned runtime candidate:**
+- IP170 is an isolated carry of Grimfeather's optional SQL database-context correction. It is not needed for Phase A and its optional SQL must **not** be executed as part of F14 testing.
+- IP171 is an unwired negative-only pair-rights evidence model. It is not runtime authority and is not part of the active candidate unless a later reviewed integration deliberately carries it forward.
+
 Do not silently replace any pin during testing. If upstream sync is integrated first, record a new exact tuple and rerun source/native gates before gameplay.
 
 ## 2. Mandatory safety prerequisites before any owner-host test
@@ -108,6 +112,25 @@ In a disposable environment, run the exact IP167 liveness regression as gameplay
 Also stress the pass/viewer trackers with repeated valid session creation/revocation.
 
 **Pass:** valid session release permits slot reuse beyond capacity; stale epochs cannot release newer sessions; no ordinary sequence poisons the tracker; any deliberately induced uncertainty/poison fails visible and never grants concealment.
+
+### A6. World Party Scaling / AutoBalance coexistence smoke
+
+Because the pinned candidate now includes the owner-merged World Party Scaling fork, verify the merged custom behavior in the same disposable test environment:
+
+- eligible normal open-world creature with one nearby player -> tier 1;
+- eligible normal open-world creature with nearby group members -> tier matches nearby online members only;
+- nearby dead/unreleased group member still counts for a new pull;
+- member releases to a distant graveyard before a new pull -> no longer counts;
+- member moves away or dies after combat starts -> active tier remains frozen;
+- distant member arrives after combat starts -> active tier remains frozen;
+- nearby online Playerbot counts like a human; distant/offline Playerbot does not;
+- normal rare remains WPS-eligible;
+- elite, rare-elite and world boss remain native/unscaled by WPS;
+- dungeon/raid creatures remain outside WPS and continue through the installed AutoBalance behavior.
+
+**Pass:** WPS never scales excluded elites or instances, nearby-member counting matches the owner rule, active tiers do not change mid-fight, and no F14 observer work changes WPS/AutoBalance ownership.
+
+The pinned public AutoBalance build can establish source coexistence only. Owner-host acceptance still requires the exact installed AutoBalance source/revision.
 
 ## 4. Phase B — positive concealment acceptance
 
@@ -257,12 +280,14 @@ Do not repair production state ad hoc. Roll back to the prepared baseline and in
 Current status after the Part 46 review/build advances:
 
 - source/model safety has progressed through IP168 and Core23's token-bound initial CREATE provenance seam;
-- Services64, Services65, Services66 and Services67 are full native GREEN;
+- Services64, Services65, Services66, Services67 and **Services68** are full native GREEN;
 - IP165/Core20 observer scope has an independent CosmicScript02/Grok PASS;
 - IP167 has an independent Grok PASS; the #163 N1 slot-leak finding is closed at source/review/native-build level, with gameplay proof still outstanding;
-- IP168 focused compiler matrix is GREEN and Grok's narrow #168 performance follow-up remains pending;
-- Services68, Services69 and Services70 are later native descendants under validation at this document revision;
+- IP168 focused compiler matrix is GREEN and CosmicScript02/Grok has independently **PASSed** the #168 performance correction; #164 M1/L1/L2 are closed at source-review level;
+- Services69 and Services70 have passed tuple/source/regression/macro checks and are currently in the actual Worldserver compile+link step at this document revision;
 - Services69/70 include merged WPS; their AutoBalance pin is public coexistence evidence only, not installed-host proof;
+- IP170 isolates the current Grimfeather optional-SQL context fix and is deliberately excluded from this Phase A runtime tuple; no optional SQL has been executed;
+- IP171's dedicated negative pair-rights workflow is GREEN; inherited historical exact-scope workflows reject the later descendant by design. IP171 remains unwired/not the active candidate and is awaiting independent review;
 - positive concealment remains hard-FALSE and Core23 registers no positive CREATE listener;
 - R2 #42 remains unanswered;
 - no gameplay acceptance has been claimed;
