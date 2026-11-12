@@ -290,7 +290,8 @@ Current status after the Part 46 review/build advances:
 - **Services70 is full native GREEN** at exact Core23 + PB15 + IP168 + Naxx292 + merged WPS + pinned public AutoBalance, including actual Worldserver compile+link and binary verification without server start;
 - Services69/70 include merged WPS; their AutoBalance pin is public coexistence evidence only, not installed-host proof;
 - IP170 isolates the current Grimfeather optional-SQL context fix and is deliberately excluded from this Phase A runtime tuple; no optional SQL has been executed;
-- IP171's dedicated negative pair-rights workflow is GREEN; inherited historical exact-scope workflows reject the later descendant by design. IP171 remains unwired/not the active candidate and is awaiting independent review;
+- IP171 was independently PASSed as negative-only; its pre-adapter completeness/threat/service findings were isolated in unwired IP172;
+- IP172 focused completeness gate is 4/4 GREEN and CosmicScript02/Grok independently PASSed it as still negative-only/unwired. IP172 remains evidence-model work only and is **not** part of the active runtime candidate;
 - positive concealment remains hard-FALSE and Core23 registers no positive CREATE listener;
 - R2 #42 remains unanswered;
 - no gameplay acceptance has been claimed;
