@@ -1,0 +1,118 @@
+name: IP historical replay and current feature preservation
+on:
+  push:
+    branches:
+      - ci/cs01-ip155-historical-current-regression-separation-20261112
+  pull_request:
+    paths:
+      - .github/workflows/ip-historical-current-regression-separation.yml
+      - docs/IP_HISTORICAL_CURRENT_REGRESSION_2026-11-12.md
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  historical-source:
+    name: Historical source and policies (${{ matrix.label }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: IP19-C3
+            sha: d53eb71c39c35f2ed488f2315565f89d8be71aa7
+          - label: IP23-paid
+            sha: 8dc16ffb3ca7f70a9c7ddc7cfbe6c5bd40088e37
+          - label: IP32-F19-paid-GM
+            sha: 6c180c0a78cdadcf6c79e8e627f2cc2e91e0fdae
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Replay original source and standalone policy checks on original head
+        env:
+          SNAPSHOT: ${{ matrix.sha }}
+          LABEL: ${{ matrix.label }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SNAPSHOT"
+          for sha in c44c3320406670cdc8f25c963ebba13e9cf24b71 a18397bbb0c7054052030a83ac30b699ac382d38; do
+            git cat-file -e "$sha^{commit}" 2>/dev/null || git fetch --no-tags origin "$sha"
+          done
+          if [ "$LABEL" != IP19-C3 ]; then
+            git cat-file -e '5fe0f9105d55d249aa55a25510d3fa23e3d84148^{commit}' 2>/dev/null || git fetch --no-tags origin 5fe0f9105d55d249aa55a25510d3fa23e3d84148
+          fi
+          if [ "$LABEL" = IP32-F19-paid-GM ]; then
+            git cat-file -e '76033c17f7179b6ff999f0296551d16574e6dcb9^{commit}' 2>/dev/null || git fetch --no-tags origin 76033c17f7179b6ff999f0296551d16574e6dcb9
+          fi
+          python3 -B -m unittest discover -s tests -p 'test_ip_combined_c3_f14_partial_login.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_combined_offline_leader_guard.py' -v
+          python3 -B tests/check_hunter_autocast_source.py
+          python3 -B tests/check_group_expansion_source.py
+          for std in c++17 c++20; do
+            g++ "-std=$std" -O2 -Wall -Wextra -Werror -pedantic tests/group_expansion_policy.cpp -o /tmp/history-group
+            /tmp/history-group
+          done
+          if [ "$LABEL" != IP19-C3 ]; then
+            python3 -B -m unittest discover -s tests -p 'test_ip_paid_expansion_source.py' -v
+            python3 -B -m unittest discover -s tests -p 'test_ip_gm_command_null_safety.py' -v
+            for cxx in g++ clang++; do
+              for std in c++17 c++20; do
+                "$cxx" "-std=$std" -O2 -Wall -Wextra -Werror -pedantic tests/expansion_purchase_policy.cpp -o /tmp/history-paid
+                /tmp/history-paid
+              done
+            done
+          fi
+          if [ "$LABEL" = IP32-F19-paid-GM ]; then
+            python3 -B -m unittest discover -s tests -p 'test_ip_f19_login_floor_source.py' -v
+            python3 -B -m unittest discover -s tests -p 'test_ip_gm_self_audit_source.py' -v
+            for cxx in g++ clang++; do
+              for std in c++17 c++20; do
+                "$cxx" "-std=$std" -O2 -Wall -Wextra -Werror -pedantic tests/f14_login_preserve_policy.cpp -o /tmp/history-f19
+                /tmp/history-f19
+              done
+            done
+            for std in c++17 c++20; do
+              g++ "-std=$std" -O2 -Wall -Wextra -Werror -pedantic tests/ip_gm_command_access_policy.cpp -o /tmp/history-gm
+              /tmp/history-gm
+            done
+          fi
+          echo 'Historical source and policy replay only; not current feature or full Worldserver evidence.'
+  current-source:
+    name: Current IP source preservation and current policy regressions
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact protected gameplay source versus last fully linked IP142
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=f259c8593f7a8ac5521bee343c40d5a2a35fd76b
+          git merge-base --is-ancestor "$baseline" HEAD
+          git diff --exit-code "$baseline" HEAD -- src/IndividualProgression.cpp src/IndividualProgression.h src/IndividualProgressionPlayer.cpp src/IndividualProgressionSpells.cpp src/cs_individualProgression.cpp src/IndividualProgressionExpansion.cpp src/IndividualProgressionExpansionPolicy.h src/IndividualProgressionGroupPolicy.h src/IndividualProgressionF14LoginPolicy.h src/IndividualProgressionReceiptPolicy.h src/IndividualProgression_loader.cpp conf data optional sql
+          echo 'Protected current gameplay source identical to IP142; not proof historical design is unchanged since IP19/23/32.'
+      - name: Execute current source and native policy regressions without modifying historical tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test in test_ip_combined_offline_leader_guard.py test_ip_f14_group_floor_source.py test_ip_paid_tbc_disabled_progression_sale.py test_ip_f14_stage8_invalid_cap_native.py test_ip_f14_raw_stage_equivalence_native.py test_ip_f14_cached_account_reader_native.py test_ip_f14_core6_positive_rndbot_adapter_source.py; do
+            test -f "tests/$test"
+            python3 -B -m unittest discover -s tests -p "$test" -v
+          done
+          python3 -B tests/check_hunter_autocast_source.py
+          python3 -B tests/check_group_expansion_source.py
+          for cxx in g++ clang++; do
+            for std in c++17 c++20; do
+              for test in f14_group_sync_floor paid_receipt_full_slot_model; do
+                "$cxx" "-std=$std" -O2 -Wall -Wextra -Werror -pedantic "tests/$test.cpp" -o "/tmp/$test"
+                "/tmp/$test"
+              done
+            done
+          done
+          echo 'Current semantic checks and exact current baseline preservation only; historical workflow failures remain visible; no full native link or gameplay.'
