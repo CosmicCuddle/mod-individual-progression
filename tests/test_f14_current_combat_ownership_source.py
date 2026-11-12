@@ -25,13 +25,7 @@ diff = subprocess.check_output(
     ["git", "diff", "-U0", PARENT, "HEAD", "--", "src/IndividualProgressionF14CurrentCoreLifecycle.cpp"],
     cwd=ROOT, text=True)
 removed = [line for line in diff.splitlines() if line.startswith("-") and not line.startswith("---")]
-allowed_removed = sorted([
-    "-    class CurrentCombatCreature final : public AllCreatureScript",
-    '-        CurrentCombatCreature() : AllCreatureScript("IndividualProgression_F14CurrentCombatCreature") { }',
-    "-    new CurrentCombatCreature();",
-])
-require(sorted(removed) == allowed_removed,
-        "current Core lifecycle removals exceed exact compile-name correction")
+require(not removed, "current Core lifecycle source must remain insertion-only from IP156")
 
 cpp = (ROOT / "src/IndividualProgressionF14CurrentCoreLifecycle.cpp").read_text()
 for needle in (
@@ -69,4 +63,4 @@ old_register = subprocess.check_output(["git", "show", PARENT + ":docs/CUSTOM_MO
 new_register = (ROOT / "docs/CUSTOM_MODIFICATIONS_REGISTER.md").read_bytes()
 require(new_register.startswith(old_register), "custom modifications register must preserve parent bytes as exact prefix")
 
-print("PASS current Core combat observer, exact compile-name correction, preserved scope and no positive visibility/store action")
+print("PASS insertion-only current Core combat observer, corrected type name, exact scope and no positive visibility/store action")
