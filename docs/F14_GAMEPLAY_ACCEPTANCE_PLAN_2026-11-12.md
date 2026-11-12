@@ -190,6 +190,8 @@ Test exact obligations for:
 
 The admission fence must never reopen merely because a reconnect happened. Global recovery must satisfy the separately approved all-clear proof.
 
+The IP168 rights-refresh observer is deliberately coalesced/delayed through normal map visibility notification. A future positive **restoration/unhide** path must therefore use its own reviewed prompt owner-thread restoration route and must not depend on this observer for timely reappearance.
+
 ### B4. WHO / world consistency
 
 Where F14 player visibility and WHO filtering are enabled by separately reviewed policy:
