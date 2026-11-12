@@ -225,7 +225,10 @@ namespace
         Combat::ActorKey const actor{marker->guid, marker->loginEpoch,
             marker->mapGeneration, marker->map};
         if (actor)
+        {
             CombatTracker().EndActor(actor);
+            CombatTracker().ReleaseActor(actor);
+        }
         marker->guid = 0;
         marker->loginEpoch = 0;
         marker->mapGeneration = 0;
