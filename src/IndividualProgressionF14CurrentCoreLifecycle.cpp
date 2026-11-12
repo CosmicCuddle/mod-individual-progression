@@ -278,64 +278,6 @@ namespace
             marker->incarnation = 0;
     }
 
-    class CurrentCombatPlayer final : public PlayerScript
-    {
-    public:
-        CurrentCombatPlayer() : PlayerScript("IndividualProgression_F14CurrentCombatPlayer",
-            {PLAYERHOOK_ON_PLAYER_ENTER_COMBAT, PLAYERHOOK_ON_PLAYER_LEAVE_COMBAT,
-             PLAYERHOOK_ON_UPDATE, PLAYERHOOK_ON_PLAYER_JUST_DIED,
-             PLAYERHOOK_ON_BEFORE_LOGOUT, PLAYERHOOK_ON_LOGOUT}) { }
-
-        void OnPlayerEnterCombat(Player* player, Unit* /*enemy*/) override
-        {
-            // Entering combat is not proof that the bot initiated an attack.
-            // Only Unit::Attack current victim is positive target ownership.
-            ObserveCombatTarget(player, player ? player->GetVictim() : nullptr);
-        }
-
-        void OnPlayerUpdate(Player* player, uint32 /*diff*/) override
-        {
-            if (!PotentialCombatActor(player) &&
-                !player->CustomData.Get<CombatActorMarker>(CombatActorMarkerKey))
-                return;
-            if (Unit* victim = player->GetVictim())
-                ObserveCombatTarget(player, victim);
-            else if (!player->IsInCombat())
-                EndCombatActorTarget(player);
-        }
-
-        void OnPlayerLeaveCombat(Player* player) override { EndCombatActorTarget(player); }
-        void OnPlayerJustDied(Player* player) override { EndCombatActorTarget(player); }
-        void OnPlayerBeforeLogout(Player* player) override { EndCombatActorSession(player); }
-        void OnPlayerLogout(Player* player) override { EndCombatActorSession(player); }
-    };
-
-    class CurrentCombatUnit final : public UnitScript
-    {
-    public:
-        CurrentCombatUnit() : UnitScript("IndividualProgression_F14CurrentCombatUnit",
-            true, {UNITHOOK_ON_UNIT_DEATH}) { }
-
-        void OnUnitDeath(Unit* unit, Unit* /*killer*/) override
-        {
-            if (!unit)
-                return;
-            if (Player* player = unit->ToPlayer())
-                EndCombatActorTarget(player);
-            if (Creature* creature = unit->ToCreature())
-                RetireCombatCreature(creature);
-        }
-    };
-
-    class CurrentCombatCreature final : public AllCreatureScript
-    {
-    public:
-        CurrentCombatCreature() : AllCreatureScript("IndividualProgression_F14CurrentCombatCreature") { }
-        void OnCreatureRemoveWorld(Creature* creature) override
-        {
-            RetireCombatCreature(creature);
-        }
-    };
 #endif
     Marker const* GetMarker(Player const* player)
     {
@@ -444,6 +386,66 @@ namespace
     private:
         std::atomic<std::uint64_t> _observed{0};
     };
+#if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
+    class CurrentCombatPlayer final : public PlayerScript
+    {
+    public:
+        CurrentCombatPlayer() : PlayerScript("IndividualProgression_F14CurrentCombatPlayer",
+            {PLAYERHOOK_ON_PLAYER_ENTER_COMBAT, PLAYERHOOK_ON_PLAYER_LEAVE_COMBAT,
+             PLAYERHOOK_ON_UPDATE, PLAYERHOOK_ON_PLAYER_JUST_DIED,
+             PLAYERHOOK_ON_BEFORE_LOGOUT, PLAYERHOOK_ON_LOGOUT}) { }
+
+        void OnPlayerEnterCombat(Player* player, Unit* /*enemy*/) override
+        {
+            // Entering combat is not proof that the bot initiated an attack.
+            // Only Unit::Attack current victim is positive target ownership.
+            ObserveCombatTarget(player, player ? player->GetVictim() : nullptr);
+        }
+
+        void OnPlayerUpdate(Player* player, uint32 /*diff*/) override
+        {
+            if (!PotentialCombatActor(player) &&
+                !player->CustomData.Get<CombatActorMarker>(CombatActorMarkerKey))
+                return;
+            if (Unit* victim = player->GetVictim())
+                ObserveCombatTarget(player, victim);
+            else if (!player->IsInCombat())
+                EndCombatActorTarget(player);
+        }
+
+        void OnPlayerLeaveCombat(Player* player) override { EndCombatActorTarget(player); }
+        void OnPlayerJustDied(Player* player) override { EndCombatActorTarget(player); }
+        void OnPlayerBeforeLogout(Player* player) override { EndCombatActorSession(player); }
+        void OnPlayerLogout(Player* player) override { EndCombatActorSession(player); }
+    };
+
+    class CurrentCombatUnit final : public UnitScript
+    {
+    public:
+        CurrentCombatUnit() : UnitScript("IndividualProgression_F14CurrentCombatUnit",
+            true, {UNITHOOK_ON_UNIT_DEATH}) { }
+
+        void OnUnitDeath(Unit* unit, Unit* /*killer*/) override
+        {
+            if (!unit)
+                return;
+            if (Player* player = unit->ToPlayer())
+                EndCombatActorTarget(player);
+            if (Creature* creature = unit->ToCreature())
+                RetireCombatCreature(creature);
+        }
+    };
+
+    class CurrentCombatCreature final : public AllCreatureScript
+    {
+    public:
+        CurrentCombatCreature() : AllCreatureScript("IndividualProgression_F14CurrentCombatCreature") { }
+        void OnCreatureRemoveWorld(Creature* creature) override
+        {
+            RetireCombatCreature(creature);
+        }
+    };
+#endif
 }
 #endif
 
