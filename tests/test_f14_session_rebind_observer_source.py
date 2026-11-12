@@ -21,11 +21,14 @@ require(sorted(actual) == expected, "unexpected IP158 path scope")
 for path in (
     "src/IndividualProgressionF14CurrentCoreLifecycle.cpp",
     "src/IndividualProgressionF14LifecycleScript.cpp",
-    "docs/CUSTOM_MODIFICATIONS_REGISTER.md",
 ):
     diff = subprocess.check_output(["git","diff","-U0",PARENT,"HEAD","--",path], cwd=ROOT, text=True)
     removed = [line for line in diff.splitlines() if line.startswith("-") and not line.startswith("---")]
-    require(not removed, "IP158 must be insertion/append-only: " + path)
+    require(not removed, "IP158 runtime source must be insertion-only: " + path)
+
+old_register = subprocess.check_output(["git","show",PARENT + ":docs/CUSTOM_MODIFICATIONS_REGISTER.md"], cwd=ROOT)
+new_register = (ROOT / "docs/CUSTOM_MODIFICATIONS_REGISTER.md").read_bytes()
+require(new_register.startswith(old_register), "custom modifications register must preserve parent bytes as exact prefix")
 
 cpp = (ROOT / "src/IndividualProgressionF14CurrentCoreLifecycle.cpp").read_text()
 for needle in (
