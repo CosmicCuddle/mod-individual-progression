@@ -6,9 +6,17 @@
 #error "Current F14 session-rebind observer requires the Core reconnect hook"
 #endif
 #endif
+#if defined(COSMIC_IP_F14_SESSION_DISCONNECT_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_DISCONNECT_OBSERVER_EXPERIMENT >= 1
+#if !defined(COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT) || COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT < 1
+#error "Current F14 session-disconnect observer requires the Core disconnect hook"
+#endif
+#endif
 #if defined(COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT) && COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT >= 1
 #if !defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) || COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT < 1
 #error "Current F14 pass identity correlation requires reconnect-safe current viewer identity"
+#endif
+#if !defined(COSMIC_IP_F14_SESSION_DISCONNECT_OBSERVER_EXPERIMENT) || COSMIC_IP_F14_SESSION_DISCONNECT_OBSERVER_EXPERIMENT < 1
+#error "Current F14 pass identity correlation requires disconnect-safe current viewer identity"
 #endif
 #endif
 #if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
@@ -538,6 +546,28 @@ namespace
         }
     };
 
+#if defined(COSMIC_IP_F14_SESSION_DISCONNECT_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_DISCONNECT_OBSERVER_EXPERIMENT >= 1
+    class CurrentViewerSessionDisconnect final : public PlayerScript
+    {
+    public:
+        CurrentViewerSessionDisconnect() : PlayerScript("IndividualProgression_F14CurrentViewerSessionDisconnect",
+            {PLAYERHOOK_ON_F14_SESSION_DISCONNECTED}) { }
+
+        void OnF14PlayerSessionDisconnected(Player* player) override
+        {
+            // The authenticated client has gone away but Core is deliberately
+            // keeping this Player in world for reconnect. Preserve/fence any
+            // outstanding restoration obligations, revoke pass-token identity,
+            // then invalidate the old viewer epoch. A fresh identity is issued
+            // only by the existing login/rebind path when a client returns.
+            BeforeDeparture(player);
+#if defined(COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT) && COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT >= 1
+            RevokePassViewer(player);
+#endif
+            Logout(player);
+        }
+    };
+#endif
     class CurrentViewerMap final : public AllMapScript
     {
     public:
@@ -869,6 +899,9 @@ void AddSC_mod_individual_progression_f14_current_core_lifecycle()
     new CurrentViewerLogin();
 #if defined(COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_REBIND_OBSERVER_EXPERIMENT >= 1
     new CurrentViewerSessionRebind();
+#endif
+#if defined(COSMIC_IP_F14_SESSION_DISCONNECT_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_SESSION_DISCONNECT_OBSERVER_EXPERIMENT >= 1
+    new CurrentViewerSessionDisconnect();
 #endif
     new CurrentViewerMap();
     new CurrentViewerPass();
