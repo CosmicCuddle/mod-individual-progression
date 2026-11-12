@@ -11,6 +11,11 @@
 #error "Current F14 pass identity correlation requires reconnect-safe current viewer identity"
 #endif
 #endif
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+#if !defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) || COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT < 1
+#error "Current F14 rights refresh requires current combat ownership"
+#endif
+#endif
 #if defined(COSMIC_IP_F14_TOKEN_BOUND_INITIAL_OUT_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TOKEN_BOUND_INITIAL_OUT_OBSERVER_EXPERIMENT >= 1
 #if !defined(COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT) || COSMIC_IP_F14_CURRENT_PASS_IDENTITY_EXPERIMENT < 1
 #error "Token-bound initial OUT observer requires exact current pass identity correlation"
@@ -43,6 +48,9 @@
 #error "Current F14 combat ownership requires login-thread verified actor publication"
 #endif
 #include "IndividualProgressionF14CurrentCombatOwnership.h"
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+#include "IndividualProgressionF14CurrentRightsRefresh.h"
+#endif
 #include "AllCreatureScript.h"
 #include "Creature.h"
 #include "Unit.h"
@@ -110,6 +118,9 @@ namespace
     struct CombatCreatureMarker final : DataMap::Base
     {
         std::uint64_t incarnation = 0;
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+        IndividualProgressionF14CurrentRightsRefresh::Pending rightsRefresh;
+#endif
     };
 
     Epoch::Issuer& CombatMapIssuer() { static Epoch::Issuer issuer; return issuer; }
@@ -183,8 +194,19 @@ namespace
         return {marker->guid, marker->loginEpoch, marker->mapGeneration, marker->map};
     }
 
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+    void RequestActorKeyCreatureRefresh(Map* map, Combat::ActorKey const& actor,
+        IndividualProgressionF14CurrentRightsRefresh::Reason reason);
+    void RequestActorCurrentCreatureRefresh(
+        Player const* player, IndividualProgressionF14CurrentRightsRefresh::Reason reason);
+#endif
+
     void EndCombatActorTarget(Player const* player)
     {
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+        RequestActorCurrentCreatureRefresh(player,
+            IndividualProgressionF14CurrentRightsRefresh::Reason::AttackOrTargetChanged);
+#endif
         Combat::ActorKey const actor = ReadCombatActor(player);
         if (actor)
             CombatTracker().EndActor(actor);
@@ -203,6 +225,10 @@ namespace
             marker->mapGeneration, marker->map};
         if (!actor)
             return;
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+        RequestActorKeyCreatureRefresh(player->GetMap(), actor,
+            IndividualProgressionF14CurrentRightsRefresh::Reason::CombatStateChanged);
+#endif
         CombatTracker().EndActor(actor);
         if (!map || !(marker->map == CombatMap(map)))
         {
@@ -226,6 +252,10 @@ namespace
             marker->mapGeneration, marker->map};
         if (actor)
         {
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+            RequestActorKeyCreatureRefresh(player->GetMap(), actor,
+                IndividualProgressionF14CurrentRightsRefresh::Reason::CombatStateChanged);
+#endif
             CombatTracker().EndActor(actor);
             CombatTracker().ReleaseActor(actor);
         }
@@ -263,9 +293,96 @@ namespace
             {creature->GetMapId(), creature->GetInstanceId()}};
     }
 
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+    namespace RightsRefresh = IndividualProgressionF14CurrentRightsRefresh;
+
+    void RequestCreatureRightsRefresh(Creature* creature, RightsRefresh::Reason reason)
+    {
+        if (!creature || !creature->IsInWorld())
+            return;
+        CombatCreatureMarker* marker =
+            creature->CustomData.Get<CombatCreatureMarker>(CombatCreatureMarkerKey);
+        // Only a creature incarnation already observed by the current combat
+        // tracker may create refresh work. Unknown creatures stay ordinary Core.
+        if (!marker || !marker->incarnation)
+            return;
+        marker->rightsRefresh.Request(reason);
+    }
+
+    Creature* ResolveCurrentCombatCreature(Map* map, Combat::CreatureKey const& key)
+    {
+        if (!map || !key || key.map.mapId != map->GetId() ||
+            key.map.instanceId != map->GetInstanceId())
+            return nullptr;
+        ObjectGuid const guid(key.guid);
+        if (!guid.IsAnyTypeCreature())
+            return nullptr;
+        Creature* creature = map->GetCreature(guid);
+        if (!creature || !creature->IsInWorld())
+            return nullptr;
+        Combat::CreatureKey const live = CombatCreatureKey(creature, false);
+        return live && live == key ? creature : nullptr;
+    }
+
+    void RequestActorKeyCreatureRefresh(Map* map, Combat::ActorKey const& actor, RightsRefresh::Reason reason)
+    {
+        if (!map || !actor)
+            return;
+        Combat::ActorState const state = CombatTracker().InspectActor(actor.guid);
+        if (!state.found || !state.active || !(state.actor == actor))
+            return;
+        if (Creature* creature = ResolveCurrentCombatCreature(map, state.creature))
+            RequestCreatureRightsRefresh(creature, reason);
+    }
+
+    void RequestActorCurrentCreatureRefresh(Player const* player, RightsRefresh::Reason reason)
+    {
+        Combat::ActorKey const actor = ReadCombatActor(player);
+        if (!actor || !player)
+            return;
+        RequestActorKeyCreatureRefresh(player->GetMap(), actor, reason);
+    }
+
+    void RequestParticipantRightsRefresh(Unit* unit, RightsRefresh::Reason reason)
+    {
+        if (!unit)
+            return;
+        if (Creature* creature = unit->ToCreature())
+            RequestCreatureRightsRefresh(creature, reason);
+        if (Player* owner = unit->GetCharmerOrOwnerPlayerOrPlayerItself())
+            RequestActorCurrentCreatureRefresh(owner, reason);
+    }
+
+    void RequestInteractionRightsRefresh(Unit* source, Unit* target, RightsRefresh::Reason reason)
+    {
+        RequestParticipantRightsRefresh(target, reason);
+        RequestParticipantRightsRefresh(source, reason);
+    }
+
+    bool ConsumeCreatureRightsRefresh(Creature* creature)
+    {
+        if (!creature)
+            return false;
+        CombatCreatureMarker* marker =
+            creature->CustomData.Get<CombatCreatureMarker>(CombatCreatureMarkerKey);
+        return marker && marker->rightsRefresh.Take() != 0;
+    }
+
+    void ClearCreatureRightsRefresh(Creature* creature)
+    {
+        if (creature)
+            if (CombatCreatureMarker* marker =
+                    creature->CustomData.Get<CombatCreatureMarker>(CombatCreatureMarkerKey))
+                marker->rightsRefresh.Clear();
+    }
+#endif
+
     void ObserveCombatTarget(Player* player, Unit* target)
     {
         Combat::ActorKey const actor = CurrentCombatActor(player);
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+        Combat::ActorState const prior = actor ? CombatTracker().InspectActor(actor.guid) : Combat::ActorState{};
+#endif
         if (!actor)
         {
             EndCombatActorSession(player);
@@ -275,6 +392,11 @@ namespace
         Creature* creature = CurrentCombatCreature(player, target);
         if (!creature)
         {
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+            if (prior.found && prior.active && prior.actor == actor)
+                if (Creature* oldCreature = ResolveCurrentCombatCreature(player->GetMap(), prior.creature))
+                    RequestCreatureRightsRefresh(oldCreature, RightsRefresh::Reason::AttackOrTargetChanged);
+#endif
             CombatTracker().EndActor(actor);
             return;
         }
@@ -282,9 +404,21 @@ namespace
         Combat::CreatureKey const key = CombatCreatureKey(creature, true);
         if (!key || !(key.map == actor.map))
         {
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+            if (prior.found && prior.active && prior.actor == actor)
+                if (Creature* oldCreature = ResolveCurrentCombatCreature(player->GetMap(), prior.creature))
+                    RequestCreatureRightsRefresh(oldCreature, RightsRefresh::Reason::AttackOrTargetChanged);
+#endif
             CombatTracker().EndActor(actor);
             return;
         }
+
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+        if (prior.found && prior.active && prior.actor == actor && !(prior.creature == key))
+            if (Creature* oldCreature = ResolveCurrentCombatCreature(player->GetMap(), prior.creature))
+                RequestCreatureRightsRefresh(oldCreature, RightsRefresh::Reason::AttackOrTargetChanged);
+        RequestCreatureRightsRefresh(creature, RightsRefresh::Reason::AttackOrTargetChanged);
+#endif
 
         static std::atomic<std::uint64_t> first{0};
         Combat::ObserveResult const result = CombatTracker().Observe(actor, key);
@@ -299,6 +433,9 @@ namespace
         Combat::CreatureKey const key = CombatCreatureKey(creature, false);
         if (!key)
             return;
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+        RequestCreatureRightsRefresh(creature, RightsRefresh::Reason::CreatureRetired);
+#endif
         CombatTracker().RetireCreature(key);
         if (CombatCreatureMarker* marker =
                 creature->CustomData.Get<CombatCreatureMarker>(CombatCreatureMarkerKey))
@@ -606,6 +743,91 @@ namespace
         void OnPlayerLogout(Player* player) override { EndCombatActorSession(player); }
     };
 
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+    class CurrentRightsRefreshUnit final : public UnitScript
+    {
+    public:
+        CurrentRightsRefreshUnit() : UnitScript("IndividualProgression_F14CurrentRightsRefreshUnit", true,
+            {UNITHOOK_ON_HEAL, UNITHOOK_ON_DAMAGE,
+             UNITHOOK_MODIFY_PERIODIC_DAMAGE_AURAS_TICK,
+             UNITHOOK_MODIFY_SPELL_DAMAGE_TAKEN, UNITHOOK_MODIFY_HEAL_RECEIVED,
+             UNITHOOK_ON_AURA_APPLY, UNITHOOK_ON_AURA_REMOVE, UNITHOOK_ON_UNIT_UPDATE,
+             UNITHOOK_ON_UNIT_ENTER_EVADE_MODE, UNITHOOK_ON_UNIT_ENTER_COMBAT,
+             UNITHOOK_ON_UNIT_EXIT_COMBAT, UNITHOOK_ON_UNIT_DEATH}) { }
+
+        void OnHeal(Unit* healer, Unit* receiver, uint32& /*gain*/) override
+        {
+            RequestInteractionRightsRefresh(healer, receiver, RightsRefresh::Reason::HealOrAssist);
+        }
+
+        void OnDamage(Unit* attacker, Unit* victim, uint32& /*damage*/) override
+        {
+            RequestInteractionRightsRefresh(attacker, victim, RightsRefresh::Reason::DirectDamage);
+        }
+
+        void ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& /*damage*/, SpellInfo const* /*spellInfo*/) override
+        {
+            RequestInteractionRightsRefresh(attacker, target, RightsRefresh::Reason::PeriodicOrSpellDamage);
+        }
+
+        void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& /*damage*/, SpellInfo const* /*spellInfo*/) override
+        {
+            RequestInteractionRightsRefresh(attacker, target, RightsRefresh::Reason::PeriodicOrSpellDamage);
+        }
+
+        void ModifyHealReceived(Unit* target, Unit* healer, uint32& /*heal*/, SpellInfo const* /*spellInfo*/) override
+        {
+            RequestInteractionRightsRefresh(healer, target, RightsRefresh::Reason::HealOrAssist);
+        }
+
+        void OnAuraApply(Unit* unit, Aura* /*aura*/) override
+        {
+            RequestParticipantRightsRefresh(unit, RightsRefresh::Reason::AuraChanged);
+        }
+
+        void OnAuraRemove(Unit* unit, AuraApplication* /*aurApp*/, AuraRemoveMode /*mode*/) override
+        {
+            RequestParticipantRightsRefresh(unit, RightsRefresh::Reason::AuraChanged);
+        }
+
+        void OnUnitUpdate(Unit* unit, uint32 /*diff*/) override
+        {
+            Creature* creature = unit ? unit->ToCreature() : nullptr;
+            if (!creature || !creature->IsInWorld() || !ConsumeCreatureRightsRefresh(creature))
+                return;
+            // Map-thread only: no lifecycle/tracker lock is held here.
+            // This requests ordinary Core reevaluation; it is not client ACK
+            // and does not clear restoration debt or authorize concealment.
+            creature->UpdateObjectVisibility(true);
+            if (_first.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_INFO("module", "IP F14 current rights-change observer requested first owning-map creature visibility reevaluation; concealment remains forced FALSE");
+        }
+
+        void OnUnitEnterEvadeMode(Unit* unit, uint8 /*evadeReason*/) override
+        {
+            RequestParticipantRightsRefresh(unit, RightsRefresh::Reason::CombatStateChanged);
+        }
+
+        void OnUnitEnterCombat(Unit* unit, Unit* victim) override
+        {
+            RequestInteractionRightsRefresh(unit, victim, RightsRefresh::Reason::CombatStateChanged);
+        }
+
+        void OnUnitExitCombat(Unit* unit) override
+        {
+            RequestParticipantRightsRefresh(unit, RightsRefresh::Reason::CombatStateChanged);
+        }
+
+        void OnUnitDeath(Unit* unit, Unit* /*killer*/) override
+        {
+            RequestParticipantRightsRefresh(unit, RightsRefresh::Reason::CreatureRetired);
+        }
+
+    private:
+        std::atomic<std::uint64_t> _first{0};
+    };
+#endif
+
     class CurrentCombatUnit final : public UnitScript
     {
     public:
@@ -630,6 +852,11 @@ namespace
         void OnCreatureRemoveWorld(Creature* creature) override
         {
             RetireCombatCreature(creature);
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+            // Removed objects cannot service a future Unit::Update. Ordinary
+            // Core removal handles client unlink; discard the pending bit.
+            ClearCreatureRightsRefresh(creature);
+#endif
         }
     };
 #endif
@@ -655,6 +882,9 @@ void AddSC_mod_individual_progression_f14_current_core_lifecycle()
 #endif
 #if defined(COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT) && COSMIC_IP_F14_CURRENT_COMBAT_OWNERSHIP_EXPERIMENT >= 1
     new CurrentCombatPlayer();
+#if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
+    new CurrentRightsRefreshUnit();
+#endif
     new CurrentCombatUnit();
     new CurrentCombatCreatureRemoval();
 #endif
