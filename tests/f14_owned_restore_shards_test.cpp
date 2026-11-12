@@ -1,4 +1,6 @@
 #include "IndividualProgressionF14OwnedRestoreShards.h"
+#include <atomic>
+#include <thread>
 #include <cstdlib>
 #include <iostream>
 namespace F = IndividualProgressionF14ViewerRestoreProtocol;
@@ -40,9 +42,10 @@ int main()
         CHECK(status.found && status.retained && status.records == 2 && status.ledgerPairs == 2);
         CHECK(status.pendingRestores == 2);
         auto evidence = s.ReadEvidence(a,v,c);
-        CHECK(evidence.found && evidence.suppressPacket == F::PacketStage::ImpliedPendingBatchFlush);
-        CHECK(evidence.restorePacket == F::PacketStage::HandedToSessionDirect);
-        CHECK(s.ReadEvidence(a,v,d).suppressServer == F::ServerStage::CreateWithheldByF14);
+        CHECK(evidence.state == S::EvidenceState::Known && evidence.evidence.found);
+        CHECK(evidence.evidence.suppressPacket == F::PacketStage::ImpliedPendingBatchFlush);
+        CHECK(evidence.evidence.restorePacket == F::PacketStage::HandedToSessionDirect);
+        CHECK(s.ReadEvidence(a,v,d).evidence.suppressServer == F::ServerStage::CreateWithheldByF14);
         CHECK(!s.RevokeCreature(a,c));
         CHECK(s.ObserveLink(a,v,c,11,true,F::VisibilityPath::Direct,t) == F::Outcome::IgnoredWrongMap);
         CHECK(s.Inspect().fenced && s.Inspect().retained == 1 && s.Inspect().occupied == 2);
@@ -62,6 +65,7 @@ int main()
         CHECK(!s.CancelBeforeEffect(r));
         CHECK(s.Commit(r,v,c,11,true,F::VisibilityPath::Direct,f) == S::CommitResult::Rejected);
         CHECK(s.Inspect().fenced && s.Inspect(b).records == 0);
+        CHECK(s.ReadEvidence(b,v,c).state == S::EvidenceState::Uncertain);
     }
     {
         S s;
@@ -71,6 +75,8 @@ int main()
         auto state = s.Inspect(a);
         CHECK(state.retained && state.uncertain && state.pending && state.reservedCreature == c);
         CHECK(state.reservedViewer == v && state.reservedIncarnation == 11);
+        CHECK(s.ReadEvidence(a,v,c).state == S::EvidenceState::Uncertain);
+        CHECK(!s.ReadEvidence(a,v,c).evidence.found);
         CHECK(!s.CancelBeforeEffect(r));
         CHECK(s.Commit(r,v,c,11,true,F::VisibilityPath::Direct,f) == S::CommitResult::Rejected);
         CHECK(s.Inspect().inFlight == 1 && s.Inspect().fenced);
@@ -102,7 +108,10 @@ int main()
         CHECK(r);
         CHECK(s.Commit(r,v,d,11,true,F::VisibilityPath::Direct,f) == S::CommitResult::Uncertain);
         CHECK(s.Seal(a,true) == S::SealResult::Retained);
-        CHECK(s.Inspect(a).reservedCreature == c && !s.ReadEvidence(a,v,d).found);
+        CHECK(s.Inspect(a).reservedCreature == c && !s.ReadEvidence(a,v,d).evidence.found);
+        CHECK(s.ReadEvidence(a,v,c).state == S::EvidenceState::Uncertain);
+        CHECK(s.ReadEvidence(a,v,d).state == S::EvidenceState::Uncertain);
+        CHECK(s.HasUnattributedCommitRisk());
     }
     {
         S s;
@@ -110,5 +119,29 @@ int main()
         CHECK(s.Seal(a,false) == S::SealResult::Retained);
         CHECK(s.Inspect(a).uncertain && s.Inspect().fenced);
     }
-    std::cout << "PASS whole-shard ownership, exact evidence, immutable retention, stale and uncertain decisions\n";
+    // Store-level concurrency: admission versus retirement of a different
+    // map containing debt. An earlier reservation remains settleable; later
+    // admission is refused. No new shard can open after the fence closes.
+    for (int i = 0; i < 256; ++i)
+    {
+        S s;
+        auto a = s.Open(1,2), b = s.Open(1,3);
+        auto prior = s.Reserve(a,v,c,11,f);
+        CHECK(prior && s.Commit(prior,v,c,11,true,F::VisibilityPath::Direct,f) == S::CommitResult::Recorded);
+        auto fb = f; fb.eventInstanceId = 3;
+        std::atomic<bool> start{false};
+        S::Reservation r{};
+        S::SealResult sealed = S::SealResult::Rejected;
+        std::thread admit([&] { while (!start.load()) std::this_thread::yield(); r = s.Reserve(b,v,other,11,fb); });
+        std::thread retire([&] { while (!start.load()) std::this_thread::yield(); sealed = s.Seal(a,true); });
+        start.store(true);
+        admit.join(); retire.join();
+        CHECK(sealed == S::SealResult::Retained && s.Inspect().fenced);
+        CHECK(!s.Reserve(b,v,other,11,fb) && !s.Open(2,4));
+        if (r)
+            CHECK(s.Commit(r,v,other,11,true,F::VisibilityPath::Direct,fb) == S::CommitResult::Recorded);
+        CHECK(s.Seal(b,true) == (r ? S::SealResult::Retained : S::SealResult::CleanReleased));
+        CHECK(s.ReadEvidence(a,v,c).state == S::EvidenceState::Known);
+    }
+    std::cout << "PASS whole-shard ownership, explicit uncertainty, immutable retention, stale decisions and concurrent seal\n";
 }
