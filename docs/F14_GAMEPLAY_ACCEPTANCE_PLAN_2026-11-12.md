@@ -26,6 +26,16 @@ Services70 is a disposable compatibility target, not an installed-host baseline.
 
 Do not silently replace any pin during testing. If upstream sync is integrated first, record a new exact tuple and rerun source/native gates before gameplay.
 
+### Pending post-sync candidate
+
+Core25 and PB19 now exist as real two-parent upstream restacks, but they do **not** replace the pinned Phase-A tuple until Services71 reaches terminal native GREEN. Services71 must preserve the immutable historical Core/PB tests on their original heads and separately prove current-restack semantics before compile/link.
+
+An expanded utility-module compatibility gate (Services72) is also under native validation. It deliberately excludes:
+- the retired standalone Playerbot Level Brackets module, because PB15/PB19 contain the integrated `RandomBotLevelMgr` implementation and `Playerbots.LevelBrackets.*` configuration;
+- MorphSummon, because CosmicCuddle's Naxxramas-specific per-appearance Gold pricing and Darkmoon Faire availability source has not yet been recovered. Plain upstream MorphSummon must **not** replace that established custom behavior.
+
+A later combined post-sync gate must stack the expanded utility modules onto a terminal-GREEN Services71 lineage, not onto the older Core23/PB15 tuple.
+
 ## 2. Mandatory safety prerequisites before any owner-host test
 
 Before a Worldserver is started for this work:
@@ -241,6 +251,13 @@ Manually preserve/retest the eight current overlap paths, especially:
 - Altbot/SelfBot/human negative cases.
 
 Retain the four currently inventoried Playerbots SQL updates and the 25 Core SQL-path changes for explicit applicability review. File-path non-overlap is not permission to apply SQL.
+
+Higher-risk Core migrations now explicitly require disposable-copy proof and rollback before any owner update:
+- World `2026_10_28_00.sql` drops `spell_proc_event`;
+- World `2026_10_25_00.sql` + `2026_10_31_00.sql` create/use `acore_string_locale` and then remove eight legacy locale columns from `acore_string`;
+- Characters `2026_10_31_00.sql` mutates duplicate current Hunter-pet slot records, keeping the newest current pet and moving older duplicates to slot 100.
+
+The four PB19 SQL additions are lower-risk Playerbots text/localisation updates, but still require updater-history and owner-custom-text overlap checks before application.
 
 ## 6. Evidence record for every gameplay case
 
