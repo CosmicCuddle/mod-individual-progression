@@ -39,7 +39,9 @@ Before a Worldserver is started for this work:
 
 - Normal human-controlled Blood Elf logs in: visible normally to Vanilla and TBC+ test viewers.
 - Normal human-controlled Draenei logs in: visible normally.
-- Human BE/Draenei reconnects after socket loss: remains ordinary visible.
+- Human BE/Draenei reconnects after socket loss **within disconnect tolerance**: remains ordinary visible and receives exactly one fresh authenticated viewer epoch after rebind.
+- Human BE/Draenei remains disconnected **past disconnect tolerance**: old session reaches clean logout; no new viewer identity appears until a later authenticated login.
+- Same-account login from a second client while the old session exists: accept either Core's kept-in-world disconnect path or ordinary logout path depending on socket-close timing; both must revoke the old viewer identity before the new client becomes authoritative.
 - Human BE/Draenei changes map/instance, logs out and relogs: no disappearance, stale state or crash.
 - GM and non-normal identities remain ordinary visible.
 
