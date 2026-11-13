@@ -35,7 +35,7 @@ For a restricted pair:
 | Battlegrounds | `OnPlayerCanJoinInBattlegroundQueue` (b), `OnPlayerCanBattleFieldPort` (a), roster from the battleground add/leave/destroy hooks | (b) a restricted bot's solo queue join is quietly refused while a still-Vanilla human waits in a matching queue and level bracket; (a) its "enter battle" is refused when it's invited to an instance holding a still-Vanilla human (either team). TBC/Wrath humans are stock. Owner decision 13 Nov 2026, option (c) |
 | Battleground matching (d) | `AllBattlegroundScript::CanAddGroupToMatchingPool` | the matcher never puts a still-Vanilla human and a restricted bot into the same match, **whichever queued or entered first**: a candidate group is refused if the other kind is already selected for the match (either team), inside the target instance, or invited to it. The refused group waits for another match. Owner-approved option (d) |
 | Duel | `AllSpellScript::OnSpellCheckCast` (global, no DB row) on spells with `SPELL_EFFECT_DUEL` | a restricted pair's duel request fails with `SPELL_FAILED_BAD_TARGETS` (no request is sent). The caster's map is owned (casts are processed in the caster's own map update), and the target is accepted only by pointer membership in it |
-| Mail | `OnPlayerCanSendMail` (world thread) | refused for a restricted pair when the receiver is **online**. An offline receiver has no live facts and is not restricted. Core uses the same hook when a mail is **returned** to its sender, so such a return is refused too (the mail can still be deleted) |
+| Mail | `OnPlayerCanSendMail` (world thread) | refused for a restricted pair when the receiver is **online**. For an **offline** receiver (owner-approved), a still-Vanilla sender is refused only if that GUID was confirmed as a restricted RandomBot earlier in this server run (remembered at its logout, on the world thread). There's no reply in that case. A bot not seen since the last restart is unknown and not restricted. Core uses the same hook when a mail is **returned** to its sender, so such a return is refused too (the mail can still be deleted) |
 
 **The in-character reply:**
 - **When:** only when the human started the interaction. Addon whispers get no reply.
@@ -122,7 +122,7 @@ This social feature is unaffected: it never restricts Altbots.
 ## Gaps (no Core change requested)
 - **Guild invite:** no script hook in Core25.
 - **Duel request:** now covered through the global spell check (the notify-only `OnPlayerDuelRequest` isn't used).
-- **Mail:** covered for online receivers only; offline receivers can't be verified and are not restricted.
+- **Mail:** covered online, and offline for bots confirmed earlier in this server run. A bot not seen since the last restart isn't restricted. The capture relies on this script being registered before IP's player script, which forgets the identity at logout; that load order is pinned by a contract.
 - **/who:** inert in Core builds without `COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT`.
 - **Stage range:** only the Vanilla-vs-TBC restriction for now. Later-era isolation (TBC human vs Wrath bot) is not in scope.
 - **Group accept and offline members:** an offline or unresolved member has no live facts, so it is skipped and never guessed from race. A group whose only restricted bot is offline can still be joined. That bot is again checked on every later interaction once it is online.

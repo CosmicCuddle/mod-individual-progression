@@ -1283,7 +1283,7 @@ Focused native tests require every completeness family independently, exercise t
 - **Thread safety (T1, CS01 review 6860967009):** client-initiated attempts run on the world thread. When Playerbots AI starts an attempt, it runs on a map thread; a pair is read there only if both player pointers are in the map this thread owns in the current world tick. Otherwise it is allowed (stock; owner decision). Two evidence-only hooks were added: `WORLDHOOK_ON_UPDATE` (world-thread and tick marker) and `PLAYERHOOK_ON_BEFORE_UPDATE` (per-thread owned map).
 - **Known gaps:**
   - guild invite (no hook);
-  - mail to an offline receiver (unverifiable, not restricted);
+  - mail to an offline bot not seen since the last restart (unknown, not restricted);
   - later-era isolation beyond Vanilla/TBC;
   - battleground matching keeps the two kinds apart at the matcher; a group invited from a different queue type into the same instance is covered by (a) once inside.
 - **Dungeon Finder (owner decision 13 Nov 2026):** a still-Vanilla human who queues is never matched into one group with a restricted RandomBot; TBC/Wrath humans are stock. Facts are recorded at queue join (world thread). The `GlobalScript::CanCreateLfgProposal` veto is value-only: GUIDs plus the recorded facts, no `Player`.

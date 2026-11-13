@@ -1043,6 +1043,30 @@ namespace
     }
 }
 
+namespace
+{
+    // Offline mail: only a bot confirmed earlier in this run is refused.
+    void TestOfflineMail()
+    {
+        for (int o = 0; o < 2; ++o)
+            for (int v = 0; v < 2; ++v)
+                for (int c = 0; c < 2; ++c)
+                    CHECK(P::OfflineMailRefused(o, v, c) == (o && v && c));
+        P::ConfirmedRestrictedBots confirmed;
+        CHECK(!confirmed.Contains(42));            // never seen this run: unknown
+        confirmed.Remember(42);
+        confirmed.Remember(0);                     // no GUID: ignored
+        confirmed.Remember(42);                    // idempotent
+        CHECK(confirmed.Size() == 1 && confirmed.Contains(42));
+        bool const vanillaSender = P::HumanStillVanilla(VanillaHuman(3));
+        bool const tbcSender = P::HumanStillVanilla(VanillaHuman(8));
+        CHECK(P::OfflineMailRefused(true, vanillaSender, confirmed.Contains(42)));
+        CHECK(!P::OfflineMailRefused(true, tbcSender, confirmed.Contains(42)));
+        CHECK(!P::OfflineMailRefused(true, vanillaSender, confirmed.Contains(43)));
+        CHECK(!P::OfflineMailRefused(false, vanillaSender, confirmed.Contains(42)));
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -1066,6 +1090,7 @@ int main()
     TestBattlegrounds();
     TestBattlegroundMatcher();
     TestDuelAndMail();
+    TestOfflineMail();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

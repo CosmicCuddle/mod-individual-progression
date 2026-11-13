@@ -193,8 +193,28 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertIn("res = SPELL_FAILED_BAD_TARGETS;", duel)
         mail = self.body("bool OnPlayerCanSendMail(Player* player", "\n        }\n")
         self.assertRegex(mail, r"if \(!OptionOn\(\) \|\| !player \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return true;")
-        self.assertRegex(mail, r"if \(!receiver\)\s*return true;")
-        self.assertIn("return AllowPair(Policy::Surface::Mail, player, receiver, false);", mail)
+        self.assertRegex(mail, r"if \(receiver\)\s*return AllowPair\(Policy::Surface::Mail, player, receiver, false\);")
+        # Offline: only a bot confirmed earlier in this run; no reply, no race.
+        off = mail.split("return AllowPair(Policy::Surface::Mail, player, receiver, false);", 1)[1]
+        self.assertIn("Confirmed().Contains(receiverGuid.GetRawValue())", off)
+        self.assertIn("Policy::OfflineMailRefused(true, Policy::HumanStillVanilla(ReadHuman(player)), confirmed)", off)
+        for token in ("SendInCharacterReply", "getRace", "isBotAccount", "IsTbcRace"):
+            self.assertNotIn(token, off, token)
+        logout = self.body("void OnPlayerLogout(Player* player) override", "\n        }\n")
+        self.assertRegex(logout, r"if \(OptionOn\(\) && WorldThread\(\)\.IsCurrent\(\) && Policy::BotIsRestrictedRandomBot\(ReadBot\(player\)\)\)")
+        self.assertIn("Confirmed().Remember(player->GetGUID().GetRawValue());", logout)
+        # The capture relies on load order: these scripts are registered
+        # (via AddSC_mod_individual_progression) BEFORE IP's player script,
+        # whose logout forgets the verified identity.
+        loader = read("src/IndividualProgression_loader.cpp")
+        self.assertLess(loader.index("    AddSC_mod_individual_progression();"),
+                        loader.index("    AddSC_mod_individual_progression_player();"))
+        core = read("src/IndividualProgression.cpp")
+        reg = core.split("void AddSC_mod_individual_progression()", 1)[1].split("}", 1)[0]
+        self.assertIn("AddSC_mod_individual_progression_f14_social_isolation();", reg)
+        player = read("src/IndividualProgressionPlayer.cpp")
+        out = player.split("void OnPlayerLogout(Player* player) override", 1)[1][:200]
+        self.assertIn("ForgetF14VerifiedRandomBotGroupIdentity(player);", out)
 
     def test_dungeon_finder_value_only(self):
         # The matcher hook runs on the LFG worker thread beside the maps: it

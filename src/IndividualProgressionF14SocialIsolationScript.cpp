@@ -190,6 +190,19 @@ namespace
         return true;
     }
 
+    // Restricted RandomBots confirmed earlier in this run (offline mail).
+    std::mutex& ConfirmedLock()
+    {
+        static std::mutex lock;
+        return lock;
+    }
+
+    Policy::ConfirmedRestrictedBots& Confirmed()
+    {
+        static Policy::ConfirmedRestrictedBots confirmed;
+        return confirmed;
+    }
+
     Policy::WorldThreadMarker& WorldThread()
     {
         static Policy::WorldThreadMarker marker;
@@ -313,9 +326,15 @@ namespace
             if (!OptionOn() || !player || !WorldThread().IsCurrent())
                 return true;
             Player* receiver = ObjectAccessor::FindPlayer(receiverGuid);
-            if (!receiver)
-                return true; // offline or unknown: not restricted
-            return AllowPair(Policy::Surface::Mail, player, receiver, false);
+            if (receiver)
+                return AllowPair(Policy::Surface::Mail, player, receiver, false);
+            // Offline: refused only for a bot confirmed earlier in this run.
+            bool confirmed = false;
+            {
+                std::lock_guard<std::mutex> lock(ConfirmedLock());
+                confirmed = Confirmed().Contains(receiverGuid.GetRawValue());
+            }
+            return !Policy::OfflineMailRefused(true, Policy::HumanStillVanilla(ReadHuman(player)), confirmed);
         }
 
         // Battleground queue join (b). CMSG_BATTLEMASTER_JOIN is
@@ -444,6 +463,15 @@ namespace
         {
             if (!player)
                 return;
+            // Remember a confirmed restricted RandomBot for offline mail. This
+            // script is registered before IP's player script (loader order),
+            // so the verified identity is still present here. World thread
+            // only; anywhere else nothing is remembered (unknown stays so).
+            if (OptionOn() && WorldThread().IsCurrent() && Policy::BotIsRestrictedRandomBot(ReadBot(player)))
+            {
+                std::lock_guard<std::mutex> lock(ConfirmedLock());
+                Confirmed().Remember(player->GetGUID().GetRawValue());
+            }
             {
                 std::lock_guard<std::mutex> lock(QueueFactsLock());
                 QueueFacts().Erase(player->GetGUID().GetRawValue());

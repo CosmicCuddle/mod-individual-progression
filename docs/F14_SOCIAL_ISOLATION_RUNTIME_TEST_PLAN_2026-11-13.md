@@ -68,7 +68,8 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | D1 | H0 challenges R to a duel | the cast fails (no request reaches R); H0 receives one in-character reply |
 | D2 | H8 challenges R; H0 challenges N | stock duel requests |
 | M1 | H0 mails R while R is online | refused with a mail error; one reply |
-| M2 | H0 mails R while R is offline | delivered (offline receiver: no live facts) |
+| M2 | H0 mails R while R is offline, after R was online earlier in this run | refused (confirmed earlier), with no reply |
+| M3 | H0 mails a BE/Dr RandomBot that hasn't logged in since the restart | delivered (unknown) |
 | OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |
 
 ## Future cases (only once a #176 runtime producer exists; not testable today)

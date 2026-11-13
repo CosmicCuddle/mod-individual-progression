@@ -314,6 +314,32 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         return optionEnabled && restrictedBot && enteringBattle && invitedToInstanceWithVanillaHuman;
     }
 
+    // Mail to an OFFLINE receiver (owner-approved): refused only when that
+    // GUID was positively confirmed as a restricted RandomBot earlier in this
+    // server run (recorded at its logout). A bot not seen since the last
+    // restart is unknown and never restricted. No reply: an offline bot has
+    // no live object to answer with.
+    constexpr bool OfflineMailRefused(bool optionEnabled, bool senderStillVanillaHuman,
+                                      bool receiverConfirmedRestrictedBot)
+    {
+        return optionEnabled && senderStillVanillaHuman && receiverConfirmedRestrictedBot;
+    }
+
+    class ConfirmedRestrictedBots
+    {
+    public:
+        void Remember(std::uint64_t guid)
+        {
+            if (guid)
+                _guids.insert(guid);
+        }
+        bool Contains(std::uint64_t guid) const { return _guids.count(guid) != 0; }
+        std::size_t Size() const { return _guids.size(); }
+
+    private:
+        std::unordered_set<std::uint64_t> _guids;
+    };
+
     // Option (d) (owner-approved): the battleground matcher itself never puts
     // a still-Vanilla human and a restricted RandomBot into the same match,
     // whichever queued or entered first. A candidate group is refused when
