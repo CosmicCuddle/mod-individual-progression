@@ -59,6 +59,7 @@ test("dirty divergent refs, API/macro, SQL/config/DBC/client, custom overlap and
     commit(repo, "local API and dependencies");
     put(repo, "src/PublicAPI.h", "#define F14_API_VERSION 3\nint NewApi();\n");
     put(repo, "untracked.txt", "untracked\n");
+    const indexBefore = fs.readFileSync(path.join(repo, ".git", "index"));
     const spec = {name: "Individual Progression", path: "ip", baseRef: "base",
                   upstreamRef: "upstream", customPaths: ["src/PublicAPI.h"],
                   registerPaths: ["docs/CUSTOM_MODIFICATIONS_REGISTER.md"],
@@ -69,6 +70,7 @@ test("dirty divergent refs, API/macro, SQL/config/DBC/client, custom overlap and
         [path.join(__dirname, "module_sync_preflight.js"), "--manifest", manifest, "--format", "json"],
         {encoding: "utf8"});
     const report = JSON.parse(cli);
+    assert.deepEqual(fs.readFileSync(path.join(repo, ".git", "index")), indexBefore);
     const item = report.modules[0];
     assert.equal(item.branch, "main");
     assert.equal(item.dirty, true);
@@ -131,8 +133,10 @@ test("malformed manifest fails visibly before repository inspection", () => fixt
         [path.join(__dirname, "module_sync_preflight.js"), "--manifest", manifest, "--format", "json"],
         {encoding: "utf8"});
     for (const data of [
-        {}, {modules: {}}, {modules: [null]},
+        {}, {modules: {}}, {modules: [null]}, {modules: [], unexpected: true},
         {modules: [{name: "AzerothCore", baseRef: "--upload-pack=bad"}]},
+        {modules: [{name: "AzerothCore", head: "typo"}]},
+        {modules: [{name: "AzerothCore", baseRef: "HEAD"}]},
         {modules: [{name: "AzerothCore", customPaths: "src/*"}]},
         {modules: [{name: "AzerothCore"}, {name: "AzerothCore"}]},
         {modules: [{name: "AzerothCore", path: "same"},

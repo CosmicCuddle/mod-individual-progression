@@ -11,8 +11,10 @@ const allowedGit = new Set(["rev-parse", "symbolic-ref", "status", "rev-list", "
 function git(repo, ...args) {
     if (!allowedGit.has(args[0])) throw new Error("inspection commands only");
     try {
-        return cp.execFileSync("git", ["-C", repo, ...args],
-                               {encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30000}).trimEnd();
+        return cp.execFileSync("git", ["-c", "core.fsmonitor=false", "-C", repo, ...args],
+                               {encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30000,
+                                env: {...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_NO_LAZY_FETCH: "1",
+                                      GIT_TERMINAL_PROMPT: "0"}}).trimEnd();
     } catch { return null; }
 }
 function validRef(ref) {
@@ -24,12 +26,21 @@ function validateManifest(manifest, dir) {
         !Array.isArray(manifest.modules))
         throw new TypeError("manifest must contain a modules array");
     const names = new Set(), paths = new Set();
+    for (const key of Object.keys(manifest))
+        if (key !== "modules") throw new TypeError(`unknown manifest field: ${key}`);
+    const moduleFields = new Set(["name", "path", "baseRef", "upstreamRef", "expectedHead",
+                                  "expectedBranch", "customPaths", "registerPaths", "pinFiles"]);
     for (const [index, item] of manifest.modules.entries()) {
         if (!item || typeof item !== "object" || Array.isArray(item) ||
             typeof item.name !== "string" || !item.name.trim())
             throw new TypeError(`modules[${index}] needs a nonempty name`);
         if (names.has(item.name)) throw new TypeError(`duplicate module name: ${item.name}`);
         names.add(item.name);
+        for (const key of Object.keys(item))
+            if (!moduleFields.has(key)) throw new TypeError(`unknown modules[${index}] field: ${key}`);
+        if (item.path == null && ["baseRef", "upstreamRef", "expectedHead", "expectedBranch"].some(
+            key => item[key] != null))
+            throw new TypeError(`modules[${index}] supplies refs without a repository path`);
         if (item.path != null) {
             if (typeof item.path !== "string" || !item.path.trim() || item.path.includes("\0"))
                 throw new TypeError(`modules[${index}].path must be a nonempty local path`);
