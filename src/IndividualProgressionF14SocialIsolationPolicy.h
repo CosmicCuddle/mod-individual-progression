@@ -195,6 +195,34 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         return onWorldThread || (ownedScopeValid && firstInOwnedMap && secondInOwnedMap);
     }
 
+    // T1 owned-map list helpers. Generic so the exact code also runs in the
+    // native tests with fake types. `players` is the owned map's own player
+    // list (elements expose GetSource()).
+    //
+    // Membership is pointer identity only: the candidate is never touched.
+    template<typename PlayerList, typename Candidate>
+    bool OwnedListContains(PlayerList const& players, Candidate const* candidate)
+    {
+        if (!candidate)
+            return false;
+        for (auto const& ref : players)
+            if (ref.GetSource() == candidate)
+                return true;
+        return false;
+    }
+
+    // Resolve a GUID among the owned map's players only (their state may be
+    // read: this thread owns them). Never consults anything else.
+    template<typename PlayerT, typename PlayerList, typename Guid>
+    PlayerT* OwnedListResolve(PlayerList const& players, Guid const& guid)
+    {
+        for (auto const& ref : players)
+            if (PlayerT* owned = ref.GetSource())
+                if (owned->GetGUID() == guid)
+                    return owned->IsInWorld() ? owned : nullptr;
+        return nullptr;
+    }
+
     // Remembers the world thread and counts world ticks; marked from the
     // world update, which runs after every map update of the tick. Before
     // the first mark nothing counts as the world thread.

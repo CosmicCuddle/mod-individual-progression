@@ -114,13 +114,20 @@ class HooksAndAuthority(unittest.TestCase):
     def test_t1_zero_foreign_access_before_ownership(self):
         # Membership is decided by pointer identity in the owned map's list.
         contains = self.body("bool Contains(Player const* candidate) const", "\n        }\n")
-        self.assertIn("if (ref.GetSource() == candidate)", contains)
+        self.assertIn("return Policy::OwnedListContains(ownedMap->GetPlayers(), candidate);", contains)
         self.assertNotIn("candidate->", contains)
         self.assertLess(contains.index("if (anyPlayer)"), contains.index("ownedMap->GetPlayers()"))
+        policy = strip_comments(read(POLICY))
+        member = policy.split("bool OwnedListContains(PlayerList const& players, Candidate const* candidate)", 1)[1]
+        member = member.split("\n    }\n", 1)[0]
+        self.assertIn("if (ref.GetSource() == candidate)", member)
+        self.assertNotIn("candidate->", member)
+        self.assertNotIn("ref.GetSource()->", member)
         # Off the world thread, resolution uses only the owned map's list.
         resolve = self.body("Player* Resolve(ObjectGuid const& guid) const", "\n        }\n")
         self.assertRegex(resolve, r"if \(anyPlayer\)\s*return ObjectAccessor::FindPlayer\(guid\);")
         self.assertEqual(resolve.count("ObjectAccessor::"), 1)
+        self.assertIn("return Policy::OwnedListResolve<Player>(ownedMap->GetPlayers(), guid);", resolve)
         guard = self.body("bool MayReadPair(ReadScope const& scope, Player const* a, Player const* b)")
         self.assertNotRegex(guard, r"\b[ab]->")
         self.assertIn("scope.Contains(a), scope.Contains(b)", guard)

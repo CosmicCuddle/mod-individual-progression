@@ -653,6 +653,66 @@ namespace
     }
 }
 
+namespace
+{
+    // Fake owned-map types: every accessor call is counted, so the tests
+    // can prove which objects the T1 helpers touch.
+    struct FakePlayer
+    {
+        std::uint64_t guid = 0;
+        bool inWorld = true;
+        mutable unsigned touched = 0;
+        std::uint64_t GetGUID() const { ++touched; return guid; }
+        bool IsInWorld() const { ++touched; return inWorld; }
+    };
+
+    struct FakeRef
+    {
+        FakePlayer* player = nullptr;
+        FakePlayer* GetSource() const { return player; }
+    };
+
+    void TestOwnedMapHelpers()
+    {
+        FakePlayer a{1}, b{2}, c{3}, offWorld{4, false}, foreign{5}, foreignSameGuid{2};
+        std::vector<FakeRef> owned{{&a}, {&b}, {nullptr}, {&c}, {&offWorld}};
+
+        // Membership: pointer identity only; NOTHING is touched.
+        CHECK(P::OwnedListContains(owned, &a));
+        CHECK(P::OwnedListContains(owned, &c));
+        CHECK(!P::OwnedListContains(owned, &foreign));
+        CHECK(!P::OwnedListContains(owned, &foreignSameGuid)); // same GUID, other object
+        CHECK(!P::OwnedListContains(owned, static_cast<FakePlayer const*>(nullptr)));
+        CHECK(!P::OwnedListContains(std::vector<FakeRef>{}, &a));
+        CHECK(a.touched == 0 && b.touched == 0 && c.touched == 0 && offWorld.touched == 0);
+        CHECK(foreign.touched == 0 && foreignSameGuid.touched == 0);
+
+        // Resolve: only owned players are read; foreign objects never.
+        CHECK(P::OwnedListResolve<FakePlayer>(owned, std::uint64_t{2}) == &b);
+        CHECK(P::OwnedListResolve<FakePlayer>(owned, std::uint64_t{3}) == &c);
+        CHECK(P::OwnedListResolve<FakePlayer>(owned, std::uint64_t{5}) == nullptr); // foreign GUID
+        CHECK(P::OwnedListResolve<FakePlayer>(owned, std::uint64_t{4}) == nullptr); // out of world
+        CHECK(P::OwnedListResolve<FakePlayer>(std::vector<FakeRef>{}, std::uint64_t{1}) == nullptr);
+        CHECK(foreign.touched == 0 && foreignSameGuid.touched == 0);
+        CHECK(a.touched > 0); // owned players may be read: this thread owns them
+
+        // Composition: a pair is readable off the world thread only when
+        // both pointers are owned; a foreign object is never touched.
+        unsigned const before = foreign.touched;
+        for (FakePlayer* x : {&a, &b, &c, &foreign, &foreignSameGuid})
+            for (FakePlayer* y : {&a, &b, &c, &foreign, &foreignSameGuid})
+            {
+                bool const xOwned = P::OwnedListContains(owned, x);
+                bool const yOwned = P::OwnedListContains(owned, y);
+                bool const expected = (x == &a || x == &b || x == &c) && (y == &a || y == &b || y == &c);
+                CHECK(P::MayReadPair(false, true, xOwned, yOwned) == expected);
+                CHECK(!P::MayReadPair(false, false, xOwned, yOwned)); // no valid record
+                CHECK(P::MayReadPair(true, false, xOwned, yOwned));   // world thread
+            }
+        CHECK(foreign.touched == before && foreignSameGuid.touched == 0);
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -671,6 +731,7 @@ int main()
     TestMultiViewerCooldowns();
     TestGroupAcceptMemberScan();
     TestThreadSafeReads();
+    TestOwnedMapHelpers();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

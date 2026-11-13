@@ -169,10 +169,7 @@ namespace
                 return true;
             if (!ownedMap)
                 return false;
-            for (auto const& ref : ownedMap->GetPlayers())
-                if (ref.GetSource() == candidate)
-                    return true;
-            return false;
+            return Policy::OwnedListContains(ownedMap->GetPlayers(), candidate);
         }
 
         // Members and leaders: off the world thread, only from the owned
@@ -183,11 +180,7 @@ namespace
                 return ObjectAccessor::FindPlayer(guid);
             if (!ownedMap || !guid)
                 return nullptr;
-            for (auto const& ref : ownedMap->GetPlayers())
-                if (Player* owned = ref.GetSource())
-                    if (owned->GetGUID() == guid)
-                        return owned->IsInWorld() ? owned : nullptr;
-            return nullptr;
+            return Policy::OwnedListResolve<Player>(ownedMap->GetPlayers(), guid);
         }
     };
 
