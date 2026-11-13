@@ -1250,3 +1250,27 @@ The review's omitted negative categories are also represented explicitly: viewer
 No Core pointers/headers, runtime adapter, hook registration, Playerbots lookup, Store Open/Reserve/Commit, packet action, visibility mutation, restoration completion, config, SQL, DB, DBC, client, host or deployment behavior is added. The existing joint viewer-rights gate remains byte-identical to IP171. IP168 remains the active runtime candidate; IP172 is evidence hardening only. F14/Paid remain OFF and R2 Coordination #42/global restoration recovery remain blockers before any positive concealment.
 
 Focused native tests require every completeness family independently, exercise the new threat/ownership/service/aura/spell/reward vetoes, preserve lifecycle/quest/group cases and prove no combination can authorize concealment. Full Worldserver/gameplay evidence is intentionally not claimed for this unwired pure model. Rollback: abandon/revert this child; no migration or live-state rollback is required.
+
+
+## 13 November 2026 — F14 BE/Draenei pair-rights runtime evidence adapter (DIAGNOSTIC ONLY, default OFF) — CS03-IP
+
+- **Intended behaviour:** after the existing token-bound initial-OUT observer's gates hold, take a snapshot of the current viewer and creature from Core25, map it to the #172 `CurrentPairRightsRisk::Facts` and count the model verdict. The observer **still returns FALSE on every path**; nothing is hidden, reserved, sent or restored.
+- **Owning component/source:** CosmicCuddle/mod-individual-progression, DRAFT branch `feature/cs03-ip-f14-pair-rights-adapter-20261113`, child of #172 `aed05a92`. New `src/IndividualProgressionF14PairRightsEvidence.h` (pure mapping) and `src/IndividualProgressionF14PairRightsCoreAdapter.h` (Core25 collector). Four exact macro-guarded insertions in `src/IndividualProgressionF14CurrentCoreLifecycle.cpp`. Tests: `tests/f14_pair_rights_evidence_test.cpp`, `tests/test_f14_pair_rights_adapter_source.py`. Workflow: `.github/workflows/f14-pair-rights-adapter.yml` (with a Core25 anchor job). Design, matrix and gaps: `docs/F14_PAIR_RIGHTS_ADAPTER_2026-11-13.md`.
+- **Protection:**
+  - **Gating:** opt-in build macro `COSMIC_IP_F14_PAIR_RIGHTS_ADAPTER_EXPERIMENT` (`#error` without the token-bound observer), never defined in source. Default builds are unchanged.
+  - **Reads:** only the viewer's and creature's own state, through const accessors, with bounded loops. Controlled units, summons, vehicles and aura casters are never dereferenced or looked up. No DB, Playerbots or `const_cast`.
+  - **Completeness:** pending spell, service, scripted/reward and quest families are hard-incomplete, so a runtime snapshot can never be clean.
+  - **Logging:** aggregate counters only.
+- **Core version/dependencies:** Core25 `395b68ee` token-bound initial-OUT query chain (unchanged); IP168/#172 lineage unchanged otherwise. No Playerbots, Naxx, Services, config option, SQL, DBC or client change.
+- **Known risks/limits:**
+  - Core25 offers no owning-map-frame proof; safety relies on reading only what Core reads in the same notifier frame.
+  - Owned-unit presence and unresolved aura casters fail visible by design (over-veto).
+  - Missing Core facts are listed in the design note.
+- **Tests:**
+  - native evidence tests (GCC/Clang, C++17/20, with and without NDEBUG), including exhaustive omission and runtime-reachability witnesses;
+  - source contracts;
+  - local mutation checks;
+  - a local Core25 header syntax check with the adapter ON and OFF.
+
+  Hosted CI is pending at the time of this entry. The macro-ON full Worldserver link is a separate Maintenance Services gate. No gameplay test.
+- **Live status/approval/rollback:** NOT MERGED, NOT DEPLOYED, nothing enabled; F14/paid flags OFF; #42 blocked. CosmicCuddle remains the final decision-maker. Rollback: leave the macro undefined, or close the DRAFT; no host, DB, config or client was touched.
