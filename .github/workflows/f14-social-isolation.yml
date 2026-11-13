@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: "Verify #172 ancestry and EXACT twelve-path scope"
+      - name: "Verify #172 ancestry and EXACT fourteen-path scope"
         shell: bash
         run: |
           set -euo pipefail
@@ -41,7 +41,9 @@ jobs:
             'src/IndividualProgressionF14SocialIsolationPolicy.h' \
             'src/IndividualProgressionF14SocialIsolationScript.cpp' \
             'src/IndividualProgressionPlayer.cpp' \
+            'tests/core_patches/apply_f14_guild_invite_hook.py' \
             'tests/f14_social_isolation_policy_test.cpp' \
+            'tests/test_f14_guild_invite_hook_patch.py' \
             'tests/test_f14_social_isolation_source.py' | sort > /tmp/allowed
           diff -u /tmp/allowed /tmp/actual
           git diff --check "$parent" HEAD
@@ -50,7 +52,9 @@ jobs:
           test ! -s /tmp/register-removed
       - name: Source contracts
         shell: bash
-        run: python3 -B -m unittest discover -s tests -p 'test_f14_social_isolation_source.py' -v
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_f14_social_isolation_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_f14_guild_invite_hook_patch.py' -v
       - name: "Native policy tests (${{ matrix.cxx }} ${{ matrix.std }}, with and without NDEBUG)"
         shell: bash
         run: |
@@ -77,6 +81,11 @@ jobs:
           sparse-checkout: |
             src/server/game
             src/server/shared
+      - name: Checkout this module (for the Core patch script)
+        uses: actions/checkout@v4
+        with:
+          path: mod
+          persist-credentials: false
       - name: Verify hook placement, ordering and /who count consistency
         shell: bash
         run: |
@@ -228,3 +237,15 @@ jobs:
               raise SystemExit(f"{bad} Core25 social anchor(s) drifted")
           print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership; Dungeon Finder seam; battleground options (c)+(d); duel and mail")
           PY
+      - name: Apply the owner-approved guild-invite hook patch to a copy of Core25
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -a core core-patched
+          python3 -I mod/tests/core_patches/apply_f14_guild_invite_hook.py core-patched
+          git -C core-patched diff --numstat | awk '$2 != 0 { exit 1 }'   # purely additive
+          test "$(git -C core-patched diff --name-only | wc -l)" = 4
+          grep -q '#define COSMIC_F14_GUILD_INVITE_HOOK_VERSION 1' core-patched/src/server/game/Scripting/ScriptDefines/PlayerScript.h
+          if python3 -I mod/tests/core_patches/apply_f14_guild_invite_hook.py core-patched; then
+            echo "repeat application must be refused"; exit 1
+          fi

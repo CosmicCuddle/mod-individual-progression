@@ -70,6 +70,8 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | M1 | H0 mails R while R is online | refused with a mail error; one reply |
 | M2 | H0 mails R while R is offline, after R was online earlier in this run | refused (confirmed earlier), with no reply |
 | M3 | H0 mails a BE/Dr RandomBot that hasn't logged in since the restart | delivered (unknown) |
+| GI1 | (patched Core only) H0's guild officer invites R; R's guild invites H0 | no invitation is sent; H0 gets one reply when H0 started it |
+| GI2 | (patched Core only) H8 invites R | stock |
 | OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |
 
 ## Future cases (only once a #176 runtime producer exists; not testable today)

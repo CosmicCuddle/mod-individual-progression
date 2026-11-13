@@ -60,7 +60,7 @@ namespace
 
     P::Surface const kSurfaces[] = {P::Surface::Whisper, P::Surface::Trade,
                                     P::Surface::GroupInvite, P::Surface::GroupAccept,
-                                    P::Surface::Duel, P::Surface::Mail};
+                                    P::Surface::Duel, P::Surface::Mail, P::Surface::GuildInvite};
 
     void TestDefaultsNeverRestrict()
     {
@@ -1025,7 +1025,7 @@ namespace
     // a human-started attempt; everyone else is stock.
     void TestDuelAndMail()
     {
-        for (P::Surface s : {P::Surface::Duel, P::Surface::Mail})
+        for (P::Surface s : {P::Surface::Duel, P::Surface::Mail, P::Surface::GuildInvite})
         {
             P::Decision const h2b = P::Decide(true, s, P::Direction::HumanToBot, VanillaHuman(), VerifiedBot(), false);
             P::Decision const b2h = P::Decide(true, s, P::Direction::BotToHuman, VanillaHuman(), VerifiedBot(), false);

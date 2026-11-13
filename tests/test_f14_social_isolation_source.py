@@ -84,7 +84,7 @@ class HooksAndAuthority(unittest.TestCase):
         self.src = strip_comments(read(SCRIPT))
 
     def test_only_social_hooks_and_who(self):
-        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+|ALLBATTLEGROUNDHOOK_[A-Z0-9_]+|ALLSPELLHOOK_[A-Z0-9_]+)\b", self.src)))
+        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z0-9_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+|ALLBATTLEGROUNDHOOK_[A-Z0-9_]+|ALLSPELLHOOK_[A-Z0-9_]+)\b", self.src)))
         self.assertEqual(hooks, sorted([
             "PLAYERHOOK_CAN_GROUP_ACCEPT", "PLAYERHOOK_CAN_GROUP_INVITE", "PLAYERHOOK_CAN_INIT_TRADE",
             "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT", "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY",
@@ -93,14 +93,17 @@ class HooksAndAuthority(unittest.TestCase):
             "PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE", "PLAYERHOOK_CAN_BATTLEFIELD_PORT",
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_ADD_PLAYER", "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_REMOVE_PLAYER_AT_LEAVE",
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY", "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL",
-            "PLAYERHOOK_CAN_SEND_MAIL", "ALLSPELLHOOK_ON_SPELL_CHECK_CAST"]))
+            "PLAYERHOOK_CAN_SEND_MAIL", "ALLSPELLHOOK_ON_SPELL_CHECK_CAST", "PLAYERHOOK_ON_F14_CAN_GUILD_INVITE"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
             "OnPlayerCanInitTrade", "OnPlayerCanUseChat", "OnUpdate", "OnPlayerBeforeUpdate",
             "OnPlayerCanJoinLfg", "OnPlayerLogout", "OnPlayerCanJoinInBattlegroundQueue",
             "OnPlayerCanBattleFieldPort", "OnBattlegroundAddPlayer", "OnBattlegroundRemovePlayerAtLeave",
-            "OnBattlegroundDestroy", "OnPlayerCanSendMail", "OnSpellCheckCast"]))
+            "OnBattlegroundDestroy", "OnPlayerCanSendMail", "OnSpellCheckCast", "OnPlayerCanGuildInvite"]))
+        # The guild hook is overridden only inside the patched-Core guard.
+        self.assertEqual(re.findall(r"\bbool (OnPlayerCanGuildInvite)\(Player\* inviter, Player\* invitee\) override", self.src),
+                         ["OnPlayerCanGuildInvite"])
         self.assertEqual(sorted(re.findall(r"\b(Can\w+)\([^;{]*\)\s*override", self.src)),
                          ["CanAddGroupToMatchingPool", "CanCreateLfgProposal"])
 
@@ -215,6 +218,23 @@ class HooksAndAuthority(unittest.TestCase):
         player = read("src/IndividualProgressionPlayer.cpp")
         out = player.split("void OnPlayerLogout(Player* player) override", 1)[1][:200]
         self.assertIn("ForgetF14VerifiedRandomBotGroupIdentity(player);", out)
+
+    def test_guild_invite_only_with_patched_core(self):
+        guard = "#if defined(COSMIC_F14_GUILD_INVITE_HOOK_VERSION) && COSMIC_F14_GUILD_INVITE_HOOK_VERSION >= 1"
+        raw = read(SCRIPT)
+        self.assertEqual(raw.count(guard), 2)  # the class and its registration
+        for block in raw.split(guard)[1:]:
+            self.assertIn("#endif", block)
+            inside = block.split("#endif", 1)[0]
+            self.assertTrue("F14SocialIsolationGuildScript" in inside)
+        cls = raw.split(guard, 1)[1].split("#endif", 1)[0]
+        self.assertIn("{PLAYERHOOK_ON_F14_CAN_GUILD_INVITE}", cls)
+        self.assertIn("return AllowPair(Policy::Surface::GuildInvite, inviter, invitee, false);", cls)
+        reg = raw.split(guard, 2)[2].split("#endif", 1)[0]
+        self.assertIn("new F14SocialIsolationGuildScript();", reg)
+        # The module never defines the Core macro itself.
+        self.assertNotRegex(raw, r"#\s*define\s+COSMIC_F14_GUILD_INVITE_HOOK_VERSION")
+        self.assertIn("GuildInvite", strip_comments(read(POLICY)))
 
     def test_dungeon_finder_value_only(self):
         # The matcher hook runs on the LFG worker thread beside the maps: it
@@ -489,6 +509,7 @@ class ExactInsertions(unittest.TestCase):
                 text = path.read_text(encoding="utf-8", errors="replace")
                 self.assertNotRegex(text, r"#\s*define\s+COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION", path.name)
                 self.assertNotRegex(text, r"#\s*define\s+COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT", path.name)
+                self.assertNotRegex(text, r"#\s*define\s+COSMIC_F14_GUILD_INVITE_HOOK_VERSION", path.name)
 
 
 if __name__ == "__main__":

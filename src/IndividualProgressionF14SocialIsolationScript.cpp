@@ -762,6 +762,26 @@ namespace
         }
     };
 
+#if defined(COSMIC_F14_GUILD_INVITE_HOOK_VERSION) && COSMIC_F14_GUILD_INVITE_HOOK_VERSION >= 1
+    // Guild invite (owner-approved Core hook, applied by
+    // tests/core_patches/apply_f14_guild_invite_hook.py). Core consults it
+    // after its own checks, before the invitation is sent. A client
+    // CMSG_GUILD_INVITE is PROCESS_THREADUNSAFE (world thread); any other
+    // caller goes through the same T1 ownership proof as every surface.
+    // Without the patched Core this whole script is compiled out.
+    class F14SocialIsolationGuildScript final : public PlayerScript
+    {
+    public:
+        F14SocialIsolationGuildScript() : PlayerScript("IndividualProgression_F14SocialIsolationGuild",
+            {PLAYERHOOK_ON_F14_CAN_GUILD_INVITE}) { }
+
+        bool OnPlayerCanGuildInvite(Player* inviter, Player* invitee) override
+        {
+            return AllowPair(Policy::Surface::GuildInvite, inviter, invitee, false);
+        }
+    };
+#endif
+
     // T1 only: remembers the world thread and counts world ticks. Reads nothing.
     class F14SocialIsolationWorldThreadScript final : public WorldScript
     {
@@ -803,4 +823,7 @@ void AddSC_mod_individual_progression_f14_social_isolation()
     new F14SocialIsolationLfgScript();
     new F14SocialIsolationBattlegroundScript();
     new F14SocialIsolationSpellScript();
+#if defined(COSMIC_F14_GUILD_INVITE_HOOK_VERSION) && COSMIC_F14_GUILD_INVITE_HOOK_VERSION >= 1
+    new F14SocialIsolationGuildScript();
+#endif
 }

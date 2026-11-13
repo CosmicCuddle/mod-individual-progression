@@ -36,6 +36,7 @@ For a restricted pair:
 | Battleground matching (d) | `AllBattlegroundScript::CanAddGroupToMatchingPool` | the matcher never puts a still-Vanilla human and a restricted bot into the same match, **whichever queued or entered first**: a candidate group is refused if the other kind is already selected for the match (either team), inside the target instance, or invited to it. The refused group waits for another match. Owner-approved option (d) |
 | Duel | `AllSpellScript::OnSpellCheckCast` (global, no DB row) on spells with `SPELL_EFFECT_DUEL` | a restricted pair's duel request fails with `SPELL_FAILED_BAD_TARGETS` (no request is sent). The caster's map is owned (casts are processed in the caster's own map update), and the target is accepted only by pointer membership in it |
 | Mail | `OnPlayerCanSendMail` (world thread) | refused for a restricted pair when the receiver is **online**. For an **offline** receiver (owner-approved), a still-Vanilla sender is refused only if that GUID was confirmed as a restricted RandomBot earlier in this server run (remembered at its logout, on the world thread). There's no reply in that case. A bot not seen since the last restart is unknown and not restricted. Core uses the same hook when a mail is **returned** to its sender, so such a return is refused too (the mail can still be deleted) |
+| Guild invite | `OnPlayerCanGuildInvite` (**new Core hook, owner-approved**; only when Core defines `COSMIC_F14_GUILD_INVITE_HOOK_VERSION`) | a restricted pair's guild invitation is refused silently after all of Core's own checks; a human-started attempt gets the usual reply. Against an unpatched Core this part is compiled out |
 
 **The in-character reply:**
 - **When:** only when the human started the interaction. Addon whispers get no reply.
@@ -120,7 +121,12 @@ This social feature is unaffected: it never restricts Altbots.
 - The /who hook reads only the viewer's own state and the verified cache, by GUID.
 
 ## Gaps (no Core change requested)
-- **Guild invite:** no script hook in Core25.
+- **Guild invite: needs the owner-approved Core hook.**
+  - Core25 has no "can invite" check, so `tests/core_patches/apply_f14_guild_invite_hook.py` adds a boolean player hook `OnPlayerCanGuildInvite(inviter, invitee)`. The enum entry is appended just before `PLAYERHOOK_END`, so nothing is renumbered.
+  - `Guild::HandleInviteMember` calls it after Core's own checks and before the invite is sent; a refusal is silent, like Core's ignored-player case.
+  - It also adds `COSMIC_F14_GUILD_INVITE_HOOK_VERSION 1`.
+  - The patch is +19 lines in 4 files, purely additive, validated before writing, refuses repeat application, and syntax-checked locally on Core25 `395b68ee`.
+  - **It must be landed in `CosmicCuddle/azerothcore-wotlk` by the Core lane.** Until then the module's guild script is compiled out.
 - **Duel request:** now covered through the global spell check (the notify-only `OnPlayerDuelRequest` isn't used).
 - **Mail:** covered online, and offline for bots confirmed earlier in this server run. A bot not seen since the last restart isn't restricted. The capture relies on this script being registered before IP's player script, which forgets the identity at logout; that load order is pinned by a contract.
 - **/who:** inert in Core builds without `COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT`.

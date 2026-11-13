@@ -108,7 +108,8 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         GroupInvite,
         GroupAccept,
         Duel,
-        Mail
+        Mail,
+        GuildInvite
     };
 
     enum class Direction : std::uint8_t
