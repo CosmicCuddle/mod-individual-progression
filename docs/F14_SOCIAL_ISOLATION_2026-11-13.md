@@ -29,7 +29,7 @@ For a restricted pair:
 | Whisper | `OnPlayerCanUseChat(…, Player* receiver)`, inside `Player::Whisper` after Core's receiver, filter and faction checks | declined both ways |
 | Trade | `OnPlayerCanInitTrade`, after Core's faction, distance and state checks | declined both ways |
 | Group invite | `OnPlayerCanGroupInvite` | declined both ways |
-| Group accept | `OnPlayerCanGroupAccept` (the other side is the group leader) | declined both ways |
+| Group accept | `OnPlayerCanGroupAccept` | the leader is checked both ways (pair rule). A Vanilla human is also refused if **any other current member** is a restricted bot; that member sends the reply. Offline or unresolved members are skipped |
 | /who | `OnF14ShouldExcludeWhoEntryForViewer` | the bot is left out of the human's list **and** count. Core calls this only in builds with its `COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT`, and skips the row before counting |
 
 **The in-character reply:**
@@ -56,7 +56,7 @@ None of these is ever restricted. An unknown human stage (out of world) is treat
 - One OR-reason was added to the existing login identity gate, so the verified cache is populated when this option is on (the same pattern as earlier F14 options). The option is forced OFF without the Playerbots API.
 
 ## Threads
-- The four social hooks run in the initiating player's session handler, where Core has just resolved and read the other `Player` itself. The adapter reads only the race, GM flag, session headless flag and security, the in-memory quest status, and IP's lock-protected verified cache.
+- The four social hooks run in the initiating player's session handler, where Core has just resolved and read the other `Player` itself. Their opcodes (`CMSG_MESSAGECHAT`, `CMSG_INITIATE_TRADE`, `CMSG_GROUP_INVITE`, `CMSG_GROUP_ACCEPT`) are `PROCESS_THREADUNSAFE` in Core25 (`Opcodes.cpp`), so they run in `World::UpdateSessions` while no map is updating. That also makes the group-accept member scan's reads of other members safe. The adapter reads only the race, GM flag, session headless flag and security, the in-memory quest status, and IP's lock-protected verified cache.
 - The reply text is behind a small mutex, because `.reload` can rewrite it.
 - The /who hook reads only the viewer's own state and the verified cache, by GUID.
 
@@ -66,7 +66,8 @@ None of these is ever restricted. An unknown human stage (out of world) is treat
 - **Mail:** a hook exists, but an offline receiver can't be verified. Not included.
 - **/who:** inert in Core builds without `COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT`.
 - **Stage range:** only the Vanilla-vs-TBC restriction for now. Later-era isolation (TBC human vs Wrath bot) is not in scope.
-- **Group accept checks the leader only.** A Vanilla human can still accept a group led by someone else that already contains a restricted bot (when `EnforceGroupRules = 0`). Checking every member would be a gameplay-policy choice, so it awaits an owner decision.
+- **Group accept and offline members:** an offline or unresolved member has no live facts, so it is skipped and never guessed from race. A group whose only restricted bot is offline can still be joined. That bot is again checked on every later interaction once it is online.
+- **Direct group adds:** earlier audits of the historical Playerbots pin found bot-driven group creation calling `Group::AddMember` directly, which bypasses both the invite and accept hooks. That is unverified on the current pin; see runtime case PB1.
 - **Identity timing:** the verified cache is filled only for bots that log in while an F14 option is on. Bots already online when the option is enabled by `.reload` stay unrestricted until they relog (this fails toward stock behaviour).
 
 ## Tests
@@ -79,7 +80,8 @@ None of these is ever restricted. An unknown human stage (out of world) is treat
   - the default reply has no technical words;
   - reply normalization: every control byte, CR/LF/NUL, oversized text, 2/3/4-byte characters at every cut offset, and a 20,000-case randomised run (always one line, at most 512 bytes, valid UTF-8, trimmed).
   - /who exclusion equals the social restriction for every equivalent fact set (720 combinations), so /who never lists a bot the human can't reach;
-  - no reply loops: 600 s of continuous attempts yield exactly 10 replies at a 60 s cooldown, and bot-initiated attempts never reply.
+  - no reply loops: 600 s of continuous attempts yield exactly 10 replies at a 60 s cooldown, and bot-initiated attempts never reply;
+  - group accept: a restricted bot anywhere in the group (first, middle or last, sizes up to 40) refuses a Vanilla human; eligible, GM and bot humans, the option OFF, and every never-restricted member kind (including race-only and offline facts) allow. This is exhaustive over groups of 0–5 members × 8 member kinds × stages 0–18 and unknown.
 - **Source contracts** (`tests/test_f14_social_isolation_source.py`):
   - default OFF, and forced OFF without Playerbots;
   - every hook checks the option first;

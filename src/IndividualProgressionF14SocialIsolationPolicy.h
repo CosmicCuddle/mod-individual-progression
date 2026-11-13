@@ -152,6 +152,24 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         return d;
     }
 
+    // Accepting a group invitation: the human is refused when ANY current
+    // member (leader included) is a restricted RandomBot for that human.
+    // Members that could not be resolved carry default (non-restricting)
+    // facts, so nobody is ever classified from race alone. Returns the
+    // index of the first restricted member, or members.size() for "allow".
+    template<typename BotRange>
+    std::size_t FirstRestrictedGroupMember(bool optionEnabled, Human const& h, BotRange const& members)
+    {
+        std::size_t index = 0;
+        for (Bot const& b : members)
+        {
+            if (IsRestrictedPair(optionEnabled, h, b))
+                return index;
+            ++index;
+        }
+        return index;
+    }
+
     // /who carries only a cached GUID and race: the target is restricted
     // only when that exact GUID holds a current verified RandomBot identity.
     constexpr bool ExcludeFromWho(bool optionEnabled, Human const& h,

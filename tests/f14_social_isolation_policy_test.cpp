@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace P = IndividualProgressionF14SocialIsolationPolicy;
 
@@ -457,6 +458,100 @@ namespace
     }
 }
 
+namespace
+{
+    // Group accept: refused when ANY member is a restricted RandomBot.
+    void TestGroupAcceptMemberScan()
+    {
+        P::Bot const restricted = VerifiedBot(P::BloodElfRace);
+        P::Bot const draenei = VerifiedBot(P::DraeneiRace);
+        P::Bot const ordinary = VerifiedBot(1);  // verified RandomBot, Human race
+        P::Bot humanBe = VerifiedBot();          // real BE player
+        humanBe.verifiedRandomBotIdentity = false;
+        humanBe.headlessSession = false;
+        P::Bot altbot = VerifiedBot();           // not IsRandomBot
+        altbot.verifiedRandomBotIdentity = false;
+        P::Bot selfBot = VerifiedBot();          // real client with bot AI
+        selfBot.headlessSession = false;
+        P::Bot gm = VerifiedBot();
+        gm.gameMasterMode = true;
+        P::Bot const unresolved{};               // offline/unresolved: no facts
+        P::Bot raceOnly{};                       // race known, nothing verified
+        raceOnly.race = P::BloodElfRace;
+        P::Bot offline = VerifiedBot();          // verified once, now out of world
+        offline.inWorld = false;
+
+        using Group = std::vector<P::Bot>;
+        P::Human const v = VanillaHuman();
+
+        // Unrestricted leader (index 0) + restricted member.
+        CHECK(P::FirstRestrictedGroupMember(true, v, Group{ordinary, restricted}) == 1);
+        // Restricted leader + unrestricted members.
+        CHECK(P::FirstRestrictedGroupMember(true, v, Group{draenei, ordinary, humanBe}) == 0);
+        // No restricted member: allow.
+        Group const clean{ordinary, humanBe, altbot, selfBot, gm, unresolved, raceOnly, offline};
+        CHECK(P::FirstRestrictedGroupMember(true, v, clean) == clean.size());
+        CHECK(P::FirstRestrictedGroupMember(true, v, Group{}) == 0); // empty = size 0 = allow
+        // Each never-restricted kind on its own.
+        for (P::Bot const& b : clean)
+            CHECK(P::FirstRestrictedGroupMember(true, v, Group{b}) == 1);
+        // Eligible (TBC/Wrath), unknown, GM and bot "humans": allow.
+        for (std::uint8_t stage : {8, 12, 13, 18, 255})
+            CHECK(P::FirstRestrictedGroupMember(true, VanillaHuman(stage), Group{ordinary, restricted}) == 2);
+        P::Human gmHuman = v;
+        gmHuman.gameMasterMode = true;
+        CHECK(P::FirstRestrictedGroupMember(true, gmHuman, Group{restricted}) == 1);
+        P::Human botHuman = v;
+        botHuman.verifiedRandomBot = true;
+        CHECK(P::FirstRestrictedGroupMember(true, botHuman, Group{restricted}) == 1);
+        // Option OFF: allow.
+        CHECK(P::FirstRestrictedGroupMember(false, v, Group{restricted, draenei}) == 2);
+
+        // Restricted bot neither first nor last, for every size up to a raid.
+        for (std::size_t size = 3; size <= 40; ++size)
+            for (std::size_t at = 1; at + 1 < size; ++at)
+            {
+                Group g(size, ordinary);
+                g[at] = (size + at) % 2 ? restricted : draenei;
+                g[size - 1] = restricted; // a later one must not win
+                CHECK(P::FirstRestrictedGroupMember(true, v, g) == at);
+            }
+
+        // Exhaustive: groups of 0-5 members over 8 member kinds, every stage.
+        P::Bot const kinds[] = {restricted, draenei, ordinary, humanBe, altbot, selfBot, unresolved, raceOnly};
+        bool const kindRestricted[] = {true, true, false, false, false, false, false, false};
+        for (unsigned stage = 0; stage <= 19; ++stage)
+        {
+            P::Human const h = VanillaHuman(static_cast<std::uint8_t>(stage == 19 ? 255 : stage));
+            bool const vanilla = stage < 8;
+            for (std::size_t size = 0; size <= 5; ++size)
+            {
+                std::size_t combos = 1;
+                for (std::size_t i = 0; i < size; ++i)
+                    combos *= 8;
+                for (std::size_t code = 0; code < combos; ++code)
+                {
+                    Group g;
+                    std::size_t expected = size;
+                    std::size_t c = code;
+                    for (std::size_t i = 0; i < size; ++i, c /= 8)
+                    {
+                        g.push_back(kinds[c % 8]);
+                        if (expected == size && vanilla && kindRestricted[c % 8])
+                            expected = i;
+                    }
+                    CHECK(P::FirstRestrictedGroupMember(true, h, g) == expected);
+                    CHECK(P::FirstRestrictedGroupMember(false, h, g) == size);
+                }
+            }
+        }
+
+        // The member that blocks gets the same decision and reply rule.
+        P::Decision const d = P::Decide(true, P::Surface::GroupAccept, P::Direction::HumanToBot, v, restricted, false);
+        CHECK(d.block && d.reply);
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -473,6 +568,7 @@ int main()
     TestReplyNormalization();
     TestLifecycleScenarios();
     TestMultiViewerCooldowns();
+    TestGroupAcceptMemberScan();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -31,6 +31,7 @@
 #include "WorldSession.h"
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -187,15 +188,48 @@ namespace
             return AllowPair(Policy::Surface::GroupInvite, player, invitee, false);
         }
 
-        // Accepting an invitation: the other side is the group's leader.
+        // Accepting an invitation. CMSG_GROUP_ACCEPT is PROCESS_THREADUNSAFE,
+        // so this runs in World::UpdateSessions while no map is updating.
         bool OnPlayerCanGroupAccept(Player* player, Group* group) override
         {
             if (!OptionOn() || !player || !group)
                 return true;
+            // 1. The leader, in both directions (unchanged pair rule).
             Player* leader = ObjectAccessor::FindPlayerByLowGUID(group->GetLeaderGUID().GetCounter());
-            if (!leader)
-                return true; // unknown leader: not ours to decide
-            return AllowPair(Policy::Surface::GroupAccept, player, leader, false);
+            if (leader && !AllowPair(Policy::Surface::GroupAccept, player, leader, false))
+                return false;
+            // 2. Every other current member, for a human who is still in
+            // Vanilla. Unresolved members are skipped: never guessed by race.
+            return AllowGroupMembers(player, group);
+        }
+
+    private:
+        bool AllowGroupMembers(Player* human, Group const* group)
+        {
+            Policy::Human const facts = ReadHuman(human);
+            if (!Policy::HumanStillVanilla(facts))
+                return true;
+            std::vector<Player*> players;
+            std::vector<Policy::Bot> bots;
+            for (Group::MemberSlot const& slot : group->GetMemberSlots())
+            {
+                if (slot.guid == human->GetGUID() || slot.guid == group->GetLeaderGUID())
+                    continue;
+                Player* member = ObjectAccessor::FindPlayer(slot.guid);
+                if (!member)
+                    continue; // offline/unresolved: no facts, never restricted
+                players.push_back(member);
+                bots.push_back(ReadBot(member));
+            }
+            std::size_t const index = Policy::FirstRestrictedGroupMember(true, facts, bots);
+            if (index >= bots.size())
+                return true;
+            // Same decision and reply rule as every other surface.
+            Policy::Decision const d = Policy::Decide(true, Policy::Surface::GroupAccept,
+                Policy::Direction::HumanToBot, facts, bots[index], false);
+            if (d.reply)
+                SendInCharacterReply(players[index], human);
+            return !d.block;
         }
     };
 

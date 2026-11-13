@@ -1265,6 +1265,7 @@ Focused native tests require every completeness family independently, exercise t
   - No world-visibility query, stage, quest, DB, Playerbots-manager or group-sync change.
   - The reply is a packet to the human's own session only. Forced OFF without the Playerbots API.
 - **Dependencies:** Core25 social hooks (stock) and its F14 /who query (`COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT` builds only); IP's verified RandomBot cache. No SQL, DBC or client change.
+- **Group accept:** the human is refused when the leader **or any other current, resolvable member** is a restricted bot (CS01 decision 6857686419). Offline or unresolved members are skipped, never guessed from race.
 - **Known gaps:** guild invite (no hook), duel (notify-only hook), mail (offline receiver unverifiable), and later-era isolation beyond Vanilla/TBC.
 - **Tests:**
   - native policy tests (GCC/Clang, C++17/20, with and without NDEBUG);

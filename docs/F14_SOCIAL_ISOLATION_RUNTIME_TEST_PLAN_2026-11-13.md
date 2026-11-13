@@ -1,7 +1,7 @@
 # F14 social isolation — runtime test plan (PLAN ONLY)
 
 **Owner:** CosmicCuddle. **Developer:** CS03-IP. **Date:** 13 November 2026.
-**Applies to:** social branch head at or after `b4df7b35`. **Status:** a plan for a future, owner-approved **test realm**. Nothing here has been run. It doesn't authorise any action on the live server, its databases or its configuration.
+**Applies to:** social branch head with the group-accept member scan or later. **Status:** a plan for a future, owner-approved **test realm**. Nothing here has been run. It doesn't authorise any action on the live server, its databases or its configuration.
 
 ## Why a runtime plan
 The native and source tests prove the policy and the wiring, but these things can only be shown on a running Worldserver with a real client:
@@ -48,7 +48,9 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | L3 | H0 whispers R at the moment R zones or changes map | no crash. Either restricted, or Core's own "not found" |
 | L4 | H0 whispers R, then logs out immediately | no crash; the reply is simply lost |
 | C1 | two humans on different maps whisper R at the same time, for 60 s | no crash; each human gets at most one reply per cooldown |
-| G1 | H8 leads a group that contains R; H0 accepts H8's invite | **H0 joins** (current leader-only rule, S1). Record the result for the owner decision |
+| G1 | H8 leads a group that contains R; H0 accepts H8's invite | **H0 is refused** and receives one reply from R (member scan, CS01 decision 6857686419) |
+| G2 | the same group, but R is offline when H0 accepts | H0 joins (an offline member is never classified). Once R is back online, whispering, trading and inviting R are still declined |
+| G3 | H8 leads a group with N, A or S only; H0 accepts | H0 joins (stock) |
 | PB1 | ask R, through Playerbots commands or its AI, to invite or trade with H0 | **UNKNOWN.** Record whether Core's invite and trade hooks fire for bot-initiated actions |
 | OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |
 
