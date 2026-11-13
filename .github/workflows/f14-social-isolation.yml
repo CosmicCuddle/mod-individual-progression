@@ -76,6 +76,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             src/server/game
+            src/server/shared
       - name: Verify hook placement, ordering and /who count consistency
         shell: bash
         run: |
@@ -148,6 +149,24 @@ jobs:
               ("DungeonFinding/LFG.h", 125, "std::array<ObjectGuid, 5> guids = { };"),
               ("DungeonFinding/LFG.h", 126, "LfgRolesMap* roles;"),
               ("Maps/MapMgr.cpp", 261, "m_updater.schedule_lfg_update(diff);"),
+              # Battlegrounds, owner option (c): (b) queue join and (a) enter battle, both through
+              # world-thread packets for humans; the roster is fed on the human worldport ack.
+              ("Server/Protocol/Opcodes.cpp", 881, "PROCESS_THREADUNSAFE,   &WorldSession::HandleBattlemasterJoinOpcode"),
+              ("Server/Protocol/Opcodes.cpp", 856, "PROCESS_THREADUNSAFE,   &WorldSession::HandleBattleFieldPortOpcode"),
+              ("Server/Protocol/Opcodes.cpp", 351, "PROCESS_THREADUNSAFE,   &WorldSession::HandleMoveWorldportAckOpcode"),
+              ("Handlers/BattleGroundHandler.cpp", 142, "if (!sScriptMgr->OnPlayerCanJoinInBattlegroundQueue(_player, guid, bgTypeId, joinAsGroup, err) && err <= 0)"),
+              ("Handlers/BattleGroundHandler.cpp", 430, "if (!sScriptMgr->OnPlayerCanBattleFieldPort(_player, arenaType, bgTypeId, action))"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 141, "PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 148, "PLAYERHOOK_CAN_BATTLEFIELD_PORT,"),
+              ("Handlers/MovementHandler.cpp", 178, "bg->AddPlayer(_player);"),
+              ("Battlegrounds/Battleground.cpp", 1243, "sScriptMgr->OnBattlegroundAddPlayer(this, player);"),
+              ("Battlegrounds/Battleground.cpp", 1132, "sScriptMgr->OnBattlegroundRemovePlayerAtLeave(this, player);"),
+              ("Battlegrounds/Battleground.cpp", 229, "sScriptMgr->OnBattlegroundDestroy(this);"),
+              ("Scripting/ScriptDefines/AllBattlegroundScript.h", 30, "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_ADD_PLAYER,"),
+              ("Scripting/ScriptDefines/AllBattlegroundScript.h", 32, "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_REMOVE_PLAYER_AT_LEAVE,"),
+              ("Scripting/ScriptDefines/AllBattlegroundScript.h", 42, "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY,"),
+              ("Entities/Player/Player.cpp", 12571, "if (_BgBattlegroundQueueID[i].invitedToInstance == instanceId)"),
+              ("../shared/SharedDefines.h", 3894, "ERR_BATTLEGROUND_NONE                   = -1,"),
           ]
           bad = 0
           for name, line, text in anchors:
@@ -157,5 +176,5 @@ jobs:
                   print(f"FAIL {name}:{line}: expected {text!r}, got {got!r}")
           if bad:
               raise SystemExit(f"{bad} Core25 social anchor(s) drifted")
-          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership; Dungeon Finder seam")
+          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership; Dungeon Finder seam; battleground option (c)")
           PY

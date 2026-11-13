@@ -56,7 +56,11 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | LFG2 | H8 (stage ≥8) and R queue for the same dungeon | may be matched (stock) |
 | LFG3 | H0 queues, then `.ip set H0 8` while still queued | stays kept apart from R until H0 re-queues (conservative) |
 | LFG4 | H0 queues with N, A or S | stock matching |
-| BG1 | H0 and R join the same battleground | record whether R joins H0's battle raid (expected **possible**) |
+| BG1 | H0 queues Warsong Gulch, then R (solo) tries to queue for the same battleground or the random battleground at the same bracket | R's queue join is quietly refused |
+| BG2 | H0 is inside a battleground; R is invited to that same instance | R's "enter battle" is refused; its invite lapses and it leaves the queue |
+| BG3 | H8 (TBC) queues and enters with R | stock |
+| BG4 | R is already queued or inside, then H0 queues or enters | **can meet** (documented order limit; needs Core option (d)) |
+| BG5 | H0 leaves the queue (or reaches stage 8), then R queues | allowed (stale entry pruned by live re-validation) |
 | U1 | a BE/Dr character whose identity was never verified (logged in before the option was on) interacts with H0 | stock, never classified from race |
 | T1a | R on the **same** map as H0 invites or whispers H0 through Playerbots | declined silently (ownership is proven on the bot's map thread) |
 | T1b | R on a **different** map invites H0 through Playerbots (for example via LFG chat) | allowed (stock; owner fail-open), with no crash under load |

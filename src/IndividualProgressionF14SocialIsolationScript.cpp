@@ -19,7 +19,11 @@
 #include "IndividualProgression.h"
 #include "IndividualProgressionF14SocialIsolationPolicy.h"
 #include "AccountMgr.h"
+#include "AllBattlegroundScript.h"
+#include "Battleground.h"
+#include "BattlegroundMgr.h"
 #include "Chat.h"
+#include "DBCStores.h"
 #include "GameTime.h"
 #include "GlobalScript.h"
 #include "Group.h"
@@ -147,6 +151,40 @@ namespace
         return table;
     }
 
+    // Battleground facts (owner decision, option (c)); values only.
+    std::mutex& BgLock()
+    {
+        static std::mutex lock;
+        return lock;
+    }
+
+    Policy::BgVanillaRoster& BgRoster()
+    {
+        static Policy::BgVanillaRoster roster;
+        return roster;
+    }
+
+    Policy::BgQueuedHumans& BgQueued()
+    {
+        static Policy::BgQueuedHumans queued;
+        return queued;
+    }
+
+    // World thread only (BattlegroundMgr data): the queue and level bracket
+    // a player of this level would wait in for this battleground type.
+    bool BgQueueAndBracket(BattlegroundTypeId bgTypeId, uint32 level, uint32& queue, uint32& bracket)
+    {
+        Battleground* templ = sBattlegroundMgr->GetBattlegroundTemplate(bgTypeId);
+        if (!templ)
+            return false;
+        PvPDifficultyEntry const* entry = GetBattlegroundBracketByLevel(templ->GetMapId(), level);
+        if (!entry)
+            return false;
+        queue = uint32(BattlegroundMgr::BGQueueTypeId(bgTypeId, 0));
+        bracket = uint32(entry->GetBracketId());
+        return true;
+    }
+
     Policy::WorldThreadMarker& WorldThread()
     {
         static Policy::WorldThreadMarker marker;
@@ -249,7 +287,96 @@ namespace
         F14SocialIsolationPlayerScript() : PlayerScript("IndividualProgression_F14SocialIsolation",
             {PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT, PLAYERHOOK_CAN_INIT_TRADE,
              PLAYERHOOK_CAN_GROUP_INVITE, PLAYERHOOK_CAN_GROUP_ACCEPT,
-             PLAYERHOOK_ON_BEFORE_UPDATE, PLAYERHOOK_CAN_JOIN_LFG, PLAYERHOOK_ON_LOGOUT}) { }
+             PLAYERHOOK_ON_BEFORE_UPDATE, PLAYERHOOK_CAN_JOIN_LFG, PLAYERHOOK_ON_LOGOUT,
+             PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE, PLAYERHOOK_CAN_BATTLEFIELD_PORT}) { }
+
+        // Battleground queue join (b). CMSG_BATTLEMASTER_JOIN is
+        // PROCESS_THREADUNSAFE and Playerbots queues the same packet, so this
+        // runs on the world thread. Vanilla humans (and their group's Vanilla
+        // humans) are recorded; a restricted bot's SOLO join is refused while a
+        // still-Vanilla human waits in a matching queue and bracket. Group
+        // joins are never refused here: the port check (a) covers them.
+        bool OnPlayerCanJoinInBattlegroundQueue(Player* player, ObjectGuid /*battlemaster*/, BattlegroundTypeId bgTypeId,
+                                                uint8 joinAsGroup, GroupJoinBattlegroundResult& err) override
+        {
+            if (!OptionOn() || !player || !WorldThread().IsCurrent())
+                return true;
+            std::vector<Player*> joiners{player};
+            if (joinAsGroup)
+                if (Group const* group = player->GetGroup())
+                    for (GroupReference const* itr = group->GetFirstMember(); itr; itr = itr->next())
+                        if (Player* member = itr->GetSource())
+                            if (member != player)
+                                joiners.push_back(member);
+
+            std::lock_guard<std::mutex> lock(BgLock());
+            for (Player* joiner : joiners)
+            {
+                if (!Policy::HumanStillVanilla(ReadHuman(joiner)))
+                    continue;
+                Policy::BgQueuedHuman where;
+                where.bgType = uint32(bgTypeId);
+                if (BgQueueAndBracket(bgTypeId, joiner->GetLevel(), where.queue, where.bracket))
+                    BgQueued().Record(joiner->GetGUID().GetRawValue(), where);
+            }
+
+            bool const solo = !joinAsGroup || !player->GetGroup();
+            bool const restricted = Policy::BotIsRestrictedRandomBot(ReadBot(player));
+            if (!restricted || !solo)
+                return true;
+            uint32 botQueue = 0;
+            uint32 botBracket = 0;
+            if (!BgQueueAndBracket(bgTypeId, player->GetLevel(), botQueue, botBracket))
+                return true;
+            uint32 const randomQueue = uint32(BattlegroundMgr::BGQueueTypeId(BATTLEGROUND_RB, 0));
+            uint32 const botLevel = player->GetLevel();
+            bool const matching = BgQueued().AnyMatching(
+                [](uint64 guid, Policy::BgQueuedHuman const& where)
+                {
+                    // Live re-validation on the world thread: still online,
+                    // still in that queue, still Vanilla.
+                    Player const* human = ObjectAccessor::FindPlayer(ObjectGuid(guid));
+                    return human &&
+                        human->InBattlegroundQueueForBattlegroundQueueType(BattlegroundQueueTypeId(where.queue)) &&
+                        Policy::HumanStillVanilla(ReadHuman(human));
+                },
+                [&](Policy::BgQueuedHuman const& where)
+                {
+                    uint32 queue = 0;
+                    uint32 bracket = 0;
+                    // The bot's bracket on the human's battleground map.
+                    if (!BgQueueAndBracket(BattlegroundTypeId(where.bgType), botLevel, queue, bracket))
+                        return false;
+                    return Policy::BgQueueMatches(botQueue, where.queue, randomQueue, bracket, where.bracket);
+                });
+            if (!Policy::BgJoinRefused(true, restricted, solo, matching))
+                return true;
+            err = ERR_BATTLEGROUND_NONE; // quiet refusal (<= 0 stops Core)
+            return false;
+        }
+
+        // Battleground "enter battle" (a). Playerbots calls the port handler
+        // from bot AI (a map thread), so only the bot's own state is read
+        // (after the T1 ownership proof) plus the value-only roster. Leaving
+        // a queue (action 0) is never refused.
+        bool OnPlayerCanBattleFieldPort(Player* player, uint8 /*arenaType*/, BattlegroundTypeId /*bgTypeId*/,
+                                        uint8 action) override
+        {
+            if (!OptionOn() || !player || action != 1)
+                return true;
+            if (!CurrentReadScope().Contains(player))
+                return true; // T1: not provably ours to read
+            bool const restricted = Policy::BotIsRestrictedRandomBot(ReadBot(player));
+            if (!restricted)
+                return true;
+            bool invitedToVanilla = false;
+            {
+                std::lock_guard<std::mutex> lock(BgLock());
+                invitedToVanilla = BgRoster().AnyInvitedInstanceHasVanillaHuman(
+                    [player](uint32 instance) { return player->IsInvitedForBattlegroundInstance(instance); });
+            }
+            return !Policy::BgPortRefused(true, restricted, true, invitedToVanilla);
+        }
 
         // Dungeon Finder: record the joiner's (and its group's) facts. A
         // client or bot CMSG_LFG_JOIN is PROCESS_THREADUNSAFE, so this runs on
@@ -279,8 +406,12 @@ namespace
         {
             if (!player)
                 return;
-            std::lock_guard<std::mutex> lock(QueueFactsLock());
-            QueueFacts().Erase(player->GetGUID().GetRawValue());
+            {
+                std::lock_guard<std::mutex> lock(QueueFactsLock());
+                QueueFacts().Erase(player->GetGUID().GetRawValue());
+            }
+            std::lock_guard<std::mutex> lock(BgLock());
+            BgQueued().Erase(player->GetGUID().GetRawValue());
         }
 
         // T1 only: this thread is about to update `player`, so it owns that
@@ -400,6 +531,45 @@ namespace
         }
     };
 
+    // Battleground roster (a): which instances hold a still-Vanilla human.
+    // Humans enter on their worldport ack, a world-thread client packet, so
+    // they are read only there; anything else records nothing. Leaving and
+    // instance destruction use only the GUID and instance id values.
+    class F14SocialIsolationBattlegroundScript final : public AllBattlegroundScript
+    {
+    public:
+        F14SocialIsolationBattlegroundScript() : AllBattlegroundScript("IndividualProgression_F14SocialIsolationBg",
+            {ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_ADD_PLAYER, ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_REMOVE_PLAYER_AT_LEAVE,
+             ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY}) { }
+
+        void OnBattlegroundAddPlayer(Battleground* bg, Player* player) override
+        {
+            if (!OptionOn() || !bg || !player || !WorldThread().IsCurrent())
+                return;
+            if (!Policy::HumanStillVanilla(ReadHuman(player)))
+                return;
+            std::lock_guard<std::mutex> lock(BgLock());
+            BgRoster().Add(bg->GetInstanceID(), player->GetGUID().GetRawValue());
+            BgQueued().Erase(player->GetGUID().GetRawValue()); // no longer waiting
+        }
+
+        void OnBattlegroundRemovePlayerAtLeave(Battleground* bg, Player* player) override
+        {
+            if (!bg || !player)
+                return;
+            std::lock_guard<std::mutex> lock(BgLock());
+            BgRoster().Remove(bg->GetInstanceID(), player->GetGUID().GetRawValue());
+        }
+
+        void OnBattlegroundDestroy(Battleground* bg) override
+        {
+            if (!bg)
+                return;
+            std::lock_guard<std::mutex> lock(BgLock());
+            BgRoster().Clear(bg->GetInstanceID());
+        }
+    };
+
     // T1 only: remembers the world thread and counts world ticks. Reads nothing.
     class F14SocialIsolationWorldThreadScript final : public WorldScript
     {
@@ -439,4 +609,5 @@ void AddSC_mod_individual_progression_f14_social_isolation()
     new F14SocialIsolationWhoScript();
     new F14SocialIsolationWorldThreadScript();
     new F14SocialIsolationLfgScript();
+    new F14SocialIsolationBattlegroundScript();
 }

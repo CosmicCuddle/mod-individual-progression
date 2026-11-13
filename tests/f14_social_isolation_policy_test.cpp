@@ -800,6 +800,95 @@ namespace
     }
 }
 
+namespace
+{
+    // Battlegrounds, owner option (c): (b) queue-join and (a) enter-battle.
+    void TestBattlegrounds()
+    {
+        std::uint32_t const WSG = 1, AB = 2, RB = 9;
+
+        // Queue/bracket matching: same bracket and same queue, or random BG
+        // on either side; never across brackets.
+        CHECK(P::BgQueueMatches(WSG, WSG, RB, 5, 5));
+        CHECK(!P::BgQueueMatches(WSG, AB, RB, 5, 5));
+        CHECK(P::BgQueueMatches(RB, AB, RB, 5, 5));
+        CHECK(P::BgQueueMatches(WSG, RB, RB, 5, 5));
+        CHECK(!P::BgQueueMatches(WSG, WSG, RB, 5, 4));
+        CHECK(!P::BgQueueMatches(RB, RB, RB, 4, 5));
+
+        // The two rules, exhaustively.
+        for (int o = 0; o < 2; ++o)
+            for (int r = 0; r < 2; ++r)
+                for (int s = 0; s < 2; ++s)
+                    for (int m = 0; m < 2; ++m)
+                    {
+                        CHECK(P::BgJoinRefused(o, r, s, m) == (o && r && s && m));
+                        CHECK(P::BgPortRefused(o, r, s, m) == (o && r && s && m)); // s = entering
+                    }
+        CHECK(!P::BgPortRefused(true, true, false, true)); // leaving a queue is never refused
+
+        // Roster: instance -> Vanilla humans inside.
+        P::BgVanillaRoster roster;
+        roster.Add(100, 1);
+        roster.Add(100, 2);
+        roster.Add(200, 3);
+        roster.Add(0, 4);   // no instance: ignored
+        roster.Add(300, 0); // no GUID: ignored
+        CHECK(roster.Instances() == 2);
+        CHECK(roster.HasVanillaHuman(100) && roster.HasVanillaHuman(200) && !roster.HasVanillaHuman(300));
+        auto invitedTo = [](std::uint32_t want) { return [want](std::uint32_t i) { return i == want; }; };
+        CHECK(roster.AnyInvitedInstanceHasVanillaHuman(invitedTo(100)));
+        CHECK(!roster.AnyInvitedInstanceHasVanillaHuman(invitedTo(999)));
+        roster.Remove(100, 1);
+        CHECK(roster.HasVanillaHuman(100));     // one human still inside
+        roster.Remove(100, 2);
+        CHECK(!roster.HasVanillaHuman(100));    // last one left
+        CHECK(!roster.AnyInvitedInstanceHasVanillaHuman(invitedTo(100)));
+        roster.Remove(100, 2);                  // repeated leave is harmless
+        roster.Remove(777, 1);
+        roster.Clear(200);                      // instance destroyed
+        CHECK(roster.Instances() == 0);
+
+        // Queued humans: re-validated and pruned on every use.
+        P::BgQueuedHumans queued;
+        queued.Record(1, {WSG, WSG, 5});
+        queued.Record(2, {AB, AB, 5});
+        queued.Record(3, {WSG, WSG, 4});
+        queued.Record(0, {WSG, WSG, 5}); // no GUID: ignored
+        CHECK(queued.Size() == 3);
+        auto all = [](std::uint64_t, P::BgQueuedHuman const&) { return true; };
+        auto botIn = [&](std::uint32_t queue, std::uint32_t bracket) {
+            return [=](P::BgQueuedHuman const& w) { return P::BgQueueMatches(queue, w.queue, RB, bracket, w.bracket); };
+        };
+        CHECK(queued.AnyMatching(all, botIn(WSG, 5)));   // human 1
+        CHECK(queued.AnyMatching(all, botIn(AB, 5)));    // human 2
+        CHECK(queued.AnyMatching(all, botIn(RB, 4)));    // random BG matches human 3's bracket
+        CHECK(!queued.AnyMatching(all, botIn(WSG, 3)));  // no one in that bracket
+        CHECK(queued.Size() == 3);
+        // Human 1 left the queue / reached TBC: pruned, no longer matches.
+        auto notOne = [](std::uint64_t g, P::BgQueuedHuman const&) { return g != 1; };
+        CHECK(!queued.AnyMatching(notOne, botIn(WSG, 5)));
+        CHECK(queued.Size() == 2);
+        queued.Erase(2);
+        CHECK(!queued.AnyMatching(all, botIn(AB, 5)));
+        auto none = [](std::uint64_t, P::BgQueuedHuman const&) { return false; };
+        CHECK(!queued.AnyMatching(none, botIn(WSG, 4)));
+        CHECK(queued.Size() == 0);
+
+        // Composition with identity: only a verified restricted bot is ever
+        // refused; TBC/Wrath humans are never recorded as Vanilla.
+        P::Bot ordinary = VerifiedBot(1);
+        P::Bot altbot = VerifiedBot();
+        altbot.verifiedRandomBotIdentity = false;
+        for (P::Bot const& b : {ordinary, altbot, P::Bot{}})
+            CHECK(!P::BgJoinRefused(true, P::BotIsRestrictedRandomBot(b), true, true) &&
+                  !P::BgPortRefused(true, P::BotIsRestrictedRandomBot(b), true, true));
+        CHECK(P::BgJoinRefused(true, P::BotIsRestrictedRandomBot(VerifiedBot(P::DraeneiRace)), true, true));
+        for (std::uint8_t stage : {8, 12, 13, 18, 255})
+            CHECK(!P::HumanStillVanilla(VanillaHuman(stage)));
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -820,6 +909,7 @@ int main()
     TestThreadSafeReads();
     TestOwnedMapHelpers();
     TestDungeonFinderQueue();
+    TestBattlegrounds();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

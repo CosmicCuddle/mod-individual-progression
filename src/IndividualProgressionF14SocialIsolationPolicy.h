@@ -26,6 +26,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace IndividualProgressionF14SocialIsolationPolicy
 {
@@ -250,6 +251,114 @@ namespace IndividualProgressionF14SocialIsolationPolicy
 
     private:
         std::unordered_map<std::uint64_t, QueueFacts> _facts;
+    };
+
+    // Battlegrounds (owner decision 13 Nov 2026, option (c)): restricted
+    // RandomBots are kept out of the queue and battle of a still-Vanilla
+    // human. (b) A restricted bot's solo queue join is refused while a
+    // still-Vanilla human waits in a matching queue and bracket. (a) A
+    // restricted bot's "enter battle" is refused when it is invited to an
+    // instance that already holds a still-Vanilla human. TBC/Wrath humans
+    // are unaffected; leaving a queue is never refused.
+    constexpr bool BgQueueMatches(std::uint32_t botQueue, std::uint32_t humanQueue, std::uint32_t randomQueue,
+                                  std::uint32_t botBracket, std::uint32_t humanBracket)
+    {
+        return botBracket == humanBracket &&
+            (botQueue == humanQueue || botQueue == randomQueue || humanQueue == randomQueue);
+    }
+
+    constexpr bool BgJoinRefused(bool optionEnabled, bool restrictedBot, bool soloJoin,
+                                 bool matchingVanillaHumanQueued)
+    {
+        return optionEnabled && restrictedBot && soloJoin && matchingVanillaHumanQueued;
+    }
+
+    constexpr bool BgPortRefused(bool optionEnabled, bool restrictedBot, bool enteringBattle,
+                                 bool invitedToInstanceWithVanillaHuman)
+    {
+        return optionEnabled && restrictedBot && enteringBattle && invitedToInstanceWithVanillaHuman;
+    }
+
+    // Instance id -> still-Vanilla humans inside (recorded on the world
+    // thread as they enter; removed as they leave). Values only.
+    class BgVanillaRoster
+    {
+    public:
+        void Add(std::uint32_t instance, std::uint64_t guid)
+        {
+            if (instance && guid)
+                _inside[instance].insert(guid);
+        }
+        void Remove(std::uint32_t instance, std::uint64_t guid)
+        {
+            auto const found = _inside.find(instance);
+            if (found == _inside.end())
+                return;
+            found->second.erase(guid);
+            if (found->second.empty())
+                _inside.erase(found);
+        }
+        void Clear(std::uint32_t instance) { _inside.erase(instance); }
+        bool HasVanillaHuman(std::uint32_t instance) const { return _inside.count(instance) != 0; }
+        std::size_t Instances() const { return _inside.size(); }
+
+        // True if `invitedTo(instance)` holds for any instance with a
+        // still-Vanilla human inside.
+        template<typename InvitedTo>
+        bool AnyInvitedInstanceHasVanillaHuman(InvitedTo invitedTo) const
+        {
+            for (auto const& entry : _inside)
+                if (invitedTo(entry.first))
+                    return true;
+            return false;
+        }
+
+    private:
+        std::unordered_map<std::uint32_t, std::unordered_set<std::uint64_t>> _inside;
+    };
+
+    // Still-Vanilla humans who joined a battleground queue: GUID -> where.
+    // Entries are re-validated live (world thread) before use and pruned.
+    struct BgQueuedHuman
+    {
+        std::uint32_t bgType = 0;
+        std::uint32_t queue = 0;
+        std::uint32_t bracket = 0;
+    };
+
+    class BgQueuedHumans
+    {
+    public:
+        void Record(std::uint64_t guid, BgQueuedHuman where)
+        {
+            if (guid)
+                _queued[guid] = where;
+        }
+        void Erase(std::uint64_t guid) { _queued.erase(guid); }
+        std::size_t Size() const { return _queued.size(); }
+
+        // `stillQueuedVanilla(guid, where)` re-validates an entry (and is
+        // where stale ones are noticed); `matches(where)` compares it with
+        // the bot's queue and bracket. Stale entries are erased.
+        template<typename StillValid, typename Matches>
+        bool AnyMatching(StillValid stillQueuedVanilla, Matches matches)
+        {
+            bool found = false;
+            for (auto it = _queued.begin(); it != _queued.end();)
+            {
+                if (!stillQueuedVanilla(it->first, it->second))
+                {
+                    it = _queued.erase(it);
+                    continue;
+                }
+                found = found || matches(it->second);
+                ++it;
+            }
+            return found;
+        }
+
+    private:
+        std::unordered_map<std::uint64_t, BgQueuedHuman> _queued;
     };
 
     // T1 owned-map list helpers. Generic so the exact code also runs in the

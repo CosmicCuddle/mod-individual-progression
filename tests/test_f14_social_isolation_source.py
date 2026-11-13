@@ -84,18 +84,64 @@ class HooksAndAuthority(unittest.TestCase):
         self.src = strip_comments(read(SCRIPT))
 
     def test_only_social_hooks_and_who(self):
-        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+)\b", self.src)))
+        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+|ALLBATTLEGROUNDHOOK_[A-Z0-9_]+)\b", self.src)))
         self.assertEqual(hooks, sorted([
             "PLAYERHOOK_CAN_GROUP_ACCEPT", "PLAYERHOOK_CAN_GROUP_INVITE", "PLAYERHOOK_CAN_INIT_TRADE",
             "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT", "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY",
             "WORLDHOOK_ON_UPDATE", "PLAYERHOOK_ON_BEFORE_UPDATE",
-            "PLAYERHOOK_CAN_JOIN_LFG", "PLAYERHOOK_ON_LOGOUT", "GLOBALHOOK_CAN_CREATE_LFG_PROPOSAL"]))
+            "PLAYERHOOK_CAN_JOIN_LFG", "PLAYERHOOK_ON_LOGOUT", "GLOBALHOOK_CAN_CREATE_LFG_PROPOSAL",
+            "PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE", "PLAYERHOOK_CAN_BATTLEFIELD_PORT",
+            "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_ADD_PLAYER", "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_REMOVE_PLAYER_AT_LEAVE",
+            "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
             "OnPlayerCanInitTrade", "OnPlayerCanUseChat", "OnUpdate", "OnPlayerBeforeUpdate",
-            "OnPlayerCanJoinLfg", "OnPlayerLogout"]))
+            "OnPlayerCanJoinLfg", "OnPlayerLogout", "OnPlayerCanJoinInBattlegroundQueue",
+            "OnPlayerCanBattleFieldPort", "OnBattlegroundAddPlayer", "OnBattlegroundRemovePlayerAtLeave",
+            "OnBattlegroundDestroy"]))
         self.assertEqual(re.findall(r"\b(Can\w+)\([^;{]*\)\s*override", self.src), ["CanCreateLfgProposal"])
+
+    def test_battlegrounds_option_c(self):
+        # (b) Queue join: world thread only; quiet refusal; only a solo
+        # restricted bot is refused; group joins are left to (a).
+        join = self.body("bool OnPlayerCanJoinInBattlegroundQueue(Player* player", "\n        }\n")
+        self.assertRegex(join, r"if \(!OptionOn\(\) \|\| !player \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return true;")
+        self.assertLess(join.index("WorldThread().IsCurrent()"), join.index("ReadHuman("))
+        self.assertRegex(join, r"if \(!restricted \|\| !solo\)\s*return true;")
+        self.assertRegex(join, r"err = ERR_BATTLEGROUND_NONE;[^\n]*\n\s*return false;")
+        # Exactly one refusal; the only other `return false;` is inside the
+        # bracket-matching lambda (a non-match, not a refusal).
+        lam = join.split("[&](Policy::BgQueuedHuman const& where)", 1)[1].split("});", 1)[0]
+        self.assertEqual(lam.count("return false;"), 1)
+        self.assertEqual(join.count("return false;") - lam.count("return false;"), 1)
+        self.assertIn("Policy::HumanStillVanilla(ReadHuman(human))", join)  # live re-validation
+        self.assertIn("InBattlegroundQueueForBattlegroundQueueType", join)
+        # (a) Enter battle: only "enter" is checked; ownership before any read;
+        # only the bot's own state plus the value roster.
+        port = self.body("bool OnPlayerCanBattleFieldPort(Player* player", "\n        }\n")
+        self.assertRegex(port, r"if \(!OptionOn\(\) \|\| !player \|\| action != 1\)\s*return true;")
+        self.assertRegex(port, r"if \(!CurrentReadScope\(\)\.Contains\(player\)\)\s*return true;")
+        self.assertLess(port.index("Contains(player)"), port.index("ReadBot(player)"))
+        for token in ("ObjectAccessor", "ReadHuman", "sBattlegroundMgr", "GetBattleground"):
+            self.assertNotIn(token, port, token)
+        self.assertEqual(set(re.findall(r"\b(\w+)->", port)), {"player"})
+        self.assertIn("player->IsInvitedForBattlegroundInstance(instance)", port)
+        # Roster: humans are read only on the world thread; leaving and
+        # destruction use values only.
+        add = self.body("void OnBattlegroundAddPlayer(Battleground* bg, Player* player) override", "\n        }\n")
+        self.assertRegex(add, r"if \(!OptionOn\(\) \|\| !bg \|\| !player \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return;")
+        self.assertLess(add.index("IsCurrent()"), add.index("ReadHuman("))
+        for sig in ("void OnBattlegroundRemovePlayerAtLeave(Battleground* bg, Player* player) override",
+                    "void OnBattlegroundDestroy(Battleground* bg) override"):
+            body = self.body(sig, "\n        }\n")
+            for token in ("ReadHuman", "ReadBot", "ObjectAccessor", "GetQuestStatus"):
+                self.assertNotIn(token, body, sig)
+        logout = self.body("void OnPlayerLogout(Player* player) override", "\n        }\n")
+        self.assertIn("BgQueued().Erase(player->GetGUID().GetRawValue());", logout)
+        policy = strip_comments(read(POLICY))
+        self.assertIn("return optionEnabled && restrictedBot && soloJoin && matchingVanillaHumanQueued;", policy)
+        self.assertIn("return optionEnabled && restrictedBot && enteringBattle && invitedToInstanceWithVanillaHuman;", policy)
 
     def test_dungeon_finder_value_only(self):
         # The matcher hook runs on the LFG worker thread beside the maps: it
