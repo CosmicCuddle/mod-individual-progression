@@ -35,6 +35,11 @@
 #error "Token-bound initial OUT observer requires the Core18 token-bearing query ABI"
 #endif
 #endif
+#if defined(COSMIC_IP_F14_PAIR_RIGHTS_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_PAIR_RIGHTS_ADAPTER_EXPERIMENT >= 1
+#if !defined(COSMIC_IP_F14_TOKEN_BOUND_INITIAL_OUT_OBSERVER_EXPERIMENT) || COSMIC_IP_F14_TOKEN_BOUND_INITIAL_OUT_OBSERVER_EXPERIMENT < 1
+#error "F14 pair-rights adapter is diagnostic-only inside the token-bound initial OUT observer"
+#endif
+#endif
 #if !defined(COSMIC_F14_PRE_MAP_REMOVAL_EXPERIMENT) || COSMIC_F14_PRE_MAP_REMOVAL_EXPERIMENT < 1
 #error "Current F14 lifecycle observer requires the Core pre-map-removal hook"
 #endif
@@ -58,6 +63,10 @@
 #include "IndividualProgressionF14CurrentCombatOwnership.h"
 #if defined(COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT) && COSMIC_IP_F14_CURRENT_RIGHTS_REFRESH_EXPERIMENT >= 1
 #include "IndividualProgressionF14CurrentRightsRefresh.h"
+#endif
+#if defined(COSMIC_IP_F14_PAIR_RIGHTS_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_PAIR_RIGHTS_ADAPTER_EXPERIMENT >= 1
+#include "IndividualProgressionF14PairRightsCoreAdapter.h"
+#include <array>
 #endif
 #include "AllCreatureScript.h"
 #include "Creature.h"
@@ -714,6 +723,11 @@ namespace
                 CombatTracker().ActiveAttackers(key) == 0)
                 return false;
 
+#if defined(COSMIC_IP_F14_PAIR_RIGHTS_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_PAIR_RIGHTS_ADAPTER_EXPERIMENT >= 1
+            // Diagnostic only: every existing gate above held. The verdict
+            // is counted, never acted on; the answer stays FALSE (visible).
+            RecordPairRightsDiagnostic(viewer, creature);
+#endif
             if (_observed.fetch_add(1, std::memory_order_relaxed) == 0)
                 LOG_INFO("module", "IP F14 observed first token-bound initial OUT nomination with exact viewer identity and current verified RandomBot attack ownership; concealment still forced FALSE");
             return false;
@@ -721,6 +735,24 @@ namespace
 
     private:
         std::atomic<std::uint64_t> _observed{0};
+#if defined(COSMIC_IP_F14_PAIR_RIGHTS_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_PAIR_RIGHTS_ADAPTER_EXPERIMENT >= 1
+        // Aggregate per-result counters; one generic log line per result at
+        // most. No GUID, pointer, name or per-pair record is retained.
+        std::array<std::atomic<std::uint64_t>,
+            IndividualProgressionF14PairRightsEvidence::ResultCount> _pairRightsResults{};
+
+        void RecordPairRightsDiagnostic(Player const* viewer, Creature const* creature)
+        {
+            namespace Evidence = IndividualProgressionF14PairRightsEvidence;
+            namespace Adapter = IndividualProgressionF14PairRightsCoreAdapter;
+            auto const result = Evidence::Classify(Adapter::Collect(viewer, creature, true));
+            std::size_t const index = static_cast<std::size_t>(result);
+            if (index < _pairRightsResults.size() &&
+                _pairRightsResults[index].fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_INFO("module", "IP F14 pair-rights adapter first {} snapshot; diagnostic only, concealment still forced FALSE",
+                    Evidence::ResultName(result));
+        }
+#endif
     };
 #endif
 

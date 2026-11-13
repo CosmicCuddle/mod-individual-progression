@@ -1,0 +1,197 @@
+# F14 BE/Draenei pair-rights runtime evidence adapter: DIAGNOSTIC ONLY, default OFF.
+# Child of IP #172 (aed05a92). The token-bound initial-OUT observer stays hard-FALSE.
+# Disposable GitHub runner ONLY; no worldserver launch, database, host or deployment.
+# The macro-ON full Worldserver link is a separate Services gate run by Maintenance.
+name: F14 pair-rights adapter (diagnostic, OFF, NO HOST)
+on:
+  pull_request:
+    branches:
+      - feature/cs01-ip172-f14-pair-rights-completeness-20261112
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    name: "Pair-rights evidence + source contracts (${{ matrix.cxx }} ${{ matrix.std }})"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: "Verify #172 ancestry and EXACT eight-path scope"
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=aed05a92f262362608f5d643c8570b504189aae0
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            '.github/workflows/f14-pair-rights-adapter.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/F14_PAIR_RIGHTS_ADAPTER_2026-11-13.md' \
+            'src/IndividualProgressionF14CurrentCoreLifecycle.cpp' \
+            'src/IndividualProgressionF14PairRightsCoreAdapter.h' \
+            'src/IndividualProgressionF14PairRightsEvidence.h' \
+            'tests/f14_pair_rights_evidence_test.cpp' \
+            'tests/test_f14_pair_rights_adapter_source.py' | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          git diff --check "$parent" HEAD
+          git diff -U0 "$parent" HEAD -- docs/CUSTOM_MODIFICATIONS_REGISTER.md \
+            | grep -E '^-' | grep -Ev '^--- ' > /tmp/register-removed || true
+          test ! -s /tmp/register-removed
+      - name: Source contracts (observer hard-FALSE, read rules, exact insertions, parents byte-identical)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_f14_pair_rights_adapter_source.py' -v
+      - name: "Native evidence tests (${{ matrix.cxx }} ${{ matrix.std }}, with and without NDEBUG)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ndebug in "" "-DNDEBUG"; do
+            ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 $ndebug \
+              -Isrc tests/f14_pair_rights_evidence_test.cpp -o /tmp/f14-pair-rights
+            /tmp/f14-pair-rights | tee /tmp/out.txt
+            grep -Eq '^F14 PAIR RIGHTS EVIDENCE ([0-9]+)/\1 passed' /tmp/out.txt
+            # The unchanged #172 model tests still pass alongside.
+            ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 $ndebug \
+              -Isrc tests/f14_current_pair_rights_risk_test.cpp -o /tmp/f14-risk
+            /tmp/f14-risk
+          done
+          echo 'PASS: diagnostic adapter model only; observer hard-FALSE, nothing enabled, no client proof'
+
+  core25-anchors:
+    name: "Core25 395b68ee API anchors (read-only)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Core25 (sparse, read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/azerothcore-wotlk
+          ref: 395b68ee4ce425826c2a79c0ddf3ade3c67c8160
+          path: core
+          persist-credentials: false
+          sparse-checkout: |
+            src/server/game
+            src/common/Utilities
+      - name: Verify every adapter API and documented gap at its exact line
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C core rev-parse HEAD)" = 395b68ee4ce425826c2a79c0ddf3ade3c67c8160
+          python3 -I - <<'PY'
+          from pathlib import Path
+          base = Path("core/src/server/game")
+          anchors = [
+              ('Entities/Player/Player.h', 1178, 'bool IsGameMaster() const'),
+              ('Entities/Unit/Unit.h', 725, 'ObjectGuid GetCharmerGUID() const'),
+              ('Entities/Player/Player.h', 2399, 'WorldObject* GetSeer() const'),
+              ('Entities/Unit/Unit.h', 867, 'ObjectGuid GetTarget() const'),
+              ('Entities/Unit/Unit.h', 910, 'Unit* GetVictim() const { return m_attacking; }'),
+              ('Entities/Unit/Unit.h', 950, 'bool IsInCombatWith(Unit const* who) const;'),
+              ('Entities/Unit/Unit.h', 972, 'bool IsThreatenedBy(Unit const* who) const'),
+              ('Entities/Unit/Unit.h', 671, 'public:'),
+              ('Entities/Unit/Unit.h', 2091, '//----------- Public variables ----------//'),
+              ('Entities/Unit/Unit.h', 2095, 'ControlSet m_Controlled;'),
+              ('Entities/Unit/Unit.h', 2099, 'ObjectGuid m_SummonSlot[MAX_SUMMON_SLOT];'),
+              ('Entities/Unit/Unit.h', 2137, 'protected:'),
+              ('Entities/Unit/Unit.h', 723, 'ObjectGuid GetMinionGUID() const'),
+              ('Entities/Unit/Unit.h', 727, 'ObjectGuid GetCharmGUID() const'),
+              ('Entities/Unit/Unit.h', 729, 'ObjectGuid GetPetGUID() const'),
+              ('Entities/Unit/Unit.h', 731, 'ObjectGuid GetCritterGUID() const'),
+              ('Entities/Unit/Unit.h', 1947, 'Vehicle* GetVehicleKit()const'),
+              ('Entities/Unit/Unit.h', 1948, 'Vehicle* GetVehicle()   const'),
+              ('Entities/Unit/Unit.h', 719, 'ObjectGuid GetOwnerGUID() const override'),
+              ('Entities/Unit/Unit.h', 721, 'ObjectGuid GetCreatorGUID() const'),
+              ('Entities/Unit/Unit.h', 1324, 'bool IsControlledByPlayer() const'),
+              ('Entities/Unit/Unit.h', 738, 'TempSummon const* ToTempSummon() const'),
+              ('Entities/Creature/TemporarySummon.h', 66, 'ObjectGuid GetSummonerGUID() const'),
+              ('Entities/Unit/Unit.h', 801, 'bool IsGuardian() const'),
+              ('Entities/Unit/Unit.h', 803, 'bool IsPet() const'),
+              ('Entities/Unit/Unit.h', 805, 'bool IsTotem() const'),
+              ('Entities/Player/Player.h', 2519, 'Group const* GetGroup() const'),
+              ('Entities/Creature/Creature.h', 231, 'ObjectGuid GetLootRecipientGUID() const'),
+              ('Entities/Creature/Creature.h', 233, 'ObjectGuid::LowType GetLootRecipientGroupGUID() const'),
+              ('Entities/Unit/Unit.h', 1401, 'AuraApplicationMap const& GetAppliedAuras() const'),
+              ('Spells/Auras/SpellAuras.h', 63, 'Aura* GetBase() const'),
+              ('Spells/Auras/SpellAuras.h', 106, 'ObjectGuid GetCasterGUID() const'),
+              ('Entities/Unit/Unit.h', 1593, 'Spell* GetCurrentSpell(CurrentSpellTypes spellType) const'),
+              ('Entities/Unit/Unit.h', 570, '#define CURRENT_MAX_SPELL'),
+              ('Entities/Unit/Unit.h', 768, 'NPCFlags GetNpcFlags() const'),
+              ('Entities/Unit/Unit.h', 823, 'bool IsServiceProvider() const'),
+              ('Server/WorldSession.h', 507, 'uint32 GetCurrentVendor() const'),
+              ('Entities/Player/Player.h', 2032, 'WorldSession* GetSession() const'),
+              ('Entities/Creature/Creature.h', 215, 'uint32 GetScriptId() const;'),
+              ('Entities/Creature/Creature.h', 213, 'std::string const& GetAIName() const;'),
+              ('Maps/Map.h', 298, 'bool Instanceable() const'),
+              ('Maps/Map.h', 299, 'bool IsDungeon() const'),
+              ('Entities/Creature/Creature.h', 371, 'CreatureGroup const* GetFormation() const'),
+              ('Entities/Creature/Creature.h', 123, 'bool isWorldBoss() const'),
+              ('Entities/Creature/Creature.h', 131, 'bool IsDungeonBoss() const;'),
+              ('Quests/QuestDef.h', 33, '#define MAX_QUEST_LOG_SIZE 25'),
+              ('Quests/QuestDef.h', 35, '#define QUEST_OBJECTIVES_COUNT 4'),
+              ('Quests/QuestDef.h', 305, 'int32  RequiredNpcOrGo[QUEST_OBJECTIVES_COUNT];'),
+              ('Quests/QuestDef.h', 103, 'QUEST_STATUS_INCOMPLETE     = 3,'),
+              ('Quests/QuestDef.h', 161, 'QUEST_SPECIAL_FLAGS_EXPLORATION_OR_EVENT'),
+              ('Entities/Player/Player.h', 1510, 'uint32 GetQuestSlotQuestId(uint16 slot) const'),
+              ('Entities/Player/Player.h', 1492, 'QuestStatus GetQuestStatus(uint32 quest_id) const;'),
+              ('Globals/ObjectMgr.h', 840, 'Quest const* GetQuestTemplate(uint32 quest_id) const'),
+              ('Entities/Creature/CreatureData.h', 31, '#define MAX_KILL_CREDIT 2'),
+              ('Entities/Creature/CreatureData.h', 190, 'uint32  KillCredit[MAX_KILL_CREDIT];'),
+              ('Entities/Creature/CreatureData.h', 220, 'uint32  lootid;'),
+              ('Entities/Creature/CreatureData.h', 221, 'uint32  pickpocketLootId;'),
+              ('Entities/Creature/CreatureData.h', 222, 'uint32  SkinLootId;'),
+              ('Loot/LootMgr.h', 226, 'bool HaveQuestLootForPlayer(uint32 loot_id, Player const* player) const;'),
+              ('Loot/LootMgr.h', 413, 'extern LootStore LootTemplates_Creature;'),
+              ('Loot/LootMgr.h', 419, 'extern LootStore LootTemplates_Pickpocketing;'),
+              ('Loot/LootMgr.h', 421, 'extern LootStore LootTemplates_Skinning;'),
+              ('Entities/Creature/Creature.h', 206, 'CreatureTemplate const* GetCreatureTemplate() const'),
+              ('Entities/Unit/Unit.cpp', 7996, 'Unit* Unit::GetFirstControlled() const'),
+              ('AI/CreatureAI.h', 181, 'virtual bool IsEscorted() { return false; }'),
+              ('Spells/Spell.cpp', 555, 'class SpellEvent : public BasicEvent'),
+              ('Entities/Object/Object.h', 749, 'EventProcessor m_Events;'),
+              ('Scripting/ScriptDefines/WorldObjectScript.h', 142, 'virtual bool OnF14ShouldSuppressCreatureInitialOutForViewer('),
+              ('Entities/Player/PlayerUpdates.cpp', 1745, 'static bool IsF14CreatureSuppressedFromClientViewForInitialOut('),
+              ('Entities/Player/PlayerUpdates.cpp', 1872, 'IsF14CreatureSuppressedFromClientViewForInitialOut('),
+              ('Grids/Notifiers/GridNotifiers.cpp', 60, 'sScriptMgr->OnF14ViewerVisibilityPassBegin(&i_player, token);'),
+              ('Grids/Notifiers/GridNotifiers.cpp', 76, 'sScriptMgr->OnF14ViewerVisibilityPassEnd(&i_player, _f14PassToken);'),
+          ]
+          bad = 0
+          for name, line, text in anchors:
+              got = (base / name).read_text(encoding="utf-8").split("\n")[line - 1]
+              if text not in got:
+                  bad += 1
+                  print(f"FAIL {name}:{line}: expected {text!r}, got {got!r}")
+          unit_h = (base / "Entities/Unit/Unit.h").read_text(encoding="utf-8").split("\n")
+          between = [l.strip() for l in unit_h[671:2136] if l.strip() in ("public:", "protected:", "private:")]
+          if between:
+              bad += 1
+              print("FAIL: access specifier between Unit public: 671 and protected: 2137", between)
+          first = "\n".join((base / "Entities/Unit/Unit.cpp").read_text(encoding="utf-8").split("\n")[7995:8006])
+          if "m_Controlled" in first:
+              bad += 1
+              print("FAIL: GetFirstControlled now walks m_Controlled; revisit the owned-unit rule")
+          if "IsWithinF14MapUpdateInvocation" in (base / "Maps/Map.h").read_text(encoding="utf-8"):
+              bad += 1
+              print("FAIL: Core25 now has a map-frame API; revisit the ownership gap")
+          ep = Path("core/src/common/Utilities/EventProcessor.h").read_text(encoding="utf-8")
+          if "bool HasEvents() const" not in ep or "GetEvents" in ep:
+              bad += 1
+              print("FAIL: EventProcessor surface changed; revisit the in-flight spell gap")
+          if bad:
+              raise SystemExit(f"{bad} Core25 anchor(s) drifted")
+          print(f"PASS: {len(anchors)} Core25 anchors + public m_Controlled + GetFirstControlled charm/minion only "
+                "+ no map-frame API + no in-flight spell enumeration")
+          PY
