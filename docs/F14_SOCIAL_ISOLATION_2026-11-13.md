@@ -161,6 +161,7 @@ This social feature is unaffected: it never restricts Altbots.
       - All queue updates run in `BattlegroundMgr::Update` on the world thread, after the map phase (World.cpp:1270, after :1255).
       - The hook reads the candidate group's players, the groups already selected (both teams), and for an existing instance its players plus the groups already invited to it. All reads are live, through `ReadHuman`/`ReadBot`.
       - It refuses the candidate if it would meet the other kind. It never mutates the queue, the pools or the battleground.
+      - **Cross-faction battlegrounds:** the owner confirmed (13 Nov 2026) that the server doesn't use cross-faction battlegrounds. So Core's separate cross-faction queue (`BG_QUEUE_CFBG`) and any module-specific matcher are out of scope, and all battleground matching goes through this hook.
       - **Premade path:** Core checks the Alliance and Horde premades one after the other and only then adds both. So a premade candidate is also compared with the premade Core will pair it with (the first not-yet-invited group of the other premade queue, mirroring `CheckPremadeMatch`). Found in self-review after the first (d) delivery.
       - **Whoever is matched first decides; the other kind waits for another match.**
     - **Remaining notes:**
