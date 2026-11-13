@@ -246,3 +246,27 @@ test("symlink outside checkout and unreadable or missing evidence never becomes 
     assert.ok(item.risks.some(x => x.includes("Pin/workflow")));
     assert.ok(item.risks.some(x => x.includes("Register evidence")));
 }));
+
+test("missing promised header blob stays UNKNOWN without lazy fetching", () => fixture(root => {
+    const repo = path.join(root, "partial");
+    init(repo);
+    put(repo, "src/API.h", "int OldApi();\n");
+    commit(repo, "base");
+    command(repo, "tag", "base");
+    put(repo, "src/API.h", "int NewApi();\n");
+    commit(repo, "head");
+    const blob = command(repo, "rev-parse", "HEAD:src/API.h");
+    const objectFile = path.resolve(repo, ".git", "objects", blob.slice(0, 2), blob.slice(2));
+    const objectsDir = path.resolve(repo, ".git", "objects");
+    assert.ok(objectFile.startsWith(objectsDir + path.sep));
+    assert.ok(fs.existsSync(objectFile));
+    command(repo, "config", "remote.origin.url", path.join(root, "nonexistent-remote"));
+    command(repo, "config", "remote.origin.promisor", "true");
+    command(repo, "config", "remote.origin.partialclonefilter", "blob:none");
+    fs.unlinkSync(objectFile); // Disposable fixture simulates a missing promisor blob.
+    const item = preflight.inspectModule({name: "AzerothCore", path: "partial",
+        baseRef: "base", upstreamRef: "HEAD"}, root);
+    assert.equal(item.HEAD, command(repo, "rev-parse", "HEAD"));
+    assert.ok(item.publicChanges === preflight.UNKNOWN || item.changedPaths === preflight.UNKNOWN);
+    assert.ok(!fs.existsSync(objectFile), "inspection must not download or recreate a missing blob");
+}));
