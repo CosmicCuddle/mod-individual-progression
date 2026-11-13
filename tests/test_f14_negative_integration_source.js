@@ -81,4 +81,23 @@ check(witness.includes("PendingRestores() == 3") &&
       witness.includes("Corr::Result::Capacity") &&
       witness.includes("Corr::Result::RecycledIncarnation"),
       "missing negative debt/ambiguity/incarnation witness");
+function hasAdditionalNegativeRoutes(source) {
+    const handoff = source.split("ObserveProposedBatchFlush(nextKey, otherCreature")[1]?.split(
+        "CHECK(!witness.TrySend(old")[0];
+    return source.includes("ObserveLinkTransition(nextKey, otherCreature") &&
+           source.includes("ObserveProposedBatchFlush(nextKey, otherCreature") &&
+           handoff?.includes("CHECK(protocol.NeedsRestore(nextKey, otherCreature));") &&
+           source.includes("unknownEnd.ObservePassEnded(oldKey, 41)") &&
+           source.includes("Corr::Result::PassClosed") &&
+           source.includes("correlations.ObserveViewerRightsOrEraChanged(other.guid)") &&
+           source.includes("protocol.ObserveCreatureRetired(creature)") &&
+           source.includes("protocol.ObserveMapUnloaded(1, 2)") &&
+           source.includes("recycled.GlobalRestoreRequired()");
+}
+check(hasAdditionalNegativeRoutes(witness), "missing send/receipt, unknown-end or creature-retirement route");
+const receiptMutant = witness.replace(
+    "CHECK(protocol.NeedsRestore(nextKey, otherCreature));\n    CHECK(protocol.LedgerView().PendingRestores() == 2);",
+    "CHECK(protocol.CompleteRestoreOnlyWithClientProof(nextKey, otherCreature, 9002, true));\n    CHECK(protocol.LedgerView().PendingRestores() == 2);");
+check(receiptMutant !== witness && !hasAdditionalNegativeRoutes(receiptMutant),
+      "send-attempt-to-client-receipt mutation escaped");
 console.log("PASS F14 negative integration source: exact ephemeral evidence, raw-GUID debt, no completion");

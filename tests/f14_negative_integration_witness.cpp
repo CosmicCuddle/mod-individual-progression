@@ -151,7 +151,23 @@ int main()
     CHECK(passes.IsActive(60, next) && correlations.Candidates() == 1);
     CHECK(witness.TrySend(next, 60, Send(nextKey, otherCreature, 60), 9002).Matched());
     CHECK(protocol.LedgerView().PendingRestores() == 2); // match never clears debt
+    // A Core send attempt, server relink and even the proposed batch handoff
+    // are still not a separately verified client restoration receipt.
+    Restore::TransitionFacts const linked{11, 9002, 1, 2};
+    CHECK(protocol.ObserveLinkTransition(nextKey, otherCreature, 9002, true,
+          Restore::VisibilityPath::Batched, linked) == Restore::Outcome::RestoreServerEvidence);
+    CHECK(protocol.ObserveProposedBatchFlush(nextKey, otherCreature, 9002, true) ==
+          Restore::Outcome::BatchFlushObserved);
+    CHECK(protocol.NeedsRestore(nextKey, otherCreature));
+    CHECK(protocol.LedgerView().PendingRestores() == 2);
     CHECK(!witness.TrySend(old, 50, Send(oldKey, creature, 50), 9001).Matched());
+
+    CorrTable unknownEnd;
+    CHECK(unknownEnd.ObservePassEnded(oldKey, 41) == Corr::Result::PassAccepted);
+    CHECK(unknownEnd.Nominate(oldKey, creature, 9001, Corr::Direction::Create,
+                              41, Nomination(protocol, oldKey, creature, 9001)) ==
+          Corr::Result::PassClosed);
+    CHECK(protocol.LedgerView().PendingRestores() == 2);
 
     // Replayed and nested passes cannot upgrade even a nominated send.
     CHECK(correlations.Nominate(nextKey, otherCreature, 9002, Corr::Direction::Create,
@@ -181,6 +197,21 @@ int main()
                                 71, Nomination(protocol, otherKey, creature, 9003)) ==
           Corr::Result::RecycledIncarnation);
     CHECK(passes.IsActive(70, other));
+    correlations.ObserveViewerRightsOrEraChanged(other.guid);
+    CHECK(correlations.Candidates() == 0);
+    protocol.ObserveCreatureRetired(creature);
+    protocol.ObserveMapUnloaded(1, 2);
+    CHECK(protocol.NeedsRestore(oldKey, creature));
+    CHECK(protocol.NeedsRestore(otherKey, creature));
+    CHECK(protocol.LedgerView().PendingRestores() == 3);
+
+    Protocol recycled;
+    CHECK(SeedPriorHidden(recycled, oldKey, creature, 9001));
+    CHECK(recycled.ObserveF14SuppressionDecision(
+        oldKey, creature, 9999, true, Restore::VisibilityPath::Direct,
+        PriorFacts(oldKey, creature, 9999)) != Restore::Outcome::SuppressionRecorded);
+    CHECK(recycled.GlobalRestoreRequired());
+    CHECK(recycled.NeedsRestore(oldKey, creature));
 
     // E1 candidate capacity poisons only correlation; no ledger obligation
     // becomes complete or globally cleared when ephemeral capacity fails.
