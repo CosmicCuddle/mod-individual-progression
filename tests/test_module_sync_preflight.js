@@ -115,3 +115,41 @@ test("unresolved refs are UNKNOWN and mutating Git verbs are rejected", () => fi
     assert.equal(missingFiles.pins, preflight.UNKNOWN);
     assert.throws(() => preflight.git(repo, "fetch", "origin"), /inspection commands only/);
 }));
+
+test("malformed manifest fails visibly before repository inspection", () => fixture(root => {
+    const manifest = path.join(root, "bad.json");
+    const cli = () => cp.spawnSync(process.execPath,
+        [path.join(__dirname, "module_sync_preflight.js"), "--manifest", manifest, "--format", "json"],
+        {encoding: "utf8"});
+    for (const data of [
+        {}, {modules: {}}, {modules: [null]},
+        {modules: [{name: "AzerothCore", baseRef: "--upload-pack=bad"}]},
+        {modules: [{name: "AzerothCore", customPaths: "src/*"}]},
+        {modules: [{name: "AzerothCore"}, {name: "AzerothCore"}]},
+        {modules: [{name: "AzerothCore", path: "same"},
+                   {name: "Playerbots", path: "same"}]},
+        {modules: [{name: "AzerothCore", expectedHead: "short"}]}
+    ]) {
+        fs.writeFileSync(manifest, JSON.stringify(data));
+        const result = cli();
+        assert.equal(result.status, 2);
+        assert.match(result.stderr, /ERROR preflight input:/);
+        assert.equal(result.stdout, "");
+    }
+}));
+
+test("contradictory identity and subdirectory paths never imply a verified checkout", () => fixture(root => {
+    const repo = path.join(root, "core");
+    init(repo);
+    put(repo, "src/API.h", "int Api();\n");
+    commit(repo, "baseline");
+    const wrong = preflight.inspectModule({name: "AzerothCore", path: "core",
+        expectedHead: "a".repeat(40), expectedBranch: "wrong"}, root);
+    assert.equal(wrong.contradictions.length, 2);
+    assert.ok(wrong.risks.some(x => x.includes("contradicts")));
+    const nested = preflight.inspectModule({name: "AzerothCore", path: "core/src",
+        baseRef: "HEAD"}, root);
+    assert.deepEqual(nested.contradictions, ["Supplied path is not the repository root."]);
+    assert.equal(nested.changedPaths, preflight.UNKNOWN);
+    assert.equal(nested.HEAD, preflight.UNKNOWN);
+}));

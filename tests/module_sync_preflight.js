@@ -19,6 +19,36 @@ function validRef(ref) {
     return typeof ref === "string" && /^[A-Za-z0-9_./-]+$/.test(ref) &&
            !ref.startsWith("-") && !ref.includes("..") && !ref.endsWith("/");
 }
+function validateManifest(manifest, dir) {
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) ||
+        !Array.isArray(manifest.modules))
+        throw new TypeError("manifest must contain a modules array");
+    const names = new Set(), paths = new Set();
+    for (const [index, item] of manifest.modules.entries()) {
+        if (!item || typeof item !== "object" || Array.isArray(item) ||
+            typeof item.name !== "string" || !item.name.trim())
+            throw new TypeError(`modules[${index}] needs a nonempty name`);
+        if (names.has(item.name)) throw new TypeError(`duplicate module name: ${item.name}`);
+        names.add(item.name);
+        if (item.path != null) {
+            if (typeof item.path !== "string" || !item.path.trim() || item.path.includes("\0"))
+                throw new TypeError(`modules[${index}].path must be a nonempty local path`);
+            const resolved = path.resolve(dir, item.path);
+            if (paths.has(resolved)) throw new TypeError(`duplicate repository path in modules[${index}]`);
+            paths.add(resolved);
+        }
+        for (const key of ["baseRef", "upstreamRef", "expectedBranch"])
+            if (item[key] != null && !validRef(item[key]))
+                throw new TypeError(`modules[${index}].${key} is not a valid local ref`);
+        if (item.expectedHead != null &&
+            (typeof item.expectedHead !== "string" || !/^[0-9a-f]{40}$/i.test(item.expectedHead)))
+            throw new TypeError(`modules[${index}].expectedHead must be a 40-digit SHA`);
+        for (const key of ["customPaths", "registerPaths", "pinFiles"])
+            if (item[key] != null && (!Array.isArray(item[key]) ||
+                item[key].some(x => typeof x !== "string" || !x || x.includes("\0"))))
+                throw new TypeError(`modules[${index}].${key} must be an array of nonempty paths`);
+    }
+}
 function localPath(base, relative) {
     return typeof relative === "string" && relative ? path.resolve(base, relative) : null;
 }
@@ -131,6 +161,8 @@ function risksAndGates(r) {
                                        : `Verify installed ${kind} version and compatibility offline.`);
         }
     if (r.path === UNKNOWN) risks.push("Repository path was not supplied or is unavailable.");
+    if (r.contradictions.length)
+        risks.push("Supplied repository identity metadata contradicts the local checkout.");
     if (r.base === UNKNOWN || r.upstream === UNKNOWN)
         risks.push("Missing local refs prevent a complete divergence/change comparison.");
     gates.push("Run relevant native tests, full Worldserver link and actual gameplay before release.");
@@ -143,13 +175,25 @@ function inspectModule(spec, manifestDir) {
                upstreamChangedPaths: UNKNOWN, likelyConflictPaths: UNKNOWN,
                publicChanges: UNKNOWN, upstreamPublicChanges: UNKNOWN,
                customOverlap: UNKNOWN, dependencies: UNKNOWN,
-               registerHits: UNKNOWN, pins: UNKNOWN};
+               registerHits: UNKNOWN, pins: UNKNOWN,
+               expectedHead: spec.expectedHead || UNKNOWN,
+               expectedBranch: spec.expectedBranch || UNKNOWN, contradictions: []};
     const repo = localPath(manifestDir, spec.path);
     if (!repo || !fs.existsSync(repo) || git(repo, "rev-parse", "--is-inside-work-tree") !== "true")
         return {...r, ...risksAndGates(r)};
     r.path = repo;
+    const top = git(repo, "rev-parse", "--show-toplevel");
+    if (!top || path.resolve(top) !== repo) {
+        r.contradictions.push("Supplied path is not the repository root.");
+        return {...r, ...risksAndGates(r)};
+    }
     r.branch = git(repo, "symbolic-ref", "--short", "-q", "HEAD") || "DETACHED";
     r.HEAD = git(repo, "rev-parse", "HEAD") || UNKNOWN;
+    if (r.expectedHead !== UNKNOWN && r.HEAD !== UNKNOWN &&
+        r.expectedHead.toLowerCase() !== r.HEAD.toLowerCase())
+        r.contradictions.push("Expected HEAD differs from local HEAD.");
+    if (r.expectedBranch !== UNKNOWN && r.branch !== UNKNOWN && r.expectedBranch !== r.branch)
+        r.contradictions.push("Expected branch differs from local branch.");
     const status = git(repo, "status", "--porcelain=v1", "--untracked-files=all");
     if (status !== null) {
         const lines = status ? status.split("\n") : [];
@@ -189,9 +233,10 @@ function inspectModule(spec, manifestDir) {
 }
 function preflight(manifestFile) {
     const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
-    const supplied = manifest.modules || [];
-    const names = new Set(supplied.map(x => x.name));
     const dir = path.dirname(path.resolve(manifestFile));
+    validateManifest(manifest, dir);
+    const supplied = manifest.modules;
+    const names = new Set(supplied.map(x => x.name));
     return {mode: "read-only local", modules: [
         ...supplied.map(x => inspectModule(x, dir)),
         ...defaultNames.filter(x => !names.has(x)).map(name => inspectModule({name}, dir))]};
@@ -202,7 +247,9 @@ function markdown(report) {
     for (const m of report.modules) {
         lines.push(`## ${m.name}`, "", `Path: ${m.path}  Branch: ${m.branch}  HEAD: ${m.HEAD}`,
                    `Base: ${m.base}  Upstream: ${m.upstream}`,
-                   `Dirty: ${m.dirty}  Ahead/behind: ${JSON.stringify(m.aheadBehind)}`);
+                   `Dirty: ${m.dirty}  Ahead/behind: ${JSON.stringify(m.aheadBehind)}`,
+                   `Expected HEAD: ${m.expectedHead}  Expected branch: ${m.expectedBranch}`,
+                   `Contradictions: ${JSON.stringify(m.contradictions)}`);
         for (const key of ["dirtyPaths", "untrackedPaths", "changedPaths", "upstreamChangedPaths",
                            "likelyConflictPaths", "publicChanges", "upstreamPublicChanges",
                            "customOverlap", "dependencies",
@@ -218,10 +265,18 @@ if (require.main === module) {
     if (!args.includes("--manifest") || !flag("--manifest")) {
         process.stderr.write("Usage: node module_sync_preflight.js --manifest path [--format json|markdown]\n");
         process.exitCode = 2;
+    } else if (args.includes("--format") && !["json", "markdown"].includes(flag("--format"))) {
+        process.stderr.write("ERROR preflight input: --format must be json or markdown\n");
+        process.exitCode = 2;
     } else {
-        const report = preflight(path.resolve(flag("--manifest")));
-        process.stdout.write((flag("--format") === "json" ? JSON.stringify(report, null, 2)
-                                                         : markdown(report)) + "\n");
+        try {
+            const report = preflight(path.resolve(flag("--manifest")));
+            process.stdout.write((flag("--format") === "json" ? JSON.stringify(report, null, 2)
+                                                             : markdown(report)) + "\n");
+        } catch (error) {
+            process.stderr.write(`ERROR preflight input: ${error.message}\n`);
+            process.exitCode = 2;
+        }
     }
 }
-module.exports = {UNKNOWN, git, inspectModule, preflight};
+module.exports = {UNKNOWN, git, inspectModule, preflight, validateManifest};
