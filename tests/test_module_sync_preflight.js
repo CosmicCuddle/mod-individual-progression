@@ -48,6 +48,7 @@ test("dirty divergent refs, API/macro, SQL/config/DBC/client, custom overlap and
     command(repo, "switch", "-c", "upstream");
     put(repo, "src/Upstream.h", "#define UPSTREAM_API 2\n");
     put(repo, "src/PublicAPI.h", "#define F14_API_VERSION 9\nint UpstreamApi();\n");
+    put(repo, "data/sql/world/upstream.sql", "-- upstream fixture only\n");
     commit(repo, "upstream change");
     command(repo, "switch", "main");
     put(repo, "src/PublicAPI.h", "#define F14_API_VERSION 2\nint NewApi();\n");
@@ -83,6 +84,7 @@ test("dirty divergent refs, API/macro, SQL/config/DBC/client, custom overlap and
     assert.ok(item.upstreamPublicChanges.some(x => x.kind === "macro"));
     assert.ok(item.upstreamPublicChanges.some(x => x.path === "src/Upstream.h"));
     assert.ok(item.dependencies.SQL.includes("data/sql/world/change.sql"));
+    assert.ok(item.upstreamDependencies.SQL.includes("data/sql/world/upstream.sql"));
     assert.ok(item.dependencies.config.includes("conf/module.conf.dist"));
     assert.ok(item.dependencies.DBC.includes("data/dbc/Test.dbc"));
     assert.ok(item.dependencies.client.includes("client/patch.mpq"));
@@ -113,6 +115,13 @@ test("unresolved refs are UNKNOWN and mutating Git verbs are rejected", () => fi
     assert.deepEqual(missingFiles.changedPaths, []);
     assert.equal(missingFiles.registerHits, preflight.UNKNOWN);
     assert.equal(missingFiles.pins, preflight.UNKNOWN);
+    put(repo, "docs/present.md", "src/Present.h\n");
+    put(repo, ".github/workflows/present.yml", `# ${"b".repeat(40)}\n`);
+    const partial = preflight.inspectModule({name: "AzerothCore", path: "core",
+        baseRef: "HEAD", registerPaths: ["docs/present.md", "docs/missing.md"],
+        pinFiles: [".github/workflows/present.yml", ".github/workflows/missing.yml"]}, root);
+    assert.equal(partial.registerHits, preflight.UNKNOWN);
+    assert.equal(partial.pins, preflight.UNKNOWN);
     assert.throws(() => preflight.git(repo, "fetch", "origin"), /inspection commands only/);
 }));
 

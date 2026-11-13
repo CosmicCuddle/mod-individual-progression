@@ -103,33 +103,29 @@ function publicChanges(repo, base, paths, target = "HEAD") {
 function registerHits(repo, paths, files) {
     if (paths === UNKNOWN || !files.length) return UNKNOWN;
     const hits = [];
-    let readable = 0;
     for (const file of files) {
         const target = within(repo, file);
-        if (!target || !fs.existsSync(target) || !fs.statSync(target).isFile()) continue;
-        ++readable;
+        if (!target || !fs.existsSync(target) || !fs.statSync(target).isFile()) return UNKNOWN;
         const text = fs.readFileSync(target, "utf8");
         for (const changed of paths) if (text.includes(changed)) hits.push({register: file, path: changed});
     }
-    return readable ? hits : UNKNOWN;
+    return hits;
 }
 function pins(repo, supplied) {
     const files = new Set(supplied);
-    const workflows = path.join(repo, ".github", "workflows");
-    if (fs.existsSync(workflows))
+    const workflows = within(repo, ".github/workflows");
+    if (workflows && fs.existsSync(workflows) && fs.statSync(workflows).isDirectory())
         for (const name of fs.readdirSync(workflows))
             if (/\.ya?ml$/i.test(name)) files.add(`.github/workflows/${name}`);
     if (!files.size) return UNKNOWN;
     const result = [];
-    let readable = 0;
     for (const file of [...files].sort()) {
         const target = within(repo, file);
-        if (!target || !fs.existsSync(target) || !fs.statSync(target).isFile()) continue;
-        ++readable;
+        if (!target || !fs.existsSync(target) || !fs.statSync(target).isFile()) return UNKNOWN;
         for (const sha of new Set(fs.readFileSync(target, "utf8").match(/\b[0-9a-f]{40}\b/gi) || []))
             result.push({file, sha: sha.toLowerCase()});
     }
-    return readable ? result : UNKNOWN;
+    return result;
 }
 function risksAndGates(r) {
     const risks = [], gates = [];
@@ -154,9 +150,10 @@ function risksAndGates(r) {
         risks.push("Changed public headers, APIs or macros may affect the installed module tuple.");
         gates.push("Compile/link the pinned Core and dependent modules together.");
     }
-    if (r.dependencies !== UNKNOWN)
-        for (const [kind, paths] of Object.entries(r.dependencies)) if (paths.length) {
-            risks.push(`Changed ${kind} dependency paths need separate review.`);
+    for (const [side, group] of [["Local", r.dependencies], ["Upstream", r.upstreamDependencies]])
+        if (group !== UNKNOWN)
+            for (const [kind, paths] of Object.entries(group)) if (paths.length) {
+            risks.push(`${side} changed ${kind} dependency paths need separate review.`);
             gates.push(kind === "SQL" ? "Review migration impact and tested backup/rollback before live data work."
                                        : `Verify installed ${kind} version and compatibility offline.`);
         }
@@ -174,7 +171,7 @@ function inspectModule(spec, manifestDir) {
                untrackedPaths: UNKNOWN, aheadBehind: UNKNOWN, changedPaths: UNKNOWN,
                upstreamChangedPaths: UNKNOWN, likelyConflictPaths: UNKNOWN,
                publicChanges: UNKNOWN, upstreamPublicChanges: UNKNOWN,
-               customOverlap: UNKNOWN, dependencies: UNKNOWN,
+               customOverlap: UNKNOWN, dependencies: UNKNOWN, upstreamDependencies: UNKNOWN,
                registerHits: UNKNOWN, pins: UNKNOWN,
                expectedHead: spec.expectedHead || UNKNOWN,
                expectedBranch: spec.expectedBranch || UNKNOWN, contradictions: []};
@@ -224,6 +221,7 @@ function inspectModule(spec, manifestDir) {
         [...new Set([...r.changedPaths, ...(r.upstreamChangedPaths === UNKNOWN ? [] : r.upstreamChangedPaths)]
             .filter(p => (spec.customPaths || []).some(pattern => globMatch(p, pattern))))].sort();
     r.dependencies = dependencies(r.changedPaths);
+    r.upstreamDependencies = dependencies(r.upstreamChangedPaths);
     r.registerHits = registerHits(repo,
         r.changedPaths === UNKNOWN ? UNKNOWN :
             [...new Set([...r.changedPaths, ...(r.upstreamChangedPaths === UNKNOWN ? [] : r.upstreamChangedPaths)])],
@@ -252,7 +250,7 @@ function markdown(report) {
                    `Contradictions: ${JSON.stringify(m.contradictions)}`);
         for (const key of ["dirtyPaths", "untrackedPaths", "changedPaths", "upstreamChangedPaths",
                            "likelyConflictPaths", "publicChanges", "upstreamPublicChanges",
-                           "customOverlap", "dependencies",
+                           "customOverlap", "dependencies", "upstreamDependencies",
                            "registerHits", "pins", "risks", "testGates"])
             lines.push(`- ${key}: ${JSON.stringify(m[key])}`);
         lines.push("");
