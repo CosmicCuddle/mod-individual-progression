@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 
 namespace C = IndividualProgressionF14GroupEraConsumer;
 using Era = C::Era;
@@ -50,6 +51,8 @@ int main()
     elf.identity.leaderRevision = 1;
     CHECK(tracker.ObserveGrouped(elf).temporary);
     CHECK(tracker.Revoke(old, true, 10, 15, C::Departure::Relog).status == C::Status::Stale);
+    CHECK(tracker.Revoke(old, false, 10, 15, C::Departure::SessionInvalidation).status ==
+          C::Status::Stale);
     CHECK(tracker.Current(elf).temporary);
     CHECK(tracker.ObserveGrouped(C::Input{true, old, 10, 15, 8}).status == C::Status::Stale);
     CHECK(tracker.Current(elf).temporary);
@@ -116,6 +119,28 @@ int main()
     CHECK(one.Current(human).temporary);
     CHECK(one.Current(elf).effectiveEra == Era::Wrath);
     CHECK(!one.Current(elf).temporary);
+    CHECK(one.Revoke(human.identity, true, human.race, 8, C::Departure::Leave).effectiveEra ==
+          Era::BurningCrusade); // Exact caller-supplied earned state, not cached 14.
+    C::Input loweredEarned = human;
+    loweredEarned.earnedStage = 8;
+    CHECK(!one.Current(loweredEarned).temporary);
+    CHECK(one.Current(loweredEarned).effectiveEra == Era::BurningCrusade);
+    CHECK(one.ObserveGrouped(elf).status == C::Status::Capacity); // Tombstone not evicted.
+    ++human.identity.membershipGeneration;
+    CHECK(one.ObserveGrouped(human).temporary); // Existing bot can advance in its slot.
+
+    // Numeric wrap to an older nonzero generation is refused, not accepted
+    // as a new session. Equal-version ABA needs a caller non-reuse guarantee.
+    C::Tracker<1> wrap;
+    C::Input nearWrap = human;
+    nearWrap.identity.sessionEpoch = std::numeric_limits<std::uint64_t>::max();
+    CHECK(wrap.ObserveGrouped(nearWrap).temporary);
+    C::Input wrapped = nearWrap;
+    wrapped.identity.sessionEpoch = 1;
+    CHECK(wrap.ObserveGrouped(wrapped).status == C::Status::Stale);
+    CHECK(wrap.Revoke(wrapped.identity, false, wrapped.race, wrapped.earnedStage,
+                      C::Departure::Relog).status == C::Status::Stale);
+    CHECK(wrap.Current(nearWrap).temporary);
 
     std::size_t combinations = 0;
     for (std::uint8_t race : std::array<std::uint8_t, 10>{1, 2, 3, 4, 5, 6, 7, 8, 10, 11})
