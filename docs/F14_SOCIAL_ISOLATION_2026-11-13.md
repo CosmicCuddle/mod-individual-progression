@@ -120,7 +120,14 @@ This social feature is unaffected: it never restricts Altbots.
 - The reply text is behind a small mutex, because `.reload` can rewrite it.
 - The /who hook reads only the viewer's own state and the verified cache, by GUID.
 
-## Gaps (no Core change requested)
+## Gaps and cross-repository follow-ups
+- **Bot-started invite, accept, trade and battleground port (Playerbots, thread safety):** Playerbots calls these thread-unsafe Core handlers directly from bot AI.
+  - **Status:** CS01 accepted the dispatch design (6866003156) as an isolated Playerbots candidate owned by CS01/Codex: queue the packet, or use a world-thread `GroupAcceptOperation` for accept. See `docs/F14_SOCIAL_ISOLATION_PLAYERBOTS_DISPATCH_DESIGN_2026-11-13.md`.
+  - **IP's side:** IP no longer does a global name lookup off the world thread.
+- **A player adopting a RandomBot as their own bot** (`.playerbots bot add|login|addaccount`, then `GroupInviteOperation` → direct `AddMember`):
+  - **The route:** at Playerbots `405f8119` the RandomBot check is commented out, so the bot could join the player's group with no invite or accept check. The other surfaces would then still block that pair.
+  - **Owner decision (13 Nov 2026): option B.** Playerbots refuses adding any RandomBot character as a player's bot, generally and not by race.
+  - **Ownership and status:** the Playerbots lane owns it. Nothing changes in IP.
 - **Guild invite: needs the owner-approved Core hook.**
   - Core25 has no "can invite" check, so `tests/core_patches/apply_f14_guild_invite_hook.py` adds a boolean player hook `OnPlayerCanGuildInvite(inviter, invitee)`. The enum entry is appended just before `PLAYERHOOK_END`, so nothing is renumbered.
   - `Guild::HandleInviteMember` calls it after Core's own checks and before the invite is sent; a refusal is silent, like Core's ignored-player case.

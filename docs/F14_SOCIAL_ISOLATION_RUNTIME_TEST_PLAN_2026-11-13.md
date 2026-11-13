@@ -79,6 +79,15 @@ Expected results assume the option is ON. Each case lists the steps and then the
 - **Map A→B→A, group A→B→A and leader A→B→A** while grouped: the temporary era is never read from a stale context (needs the eager map, membership and leader generation issuers).
 - **Unknown classification:** a member with no account match and no verified identity stays outside every population.
 
+## Cases that need the Playerbots candidate (CS01/Codex lane)
+| ID | Steps | Expected |
+|---|---|---|
+| PBD1 | with map worker threads > 0: bots invite, accept, trade and accept battleground invites, with humans and with each other | as before, at most one world tick later; no crash or race (ideally a ThreadSanitizer build) |
+| PBD2 | the same with map worker threads = 0 | as before |
+| PBD3 | a bot accepts a human's invite | the follow-up still runs (master set, strategies, summon) through `GroupAcceptOperation` |
+| PBB1 | `.playerbots bot add <offline RandomBot character>` | refused with a clear message (owner option B) |
+| PBB2 | `.playerbots bot add <own alt>` / linked-account alt / `addclass` | accepted, unchanged |
+
 ## Pass criteria and evidence
 - **Pass criteria:**
   - every expected result above is met;
