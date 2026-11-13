@@ -106,10 +106,11 @@ Two identity notions are in use, and they are **deliberately different**. A sour
   - exact one-line login OR change, additive-only edits, existing hooks unchanged, every other file byte-identical;
   - the two identity sources: restriction uses only the verified cache, and the existing group-sync write population is every non-normal account.
 - **Local Core25 header syntax check** (`-fsyntax-only`) of the new script and both modified IP sources. Not a link.
-- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 22 lines:
+- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 33 lines:
   - the four hook declarations and enums, plus `BuildChatPacket`;
   - Core's wrong-faction checks before the whisper (ChatHandler.cpp:428 → :448) and trade (TradeHandler.cpp:830 → :842) hooks;
-  - the /who exclusion (MiscHandler.cpp:401) before `matchCount++` (:407), so the visible list and count stay consistent.
+  - the /who exclusion (MiscHandler.cpp:401) before `matchCount++` (:407), so the visible list and count stay consistent;
+  - for the group-accept member scan: the accept hook call, `Group::GetMemberSlots` and `MemberSlot::guid`, `ObjectAccessor::FindPlayer` returning in-world players only, and the four social opcodes being `PROCESS_THREADUNSAFE` (with `MapSessionFilter` refusing them), so they run on the world thread.
 
 ## Evidence levels and rollback
 Source and model proof, plus a local header syntax check. No Worldserver link, gameplay or client test has been done.

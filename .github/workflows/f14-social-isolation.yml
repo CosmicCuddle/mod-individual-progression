@@ -106,6 +106,18 @@ jobs:
               ("Scripting/ScriptDefines/WorldObjectScript.h", 62, "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY,"),
               ("Scripting/ScriptDefines/WorldObjectScript.h", 159, "virtual bool OnF14ShouldExcludeWhoEntryForViewer("),
               ("Chat/Chat.h", 48, "static std::size_t BuildChatPacket(WorldPacket& data, ChatMsg chatType, Language language, WorldObject const* sender, WorldObject const* receiver"),
+              # Group-accept member scan (S1): API, in-world lookup and thread context.
+              ("Handlers/GroupHandler.cpp", 257, "if (!sScriptMgr->OnPlayerCanGroupAccept(GetPlayer(), group))"),
+              ("Groups/Group.h", 183, "ObjectGuid  guid;"),
+              ("Groups/Group.h", 252, "MemberSlotList const& GetMemberSlots() const { return m_memberSlots; }"),
+              ("Globals/ObjectAccessor.cpp", 269, "Player* ObjectAccessor::FindPlayer(ObjectGuid const guid)"),
+              ("Globals/ObjectAccessor.cpp", 272, "return player && player->IsInWorld() ? player : nullptr;"),
+              ("Server/Protocol/Opcodes.cpp", 241, "PROCESS_THREADUNSAFE,   &WorldSession::HandleGroupInviteOpcode"),
+              ("Server/Protocol/Opcodes.cpp", 245, "PROCESS_THREADUNSAFE,   &WorldSession::HandleGroupAcceptOpcode"),
+              ("Server/Protocol/Opcodes.cpp", 280, "PROCESS_THREADUNSAFE,   &WorldSession::HandleMessagechatOpcode"),
+              ("Server/Protocol/Opcodes.cpp", 409, "PROCESS_THREADUNSAFE,   &WorldSession::HandleInitiateTradeOpcode"),
+              ("Server/WorldSession.cpp", 76, "if (opHandle->ProcessingPlace == PROCESS_THREADUNSAFE)"),
+              ("Server/WorldSession.cpp", 77, "return false;"),
           ]
           bad = 0
           for name, line, text in anchors:
@@ -115,5 +127,5 @@ jobs:
                   print(f"FAIL {name}:{line}: expected {text!r}, got {got!r}")
           if bad:
               raise SystemExit(f"{bad} Core25 social anchor(s) drifted")
-          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount")
+          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only")
           PY
