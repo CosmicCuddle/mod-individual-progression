@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace P = IndividualProgressionF14SocialIsolationPolicy;
 
@@ -284,6 +285,100 @@ namespace
         CHECK(seen[0][0] && seen[3][3]);
     }
 
+    bool ValidUtf8(std::string const& t)
+    {
+        std::size_t i = 0;
+        while (i < t.size())
+        {
+            unsigned char const c = static_cast<unsigned char>(t[i]);
+            std::size_t n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+            if (!n || i + n > t.size())
+                return false;
+            for (std::size_t k = 1; k < n; ++k)
+                if ((static_cast<unsigned char>(t[i + k]) & 0xC0) != 0x80)
+                    return false;
+            i += n;
+        }
+        return true;
+    }
+
+    bool OneLineNoControl(std::string const& t)
+    {
+        for (char c : t)
+        {
+            unsigned char const u = static_cast<unsigned char>(c);
+            if (u < 0x20 || u == 0x7F)
+                return false;
+        }
+        return true;
+    }
+
+    void TestReplyNormalization()
+    {
+        // Default stays exactly as configured.
+        CHECK(P::NormalizeReply(P::DefaultReply) == std::string(P::DefaultReply));
+        // Empty / whitespace / control-only => decline silently.
+        CHECK(P::NormalizeReply("").empty());
+        CHECK(P::NormalizeReply("   ").empty());
+        CHECK(P::NormalizeReply("\r\n\t").empty());
+        CHECK(P::NormalizeReply(std::string("\0\0", 2)).empty());
+        // CR/LF/NUL/tab/DEL/other C0 become spaces; one line; trimmed.
+        CHECK(P::NormalizeReply("Line one\r\nLine two") == "Line one  Line two");
+        CHECK(P::NormalizeReply(std::string("a\0b", 3)) == "a b");
+        CHECK(P::NormalizeReply("\n  hello\t") == "hello");
+        CHECK(P::NormalizeReply("x\x7Fy\x1Bz") == "x y z");
+        for (int c = 0; c < 256; ++c)
+        {
+            std::string const out = P::NormalizeReply(std::string("a") + static_cast<char>(c) + "b");
+            CHECK(OneLineNoControl(out));
+            CHECK(out.size() == 3);
+        }
+        // Oversized ASCII is cut to exactly the cap.
+        std::string const big(5000, 'w');
+        CHECK(P::NormalizeReply(big).size() == P::MaxReplyBytes);
+        CHECK(P::NormalizeReply(std::string(P::MaxReplyBytes, 'w')).size() == P::MaxReplyBytes);
+        CHECK(P::NormalizeReply(std::string(P::MaxReplyBytes + 1, 'w')).size() == P::MaxReplyBytes);
+        // Multi-byte text is never cut mid-character, at every offset.
+        char const* glyphs[] = {"\xC3\xA9", "\xE2\x82\xAC", "\xF0\x9F\x8C\x99"}; // 2, 3, 4 bytes
+        for (char const* g : glyphs)
+            for (std::size_t pad = 0; pad < 4; ++pad)
+            {
+                std::string t(pad, 'p');
+                while (t.size() < 1200)
+                    t += g;
+                std::string const out = P::NormalizeReply(t);
+                CHECK(out.size() <= P::MaxReplyBytes);
+                CHECK(out.size() + 4 > P::MaxReplyBytes);
+                CHECK(ValidUtf8(out));
+                CHECK(t.compare(0, out.size(), out) == 0); // a true prefix
+            }
+        // Randomised: always one line, bounded, valid UTF-8 for UTF-8 input.
+        std::uint64_t s = 0x2545F4914F6CDD1DULL;
+        for (int i = 0; i < 20000; ++i)
+        {
+            std::string t;
+            int const len = static_cast<int>(s % 900);
+            for (int k = 0; k < len; ++k)
+            {
+                s ^= s << 13; s ^= s >> 7; s ^= s << 17;
+                switch (s % 6)
+                {
+                    case 0: t += '\n'; break;
+                    case 1: t += '\r'; break;
+                    case 2: t.push_back('\0'); break;
+                    case 3: t += "\xE2\x82\xAC"; break;
+                    default: t += static_cast<char>('a' + s % 26); break;
+                }
+            }
+            s ^= s << 13; s ^= s >> 7; s ^= s << 17;
+            std::string const out = P::NormalizeReply(t);
+            CHECK(out.size() <= P::MaxReplyBytes);
+            CHECK(OneLineNoControl(out));
+            CHECK(ValidUtf8(out));
+            CHECK(out.empty() || (out.front() != ' ' && out.back() != ' '));
+        }
+    }
+
     void TestDefaultReplyIsInCharacter()
     {
         char const* text = P::DefaultReply;
@@ -308,6 +403,7 @@ int main()
     TestReplyLimiter();
     TestLimiterSpacingRandomised();
     TestDefaultReplyIsInCharacter();
+    TestReplyNormalization();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -116,6 +116,11 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertIn("ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, LANG_UNIVERSAL, bot, human, text);", reply)
         self.assertIn("human->SendDirectMessage(&data);", reply)
         self.assertLess(reply.index("MayReply("), reply.index("BuildChatPacket("))
+        # Operator text is normalized (one line, bounded) right before the sink.
+        self.assertIn("Policy::NormalizeReply(sIndividualProgression->GetF14SocialIsolationReply())", reply)
+        self.assertLess(reply.index("NormalizeReply("), reply.index("BuildChatPacket("))
+        self.assertLess(reply.index("if (text.empty())"), reply.index("BuildChatPacket("))
+        self.assertIn("constexpr std::size_t MaxReplyBytes = 512;", read(POLICY))
         self.assertIn("std::lock_guard<std::mutex> lock(ReplyLock());", reply)
 
     def test_stage_mirror_matches_ip(self):

@@ -121,7 +121,8 @@ namespace
         }
         if (!mayReply)
             return;
-        std::string const text = sIndividualProgression->GetF14SocialIsolationReply();
+        // One line, bounded length; empty means decline silently.
+        std::string const text = Policy::NormalizeReply(sIndividualProgression->GetF14SocialIsolationReply());
         if (text.empty())
             return;
         WorldPacket data;

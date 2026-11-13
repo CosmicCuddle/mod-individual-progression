@@ -22,6 +22,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace IndividualProgressionF14SocialIsolationPolicy
 {
@@ -35,6 +36,41 @@ namespace IndividualProgressionF14SocialIsolationPolicy
     constexpr std::uint32_t DefaultReplyCooldownSeconds = 60;
     constexpr char const* DefaultReply =
         "You are not yet ready for the road I walk. Return when your journey has carried you into a later age.";
+
+    // Module-level safety cap for the configured reply (not a claimed Core
+    // protocol limit): one line, at most this many UTF-8 bytes.
+    constexpr std::size_t MaxReplyBytes = 512;
+
+    // Make an operator-configured reply safe to send: every control byte
+    // (CR, LF, NUL, tab, other C0 and DEL) becomes a space, surrounding spaces
+    // are trimmed, and the text is cut to MaxReplyBytes without splitting a
+    // UTF-8 character. An empty result means "decline silently".
+    inline std::string NormalizeReply(std::string const& raw)
+    {
+        std::string text;
+        text.reserve(raw.size() < MaxReplyBytes ? raw.size() : MaxReplyBytes);
+        for (char c : raw)
+        {
+            unsigned char const u = static_cast<unsigned char>(c);
+            text.push_back(u < 0x20 || u == 0x7F ? ' ' : c);
+        }
+        std::size_t const first = text.find_first_not_of(' ');
+        if (first == std::string::npos)
+            return std::string();
+        text.erase(0, first);
+        if (text.size() > MaxReplyBytes)
+        {
+            std::size_t cut = MaxReplyBytes;
+            // Never end inside a multi-byte sequence: back up over
+            // continuation bytes, then drop the partial lead byte.
+            while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80)
+                --cut;
+            text.resize(cut);
+        }
+        std::size_t const last = text.find_last_not_of(' ');
+        text.resize(last == std::string::npos ? 0 : last + 1);
+        return text;
+    }
 
     // The human side of a pair. Defaults are the non-restricting values.
     struct Human
