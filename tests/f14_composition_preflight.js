@@ -70,16 +70,23 @@ function objectOverlaps(candidates, entryAt) {
             keys.every(x => x === keys[0]) ? "IDENTICAL_TREE_ENTRY" : "DIVERGENT_TREE_ENTRIES"};
     });
 }
+function commonBase(specs) {
+    const heads = new Set(specs.map(c => c.expectedHead.toLowerCase()));
+    const roots = [...new Set(specs.map(c => c.parent.toLowerCase()).filter(p => !heads.has(p)))];
+    return roots.length === 1 ? roots[0] : "UNKNOWN";
+}
 function dependencyEdges(candidates, base) {
-    const byHead = new Map(candidates.map(c => [c.HEAD, c.name]));
+    const byHead = new Map(candidates.map(c => [c.HEAD.toLowerCase(), c.name]));
     return candidates.filter(c => c.parent !== "UNKNOWN").map(c => ({
         candidate: c.name, parent: c.parent,
-        parentCandidate: c.parent === base ? "COMMON_BASE" : byHead.get(c.parent) || "UNKNOWN"
+        parentCandidate: base !== "UNKNOWN" && c.parent.toLowerCase() === base ? "COMMON_BASE" :
+            byHead.get(c.parent.toLowerCase()) || "UNKNOWN"
     }));
 }
 function inspect(manifest, manifestDir) {
     const registerReport = register.inspect(manifest, manifestDir);
     const repo = path.resolve(manifestDir, manifest.repository);
+    const base = commonBase(manifest.candidates);
     const candidates = [];
     for (const spec of manifest.candidates) {
         const report = registerReport.candidates.find(x => x.name === spec.name);
@@ -98,7 +105,8 @@ function inspect(manifest, manifestDir) {
             }
         candidates.push({name: spec.name, parent: spec.parent, HEAD: report?.HEAD || "UNKNOWN",
                          paths, configDefaults: config, sourceContractPins: contractPins,
-                         requiresParentTree: spec.parent !== manifest.candidates[0].parent,
+                         requiresParentTree: base === "UNKNOWN" ? "UNKNOWN" :
+                             spec.parent.toLowerCase() !== base,
                          registerProblems: report?.problems || ["UNKNOWN"]});
     }
     for (const e of manifest.externalRows) {
@@ -128,14 +136,15 @@ function inspect(manifest, manifestDir) {
             problems.push("supplied external config defaults differ from exact local Git diff");
         candidates.push({name: e.name, parent: e.parent, HEAD: verified ? e.head : "UNKNOWN",
                          paths, configDefaults: defaults, sourceContractPins: "UNKNOWN",
-                         requiresParentTree: e.parent !== manifest.candidates[0].parent,
+                         requiresParentTree: base === "UNKNOWN" ? "UNKNOWN" :
+                             e.parent.toLowerCase() !== base,
                          verification: verified ? "LOCAL EXACT GIT OBJECTS; moving branch not checked" : "UNKNOWN",
                          problems});
     }
-    return {mode: "offline read-only composition preflight", candidates,
+    return {mode: "offline read-only composition preflight", commonBase: base, candidates,
             overlaps: overlaps(candidates), duplicateFeatureIds: registerReport.conflicts,
             objectOverlaps: objectOverlaps(candidates, (head, p) => treeEntry(repo, head, p)),
-            dependencyEdges: dependencyEdges(candidates, manifest.candidates[0].parent),
+            dependencyEdges: dependencyEdges(candidates, base),
             externalRegisterRows: registerReport.externalRows};
 }
 if (require.main === module) {
@@ -151,4 +160,4 @@ if (require.main === module) {
         process.exitCode = 2;
     }
 }
-module.exports = {configDefaults, overlaps, treeEntry, objectOverlaps, dependencyEdges, inspect};
+module.exports = {configDefaults, overlaps, treeEntry, objectOverlaps, commonBase, dependencyEdges, inspect};

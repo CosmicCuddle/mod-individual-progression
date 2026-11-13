@@ -49,6 +49,22 @@ test("object-level fallback distinguishes content, mode and unavailable tree ent
     ], "c".repeat(40)).map(x => x.parentCandidate), ["COMMON_BASE", "root", "UNKNOWN"]);
 });
 
+test("common base comes from the graph, not the first manifest row", () => {
+    const base = "a".repeat(40), parent = "b".repeat(40), child = "c".repeat(40);
+    const specs = [
+        {name: "child", expectedHead: child, parent},
+        {name: "parent", expectedHead: parent, parent: base}
+    ];
+    assert.equal(preflight.commonBase(specs), base);
+    assert.equal(preflight.commonBase([...specs].reverse()), base);
+    assert.deepEqual(preflight.dependencyEdges(specs.map(s =>
+        ({name: s.name, HEAD: s.expectedHead, parent: s.parent})), base)
+        .map(x => [x.candidate, x.parentCandidate]),
+        [["child", "parent"], ["parent", "COMMON_BASE"]]);
+    assert.equal(preflight.commonBase([...specs,
+        {name: "unrelated", expectedHead: "d".repeat(40), parent: "e".repeat(40)}]), "UNKNOWN");
+});
+
 test("pinned local candidates have only Register overlap; external social data stays labeled", () => {
     const file = path.resolve(__dirname, "../docs/F14_REGISTER_RECONCILIATION_MANIFEST_2026-11-13.json");
     const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -77,12 +93,22 @@ test("exact external Git diff verifies paths and all three config defaults", () 
     }
     assert.equal(social.verification, "LOCAL EXACT GIT OBJECTS; moving branch not checked");
     assert.equal(social.HEAD, manifest.externalRows[0].head);
+    assert.equal(report.commonBase, "aed05a92f262362608f5d643c8570b504189aae0");
     assert.deepEqual(social.problems, []);
     assert.equal(social.paths.length, 12);
     assert.equal(Object.keys(social.configDefaults).length, 3);
     assert.deepEqual(report.objectOverlaps.map(x => [x.path, x.verdict]),
                      [["docs/CUSTOM_MODIFICATIONS_REGISTER.md", "DIVERGENT_TREE_ENTRIES"]]);
     assert.deepEqual(report.dependencyEdges.filter(x => x.parentCandidate !== "COMMON_BASE")
+                     .map(x => [x.candidate, x.parentCandidate]),
+                     [["IP #176 group consumer", "IP #175 group floor"],
+                      ["IP #177 negative witness", "IP #174 pass lifecycle"]]);
+    const reordered = structuredClone(manifest);
+    reordered.candidates.unshift(reordered.candidates.splice(2, 1)[0]); // Child #176 first.
+    const reorderedReport = preflight.inspect(reordered, path.dirname(file));
+    assert.equal(reorderedReport.commonBase, report.commonBase);
+    assert.equal(reorderedReport.candidates[0].requiresParentTree, true);
+    assert.deepEqual(reorderedReport.dependencyEdges.filter(x => x.parentCandidate !== "COMMON_BASE")
                      .map(x => [x.candidate, x.parentCandidate]),
                      [["IP #176 group consumer", "IP #175 group floor"],
                       ["IP #177 negative witness", "IP #174 pass lifecycle"]]);
