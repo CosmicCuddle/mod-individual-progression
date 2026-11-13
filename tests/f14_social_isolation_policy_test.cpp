@@ -379,6 +379,73 @@ namespace
         }
     }
 
+    // Backlog item 4: lifecycle scenarios that reduce to pure decisions.
+    // Runtime ordering (login hooks, map transfer, Core threads) is NOT
+    // exercised here; see docs/F14_SOCIAL_ISOLATION_2026-11-13.md.
+    void TestLifecycleScenarios()
+    {
+        // Identity appearing late (verified only after a later login): the
+        // pair is unrestricted until the verified fact exists, then restricted.
+        P::Bot late = VerifiedBot();
+        late.verifiedRandomBotIdentity = false;
+        CHECK(!P::IsRestrictedPair(true, VanillaHuman(), late));
+        late.verifiedRandomBotIdentity = true;
+        CHECK(P::IsRestrictedPair(true, VanillaHuman(), late));
+        // Identity disappearing (logout/revoke): unknown => normal interaction.
+        late.verifiedRandomBotIdentity = false;
+        CHECK(!P::IsRestrictedPair(true, VanillaHuman(), late));
+        CHECK(!P::ExcludeFromWho(true, VanillaHuman(), false, P::BloodElfRace));
+
+        // Bot leaves the world mid-attempt (map transfer/logout): not restricted.
+        P::Bot transferring = VerifiedBot();
+        transferring.inWorld = false;
+        CHECK(!P::IsRestrictedPair(true, VanillaHuman(), transferring));
+        P::Human relogging = VanillaHuman();
+        relogging.inWorld = false; // the stage reader also reports 255 here
+        relogging.rawStage = 255;
+        CHECK(!P::IsRestrictedPair(true, relogging, VerifiedBot()));
+
+        // Progression changing while online is re-read on every attempt,
+        // including an unusual downward correction.
+        int const path[] = {0, 7, 8, 12, 13, 7, 3, 8};
+        for (int stage : path)
+            CHECK(P::IsRestrictedPair(true, VanillaHuman(static_cast<std::uint8_t>(stage)), VerifiedBot()) ==
+                  (stage < P::FirstTbcStage));
+
+        // Ordinary-race verified bots are never isolated, at any human stage.
+        for (int race = 1; race <= 8; ++race)
+            for (int stage = 0; stage <= 18; ++stage)
+                CHECK(!P::IsRestrictedPair(true, VanillaHuman(static_cast<std::uint8_t>(stage)),
+                                           VerifiedBot(static_cast<std::uint8_t>(race))));
+    }
+
+    // Many humans and many bots: cooldowns are strictly per (human, bot).
+    void TestMultiViewerCooldowns()
+    {
+        P::ReplyLimiter<16> l;
+        for (std::uint64_t human = 1; human <= 3; ++human)
+            for (std::uint64_t bot = 100; bot <= 102; ++bot)
+                CHECK(l.MayReply(human, bot, 1000, 60)); // 9 independent first replies
+        for (std::uint64_t human = 1; human <= 3; ++human)
+            for (std::uint64_t bot = 100; bot <= 102; ++bot)
+                CHECK(!l.MayReply(human, bot, 1001, 60)); // each pair cools down alone
+        CHECK(l.MayReply(4, 100, 1001, 60)); // a new human is unaffected
+
+        // Logout/relog keeps the raw-GUID pair cooldown: a quick relog does
+        // not reset it, and it expires normally.
+        CHECK(!l.MayReply(1, 100, 1030, 60));
+        CHECK(l.MayReply(1, 100, 1060, 60));
+
+        // Saturation affects only new pairs, and recovers as entries cool.
+        P::ReplyLimiter<2> tiny;
+        CHECK(tiny.MayReply(1, 100, 10, 60));
+        CHECK(tiny.MayReply(2, 100, 10, 60));
+        CHECK(!tiny.MayReply(3, 100, 11, 60));
+        CHECK(!tiny.MayReply(1, 100, 12, 60)); // existing pair still cooling
+        CHECK(tiny.MayReply(3, 100, 70, 60));  // a cooled slot is reused
+        CHECK(tiny.FullRefusals() == 1);
+    }
+
     void TestDefaultReplyIsInCharacter()
     {
         char const* text = P::DefaultReply;
@@ -404,6 +471,8 @@ int main()
     TestLimiterSpacingRandomised();
     TestDefaultReplyIsInCharacter();
     TestReplyNormalization();
+    TestLifecycleScenarios();
+    TestMultiViewerCooldowns();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }
