@@ -1,0 +1,62 @@
+# F14 safer social isolation for verified BE/Draenei RandomBots (default OFF).
+# Child of IP #172 (aed05a92). MILESTONE-ONLY: manual dispatch, so ordinary
+# pushes spend no Actions quota. No worldserver launch, DB, host or deploy.
+name: F14 social isolation (OFF, milestone, NO HOST)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    name: "Social isolation policy + source contracts (${{ matrix.cxx }} ${{ matrix.std }})"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: "Verify #172 ancestry and EXACT eleven-path scope"
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=aed05a92f262362608f5d643c8570b504189aae0
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            '.github/workflows/f14-social-isolation.yml' \
+            'conf/individualProgression.conf.dist' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/F14_SOCIAL_ISOLATION_2026-11-13.md' \
+            'src/IndividualProgression.cpp' \
+            'src/IndividualProgression.h' \
+            'src/IndividualProgressionF14SocialIsolationPolicy.h' \
+            'src/IndividualProgressionF14SocialIsolationScript.cpp' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'tests/f14_social_isolation_policy_test.cpp' \
+            'tests/test_f14_social_isolation_source.py' | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          git diff --check "$parent" HEAD
+          git diff -U0 "$parent" HEAD -- docs/CUSTOM_MODIFICATIONS_REGISTER.md \
+            | grep -E '^-' | grep -Ev '^--- ' > /tmp/register-removed || true
+          test ! -s /tmp/register-removed
+      - name: Source contracts
+        shell: bash
+        run: python3 -B -m unittest discover -s tests -p 'test_f14_social_isolation_source.py' -v
+      - name: "Native policy tests (${{ matrix.cxx }} ${{ matrix.std }}, with and without NDEBUG)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ndebug in "" "-DNDEBUG"; do
+            ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 $ndebug \
+              -Isrc tests/f14_social_isolation_policy_test.cpp -o /tmp/f14-social
+            /tmp/f14-social | tee /tmp/out.txt
+            grep -Eq '^F14 SOCIAL ISOLATION POLICY ([0-9]+)/\1 passed' /tmp/out.txt
+          done

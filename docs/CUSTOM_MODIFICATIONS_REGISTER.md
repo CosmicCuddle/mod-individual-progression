@@ -1250,3 +1250,27 @@ The review's omitted negative categories are also represented explicitly: viewer
 No Core pointers/headers, runtime adapter, hook registration, Playerbots lookup, Store Open/Reserve/Commit, packet action, visibility mutation, restoration completion, config, SQL, DB, DBC, client, host or deployment behavior is added. The existing joint viewer-rights gate remains byte-identical to IP171. IP168 remains the active runtime candidate; IP172 is evidence hardening only. F14/Paid remain OFF and R2 Coordination #42/global restoration recovery remain blockers before any positive concealment.
 
 Focused native tests require every completeness family independently, exercise the new threat/ownership/service/aura/spell/reward vetoes, preserve lifecycle/quest/group cases and prove no combination can authorize concealment. Full Worldserver/gameplay evidence is intentionally not claimed for this unwired pure model. Rollback: abandon/revert this child; no migration or live-state rollback is required.
+
+
+## 13 November 2026 — F14 safer social isolation for verified BE/Draenei RandomBots (default OFF) — CS03-IP
+
+- **Intended behaviour:** with `IndividualProgression.F14.RandomBotSocialIsolation = 1`, a login-verified headless Blood Elf/Draenei RandomBot declines whisper, trade, group invite and group accept with an ordinary human still below stage 8, in both directions. In Core builds with the F14 /who query, it is also left out of that human's /who list and count. When the human starts the interaction, the bot answers once with a configurable in-character whisper, rate-limited per pair. The restriction lifts as soon as the human reaches stage 8. Nobody is hidden in the world.
+- **Owning component/source:** CosmicCuddle/mod-individual-progression, DRAFT branch `feature/cs03-ip-f14-social-isolation-20261113`, child of #172 `aed05a92`.
+  - New: `src/IndividualProgressionF14SocialIsolationPolicy.h` (pure) and `src/IndividualProgressionF14SocialIsolationScript.cpp` (separate PlayerScript plus a /who-only WorldObjectScript).
+  - Changed: additive config members and load, plus one AddSC call (`src/IndividualProgression.h/.cpp`); one OR-reason in the login identity gate (`src/IndividualProgressionPlayer.cpp`); three default-safe keys (`conf/individualProgression.conf.dist`).
+  - Tests, a dispatch-only workflow and `docs/F14_SOCIAL_ISOLATION_2026-11-13.md`.
+- **Protection:**
+  - Identity is never race alone: verified cache, headless and not GM. Humans, Altbots, SelfBots, GMs and unknown characters are never restricted.
+  - Existing IP hooks (including `EnforceGroupRules`) are unchanged.
+  - No world-visibility query, stage, quest, DB, Playerbots-manager or group-sync change.
+  - The reply is a packet to the human's own session only. Forced OFF without the Playerbots API.
+- **Dependencies:** Core25 social hooks (stock) and its F14 /who query (`COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT` builds only); IP's verified RandomBot cache. No SQL, DBC or client change.
+- **Known gaps:** guild invite (no hook), duel (notify-only hook), mail (offline receiver unverifiable), and later-era isolation beyond Vanilla/TBC.
+- **Tests:**
+  - native policy tests (GCC/Clang, C++17/20, with and without NDEBUG);
+  - source contracts;
+  - local mutation checks;
+  - a local Core25 header syntax check.
+
+  Hosted CI is milestone-only. No Worldserver link or gameplay test.
+- **Live status/approval/rollback:** NOT MERGED, NOT DEPLOYED, OFF by default; owner approval required. Rollback: keep the option `0`, or close the DRAFT; no host, DB, config or client was touched.

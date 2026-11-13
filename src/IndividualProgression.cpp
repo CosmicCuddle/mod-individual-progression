@@ -6,6 +6,7 @@
 #include "IndividualProgressionGroupPolicy.h"
 #include "IndividualProgressionF14LoginPolicy.h"
 #include "IndividualProgressionF14StageFloorPolicy.h"
+#include "IndividualProgressionF14SocialIsolationPolicy.h"
 #include "naxxramas_40.h"
 #include "Mail.h"
 #include <mutex>
@@ -826,6 +827,20 @@ bool IndividualProgression::HasF14VerifiedRandomBotIdentity(Player const* player
 
 // WHO queries carry a cached GUID. Never look up a target Player or call
 // mutable RandomPlayerbotMgr on a session/WHO worker. Missing means ALLOW.
+// F14 social isolation reply text: read by session handlers, rewritten on
+// .reload, so both sides take this small lock and copy the string.
+std::string IndividualProgression::GetF14SocialIsolationReply()
+{
+    std::lock_guard<std::mutex> lock(_f14SocialIsolationReplyLock);
+    return _f14SocialIsolationReply;
+}
+
+void IndividualProgression::SetF14SocialIsolationReply(std::string reply)
+{
+    std::lock_guard<std::mutex> lock(_f14SocialIsolationReplyLock);
+    _f14SocialIsolationReply = std::move(reply);
+}
+
 bool IndividualProgression::HasF14VerifiedRandomBotGuid(ObjectGuid const& guid)
 {
     if (!guid)
@@ -1584,6 +1599,14 @@ private:
             "IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin", false);
         sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor = sConfigMgr->GetOption<bool>(
             "IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor", false);
+        sIndividualProgression->f14RandomBotSocialIsolation = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.RandomBotSocialIsolation", false);
+        sIndividualProgression->f14RandomBotSocialIsolationReplyCooldownSeconds = sConfigMgr->GetOption<uint32>(
+            "IndividualProgression.F14.RandomBotSocialIsolation.ReplyCooldownSeconds",
+            IndividualProgressionF14SocialIsolationPolicy::DefaultReplyCooldownSeconds);
+        sIndividualProgression->SetF14SocialIsolationReply(sConfigMgr->GetOption<std::string>(
+            "IndividualProgression.F14.RandomBotSocialIsolation.Reply",
+            IndividualProgressionF14SocialIsolationPolicy::DefaultReply));
         // F14 observer + WHO pilot remains OFF until the separately reviewed,
         // immediate, per-viewer Core visibility-refresh bridge is present.
         sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = sConfigMgr->GetOption<bool>(
@@ -1610,6 +1633,11 @@ private:
         {
             LOG_ERROR("module", "IndividualProgression F14 verified RandomBot stage floor requires Playerbots API header; forcing OFF");
             sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor = false;
+        }
+        if (sIndividualProgression->f14RandomBotSocialIsolation)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 RandomBot social isolation requires Playerbots API header; forcing OFF");
+            sIndividualProgression->f14RandomBotSocialIsolation = false;
         }
         if (sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin)
         {
@@ -1839,10 +1867,12 @@ void AddSC_ip_paid_expansion();
 // F14 lifecycle consumer lives in IndividualProgressionF14LifecycleScript.cpp;
 // registered here so the upstream Grim loader stays byte-identical.
 void AddSC_mod_individual_progression_f14_lifecycle();
+void AddSC_mod_individual_progression_f14_social_isolation();
 
 void AddSC_mod_individual_progression()
 {
     new IndividualPlayerProgression_WorldScript();
     AddSC_ip_paid_expansion();
     AddSC_mod_individual_progression_f14_lifecycle();
+    AddSC_mod_individual_progression_f14_social_isolation();
 }

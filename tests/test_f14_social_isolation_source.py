@@ -1,0 +1,181 @@
+"""F14 social isolation: source contracts, not in-game proof.
+
+Pins that the feature is default OFF, uses only the four social PlayerScript
+hooks plus the /who-only query (never the paused world-visibility query),
+decides identity from IP's verified RandomBot cache (never race alone),
+answers through a packet to the human's own session (never Player::Whisper),
+and leaves every other file of IP #172 unchanged apart from the exact
+reviewed insertions.
+"""
+import re
+import subprocess
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PARENT = "aed05a92f262362608f5d643c8570b504189aae0"  # IP #172 head
+POLICY = "src/IndividualProgressionF14SocialIsolationPolicy.h"
+SCRIPT = "src/IndividualProgressionF14SocialIsolationScript.cpp"
+KEY = "IndividualProgression.F14.RandomBotSocialIsolation"
+SCOPE = {
+    POLICY, SCRIPT,
+    "src/IndividualProgression.h", "src/IndividualProgression.cpp", "src/IndividualProgressionPlayer.cpp",
+    "conf/individualProgression.conf.dist",
+    "tests/f14_social_isolation_policy_test.cpp", "tests/test_f14_social_isolation_source.py",
+    ".github/workflows/f14-social-isolation.yml",
+    "docs/F14_SOCIAL_ISOLATION_2026-11-13.md", "docs/CUSTOM_MODIFICATIONS_REGISTER.md",
+}
+
+
+def read(name):
+    return (ROOT / name).read_text(encoding="utf-8")
+
+
+def git(*args):
+    return subprocess.run(["git", "-C", str(ROOT), *args], check=True, capture_output=True).stdout
+
+
+def parent(name):
+    return git("show", PARENT + ":" + name).decode("utf-8")
+
+
+def strip_comments(src):
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    return re.sub(r"//[^\n]*", "", src)
+
+
+def added_lines(name):
+    out = subprocess.run(["git", "-C", str(ROOT), "diff", "-U0", PARENT, "--", name],
+                         check=True, capture_output=True, text=True).stdout
+    plus = [l[1:] for l in out.splitlines() if l.startswith("+") and not l.startswith("+++")]
+    minus = [l[1:] for l in out.splitlines() if l.startswith("-") and not l.startswith("---")]
+    return plus, minus
+
+
+class DefaultOff(unittest.TestCase):
+    def test_conf_defaults(self):
+        conf = read("conf/individualProgression.conf.dist")
+        self.assertEqual(re.findall(r"(?m)^" + re.escape(KEY) + r"\s*=\s*(\S+)\s*$", conf), ["0"])
+        self.assertRegex(conf, r"(?m)^" + re.escape(KEY) + r"\.ReplyCooldownSeconds\s*=\s*60\s*$")
+        for key in re.findall(r"(?m)^(IndividualProgression\.(?:F14\.\w+|PaidExpansion\.Enable))\s*=", conf):
+            self.assertRegex(conf, r"(?m)^" + re.escape(key) + r"\s*=\s*0\s*$", key)
+
+    def test_member_default_and_forced_off_without_playerbots(self):
+        self.assertIn("bool f14RandomBotSocialIsolation = false;", read("src/IndividualProgression.h"))
+        core = read("src/IndividualProgression.cpp")
+        self.assertIn('"' + KEY + '", false)', core)
+        block = core.split('#if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")', 1)[1]
+        block = block[:block.index("#endif")]
+        self.assertIn("sIndividualProgression->f14RandomBotSocialIsolation = false;", block)
+
+    def test_every_hook_checks_the_option_first(self):
+        src = strip_comments(read(SCRIPT))
+        self.assertIn("return sIndividualProgression->enabled && sIndividualProgression->f14RandomBotSocialIsolation;", src)
+        allow = src.split("bool AllowPair(", 1)[1]
+        self.assertIn("if (!OptionOn() || !initiator || !other || initiator == other)", allow[:400])
+        for sig in ("bool OnPlayerCanGroupInvite(", "bool OnPlayerCanGroupAccept(",
+                    "bool OnF14ShouldExcludeWhoEntryForViewer("):
+            body = src.split(sig, 1)[1][:400]
+            self.assertIn("!OptionOn()", body, sig)
+
+
+class HooksAndAuthority(unittest.TestCase):
+    def setUp(self):
+        self.src = strip_comments(read(SCRIPT))
+
+    def test_only_social_hooks_and_who(self):
+        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z_]+|WORLDOBJECTHOOK_[A-Z0-9_]+)\b", self.src)))
+        self.assertEqual(hooks, sorted([
+            "PLAYERHOOK_CAN_GROUP_ACCEPT", "PLAYERHOOK_CAN_GROUP_INVITE", "PLAYERHOOK_CAN_INIT_TRADE",
+            "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT", "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY"]))
+        overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
+        self.assertEqual(overrides, sorted([
+            "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
+            "OnPlayerCanInitTrade", "OnPlayerCanUseChat"]))
+
+    def test_no_world_hiding_or_mutation(self):
+        for token in ("OnF14ShouldSuppressPlayerForViewer", "SuppressCreature", "SetPhaseMask", "UpdateObjectVisibility",
+                      "DestroyForPlayer", "ForceUpdateProgressionState", "UpdateProgressionState",
+                      "RewardQuest", "RemoveRewardedQuest", "sRandomPlayerbotMgr", "Playerbot", "Database",
+                      "QueryResult", "const_cast", "GetEffectiveProgression", "isNormalAccount", "isBotAccount"):
+            self.assertNotIn(token, self.src, token)
+
+    def test_identity_never_race_alone(self):
+        self.assertIn("HasF14VerifiedRandomBotIdentity(player)", self.src)
+        self.assertIn("HasF14VerifiedRandomBotGuid(targetGuid)", self.src)
+        policy = strip_comments(read(POLICY))
+        bot = policy.split("constexpr bool BotIsRestrictedRandomBot(", 1)[1].split("}", 1)[0]
+        for token in ("b.verifiedRandomBotIdentity", "b.headlessSession", "!b.gameMasterMode", "IsTbcRace(b.race)"):
+            self.assertIn(token, bot)
+        who = policy.split("constexpr bool ExcludeFromWho(", 1)[1].split("}", 1)[0]
+        self.assertIn("targetGuidVerifiedRandomBot", who)
+
+    def test_reply_is_a_direct_packet_not_a_whisper(self):
+        self.assertNotRegex(self.src, r"\bWhisper\(")
+        reply = self.src.split("void SendInCharacterReply(", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, LANG_UNIVERSAL, bot, human, text);", reply)
+        self.assertIn("human->SendDirectMessage(&data);", reply)
+        self.assertLess(reply.index("MayReply("), reply.index("BuildChatPacket("))
+        self.assertIn("std::lock_guard<std::mutex> lock(ReplyLock());", reply)
+
+    def test_stage_mirror_matches_ip(self):
+        mirror = self.src.split("uint8 ReadRawStage(Player const* player)", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("for (uint8 i = PROGRESSION_MOLTEN_CORE; i <= PROGRESSION_WOTLK_TIER_5; ++i)", mirror)
+        self.assertIn("player->GetQuestStatus(66000 + i) == QUEST_STATUS_REWARDED", mirror)
+        self.assertIn("return 255;", mirror)  # out of world = unknown, never Vanilla
+        ip = read("src/IndividualProgression.cpp").split(
+            "uint8 IndividualProgression::GetPlayerProgressionFromQuests(Player* player) const", 1)[1][:500]
+        self.assertIn("for (uint8 i = PROGRESSION_MOLTEN_CORE; i <= PROGRESSION_WOTLK_TIER_5; ++i)", ip)
+        self.assertIn("uint32 PROGRESSION_QUEST = 66000 + i;", ip)
+        self.assertIn("QUEST_STATUS_REWARDED", ip)
+
+    def test_default_reply_has_no_technical_words(self):
+        policy = read(POLICY)
+        text = re.search(r'DefaultReply =\s*"([^"]+)"', policy).group(1)
+        conf = read("conf/individualProgression.conf.dist")
+        self.assertIn('"' + text + '"', conf)
+        for word in ("tier", "stage", "server", "expansion", "tbc", "vanilla", "level", "progression", "era"):
+            self.assertNotRegex(text.lower(), r"\b" + word + r"\b", word)
+
+
+class ExactInsertions(unittest.TestCase):
+    def test_player_cpp_one_or_reason(self):
+        plus, minus = added_lines("src/IndividualProgressionPlayer.cpp")
+        # Inserted before the pinned last reason so the #80 gate pin holds.
+        self.assertEqual(minus, [])
+        self.assertEqual(plus, ["             sIndividualProgression->f14RandomBotSocialIsolation ||"])
+
+    def test_core_and_header_additions_only(self):
+        for name in ("src/IndividualProgression.cpp", "src/IndividualProgression.h"):
+            plus, minus = added_lines(name)
+            self.assertEqual(minus, [], name)
+            joined = "\n".join(plus)
+            for token in ("ForceUpdateProgressionState", "RewardQuest", "enforceGroupRules ="):
+                self.assertNotIn(token, joined, name)
+        plus, _ = added_lines("src/IndividualProgression.cpp")
+        self.assertIn("    AddSC_mod_individual_progression_f14_social_isolation();", plus)
+
+    def test_existing_ip_hooks_untouched(self):
+        cur = read("src/IndividualProgressionPlayer.cpp")
+        old = parent("src/IndividualProgressionPlayer.cpp")
+        for sig in ("bool OnPlayerCanGroupInvite(Player* player, std::string& membername) override",
+                    "bool OnPlayerCanGroupAccept(Player* player, Group* group) override"):
+            self.assertEqual(cur.split(sig, 1)[1][:3000], old.split(sig, 1)[1][:3000], sig)
+
+    def test_every_other_parent_file_is_byte_identical(self):
+        tracked = git("ls-tree", "-r", "--name-only", PARENT).decode().splitlines()
+        self.assertGreater(len(tracked), 50)
+        for name in tracked:
+            if name not in SCOPE:
+                self.assertEqual((ROOT / name).read_bytes(), git("show", PARENT + ":" + name), name)
+
+    def test_no_experiment_macro_defined(self):
+        for path in sorted((ROOT / "src").rglob("*")):
+            if path.is_file():
+                text = path.read_text(encoding="utf-8", errors="replace")
+                self.assertNotRegex(text, r"#\s*define\s+COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION", path.name)
+                self.assertNotRegex(text, r"#\s*define\s+COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT", path.name)
+
+
+if __name__ == "__main__":
+    unittest.main()

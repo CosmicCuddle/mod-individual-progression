@@ -24,6 +24,7 @@
 // API at compile time and keep building against an IP without it.
 #define COSMIC_IP_PAID_EXPANSION_API_VERSION 1
 #include <atomic>
+#include <mutex>
 #include <regex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -445,6 +446,14 @@ public:
     // would push a positively verified headless BE/Draenei RandomBot below an
     // already earned stage 8+. Default OFF; never creates or grants a stage.
     bool f14ProtectVerifiedRandomBotStageFloor = false;
+    // F14 social isolation (default OFF): a verified BE/Draenei RandomBot
+    // declines whisper/trade/group with a still-Vanilla human, leaves that
+    // human's /who and answers once in character. Never hides in the world.
+    bool f14RandomBotSocialIsolation = false;
+    uint32 f14RandomBotSocialIsolationReplyCooldownSeconds = 60;
+    // The reply text can change on .reload while sessions read it.
+    std::string GetF14SocialIsolationReply();
+    void SetF14SocialIsolationReply(std::string reply);
     std::string paidExpansionVendorName;
 
     // progression is derived from rewarded hidden quests (IDs 66000 + progression)
@@ -632,6 +641,8 @@ private:
 #endif
     std::uint64_t _f14NextRandomBotLoginEpoch = 0;
     std::shared_mutex _f14GroupCacheLock;
+    std::mutex _f14SocialIsolationReplyLock;
+    std::string _f14SocialIsolationReply;
 };
 
 #define sIndividualProgression IndividualProgression::instance()

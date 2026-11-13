@@ -130,6 +130,36 @@ IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0
 #
 IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor = 0
 
+# IndividualProgression.F14.RandomBotSocialIsolation
+#
+#        DEVELOPMENT ONLY / OFF by default. While an ordinary human player is
+#        still in Vanilla (stage below 8), a positively VERIFIED headless
+#        Blood Elf/Draenei RandomBot declines that player's whisper, trade and
+#        group invitation (both directions) and, in Core builds with the F14
+#        /who query, is left out of that player's /who list and count. When
+#        the player starts the interaction, the bot answers once with the
+#        whisper below (rate-limited per player and bot). Normal interaction
+#        returns as soon as the player reaches stage 8. Never decided from
+#        race alone: humans, Altbots, SelfBots, GMs and unknown characters
+#        are never affected, and nobody is hidden in the world.
+#        FORCED OFF without the Playerbots API. Owner approval required.
+#
+IndividualProgression.F14.RandomBotSocialIsolation = 0
+
+# IndividualProgression.F14.RandomBotSocialIsolation.Reply
+#
+#        The in-character whisper the bot sends back. Empty = no answer (the
+#        interaction is still declined).
+#
+IndividualProgression.F14.RandomBotSocialIsolation.Reply = "You are not yet ready for the road I walk. Return when your journey has carried you into a later age."
+
+# IndividualProgression.F14.RandomBotSocialIsolation.ReplyCooldownSeconds
+#
+#        Minimum seconds between two answers from the same bot to the same
+#        player. Clamped to 5..3600.
+#
+IndividualProgression.F14.RandomBotSocialIsolation.ReplyCooldownSeconds = 60
+
 # IndividualProgression.PaidExpansion.Enable
 #
 #        DRAFT - paid expansion entitlement. Read at server start only.
