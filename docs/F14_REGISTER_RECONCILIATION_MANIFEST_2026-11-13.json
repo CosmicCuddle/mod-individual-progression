@@ -22,7 +22,7 @@
     },
     {
       "name": "IP #177 negative witness",
-      "ref": "feature/codex-f14-negative-integration-witness-20261113",
+      "ref": "49af2465898e318481e9ad9de17699aea6f9338d",
       "expectedHead": "49af2465898e318481e9ad9de17699aea6f9338d",
       "parent": "3bf97b4d6edc746cb0ff7e7e02a55d6ab9fc5b32"
     },

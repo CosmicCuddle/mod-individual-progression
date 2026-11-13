@@ -24,6 +24,26 @@ test("overlap classifies Register separately from executable runtime paths", () 
     assert.deepEqual(pairs[0].runtimeOverlap, ["src/Shared.cpp"]);
 });
 
+test("object-level fallback distinguishes identical, divergent and unavailable blobs", () => {
+    const a = "a".repeat(40), b = "b".repeat(40);
+    const candidates = [
+        {name: "a", HEAD: a, paths: ["same.h", "different.h", "unknown.h"]},
+        {name: "b", HEAD: b, paths: ["same.h", "different.h", "unknown.h"]},
+        {name: "supplied-only", HEAD: a, paths: ["same.h"],
+         verification: "EXTERNAL SUPPLIED METADATA ONLY; recheck branch before use"}
+    ];
+    const ids = {"same.h": ["1", "1"], "different.h": ["2", "3"], "unknown.h": ["4", null]};
+    const report = preflight.objectOverlaps(candidates, (head, p) => ids[p][head === a ? 0 : 1]);
+    assert.deepEqual(report.map(x => [x.path, x.verdict]), [
+        ["same.h", "IDENTICAL_BLOB"], ["different.h", "DIVERGENT_BLOBS"], ["unknown.h", "UNKNOWN"]]);
+    assert.equal(report[0].claims.length, 2); // Supplied metadata is not a local object claim.
+    assert.deepEqual(preflight.dependencyEdges([
+        {name: "root", HEAD: a, parent: "c".repeat(40)},
+        {name: "child", HEAD: b, parent: a},
+        {name: "unmatched", HEAD: "d".repeat(40), parent: "e".repeat(40)}
+    ], "c".repeat(40)).map(x => x.parentCandidate), ["COMMON_BASE", "root", "UNKNOWN"]);
+});
+
 test("pinned local candidates have only Register overlap; external social data stays labeled", () => {
     const file = path.resolve(__dirname, "../docs/F14_REGISTER_RECONCILIATION_MANIFEST_2026-11-13.json");
     const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -55,6 +75,12 @@ test("exact external Git diff verifies paths and all three config defaults", () 
     assert.deepEqual(social.problems, []);
     assert.equal(social.paths.length, 12);
     assert.equal(Object.keys(social.configDefaults).length, 3);
+    assert.deepEqual(report.objectOverlaps.map(x => [x.path, x.verdict]),
+                     [["docs/CUSTOM_MODIFICATIONS_REGISTER.md", "DIVERGENT_BLOBS"]]);
+    assert.deepEqual(report.dependencyEdges.filter(x => x.parentCandidate !== "COMMON_BASE")
+                     .map(x => [x.candidate, x.parentCandidate]),
+                     [["IP #176 group consumer", "IP #175 group floor"],
+                      ["IP #177 negative witness", "IP #174 pass lifecycle"]]);
     const bad = structuredClone(manifest);
     bad.externalRows[0].configDefaults["IndividualProgression.F14.RandomBotSocialIsolation"] = "1";
     assert.ok(preflight.inspect(bad, path.dirname(file)).candidates[5].problems

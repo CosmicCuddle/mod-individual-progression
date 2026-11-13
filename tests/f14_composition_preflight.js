@@ -40,6 +40,30 @@ function overlaps(candidates) {
         }
     return pairs;
 }
+function objectOverlaps(candidates, objectId) {
+    const claims = new Map();
+    for (const c of candidates) {
+        if (!Array.isArray(c.paths) || !/^[0-9a-f]{40}$/i.test(c.HEAD) ||
+            (c.verification && c.verification !== "LOCAL EXACT GIT OBJECTS; moving branch not checked"))
+            continue;
+        for (const p of c.paths) {
+            if (!claims.has(p)) claims.set(p, []);
+            claims.get(p).push({candidate: c.name, object: objectId(c.HEAD, p) || "UNKNOWN"});
+        }
+    }
+    return [...claims].filter(([, rows]) => rows.length > 1).map(([path, rows]) => {
+        const ids = rows.map(x => x.object);
+        return {path, claims: rows, verdict: ids.includes("UNKNOWN") ? "UNKNOWN" :
+            ids.every(x => x === ids[0]) ? "IDENTICAL_BLOB" : "DIVERGENT_BLOBS"};
+    });
+}
+function dependencyEdges(candidates, base) {
+    const byHead = new Map(candidates.map(c => [c.HEAD, c.name]));
+    return candidates.filter(c => c.parent !== "UNKNOWN").map(c => ({
+        candidate: c.name, parent: c.parent,
+        parentCandidate: c.parent === base ? "COMMON_BASE" : byHead.get(c.parent) || "UNKNOWN"
+    }));
+}
 function inspect(manifest, manifestDir) {
     const registerReport = register.inspect(manifest, manifestDir);
     const repo = path.resolve(manifestDir, manifest.repository);
@@ -97,6 +121,9 @@ function inspect(manifest, manifestDir) {
     }
     return {mode: "offline read-only composition preflight", candidates,
             overlaps: overlaps(candidates), duplicateFeatureIds: registerReport.conflicts,
+            objectOverlaps: objectOverlaps(candidates, (head, p) =>
+                git(repo, "rev-parse", "--verify", `${head}:${p}`)),
+            dependencyEdges: dependencyEdges(candidates, manifest.candidates[0].parent),
             externalRegisterRows: registerReport.externalRows};
 }
 if (require.main === module) {
@@ -112,4 +139,4 @@ if (require.main === module) {
         process.exitCode = 2;
     }
 }
-module.exports = {configDefaults, overlaps, inspect};
+module.exports = {configDefaults, overlaps, objectOverlaps, dependencyEdges, inspect};
