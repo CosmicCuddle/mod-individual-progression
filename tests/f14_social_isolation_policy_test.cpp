@@ -556,29 +556,49 @@ namespace
 
 namespace
 {
-    // T1: cross-map reads off the world thread are never made; the pair is
-    // then not restricted (the existing unknown-facts fallback).
+    // T1: off the world thread a pair is read only when both pointers are in
+    // the map this thread owns in the current tick; otherwise nothing is
+    // read and the pair is not restricted (owner decision: allow).
     void TestThreadSafeReads()
     {
-        CHECK(P::MayReadPair(true, true));
-        CHECK(P::MayReadPair(true, false));   // client packet: world thread
-        CHECK(P::MayReadPair(false, true));   // bot AI, same map thread
-        CHECK(!P::MayReadPair(false, false)); // bot AI, other map: never read
+        // Owned-scope validity: recorded in this very tick only.
+        CHECK(P::OwnedScopeValid(true, 7, 7));
+        CHECK(!P::OwnedScopeValid(true, 6, 7));   // a previous tick: stale
+        CHECK(!P::OwnedScopeValid(true, 8, 7));
+        CHECK(!P::OwnedScopeValid(false, 7, 7));  // never recorded
 
-        // Composition model of the script: read facts only when allowed.
+        // Full truth table of the read rule.
         for (int world = 0; world < 2; ++world)
-            for (int same = 0; same < 2; ++same)
-                for (P::Surface s : kSurfaces)
-                    for (int dir = 0; dir < 2; ++dir)
+            for (int valid = 0; valid < 2; ++valid)
+                for (int first = 0; first < 2; ++first)
+                    for (int second = 0; second < 2; ++second)
                     {
-                        bool const readable = P::MayReadPair(world != 0, same != 0);
-                        P::Direction const d = dir ? P::Direction::BotToHuman : P::Direction::HumanToBot;
-                        P::Decision const decided = readable
-                            ? P::Decide(true, s, d, VanillaHuman(), VerifiedBot(), false)
-                            : P::Decision{};
-                        CHECK(decided.block == readable);
-                        CHECK(decided.reply == (readable && dir == 0));
+                        bool const expected = world || (valid && first && second);
+                        CHECK(P::MayReadPair(world != 0, valid != 0, first != 0, second != 0) == expected);
                     }
+        CHECK(P::MayReadPair(true, false, false, false));  // client packet: world thread
+        CHECK(P::MayReadPair(false, true, true, true));    // bot AI, both on the owned map
+        CHECK(!P::MayReadPair(false, true, true, false));  // other player on another map
+        CHECK(!P::MayReadPair(false, true, false, true));  // initiator not ours (e.g. LFG invite)
+        CHECK(!P::MayReadPair(false, false, true, true));  // stale or missing record
+
+        // Composition model: facts are read and decided only when allowed;
+        // otherwise the pair is allowed with no reply.
+        for (int world = 0; world < 2; ++world)
+            for (int valid = 0; valid < 2; ++valid)
+                for (int first = 0; first < 2; ++first)
+                    for (int second = 0; second < 2; ++second)
+                        for (P::Surface s : kSurfaces)
+                            for (int dir = 0; dir < 2; ++dir)
+                            {
+                                bool const readable = P::MayReadPair(world != 0, valid != 0, first != 0, second != 0);
+                                P::Direction const d = dir ? P::Direction::BotToHuman : P::Direction::HumanToBot;
+                                P::Decision const decided = readable
+                                    ? P::Decide(true, s, d, VanillaHuman(), VerifiedBot(), false)
+                                    : P::Decision{};
+                                CHECK(decided.block == readable);
+                                CHECK(decided.reply == (readable && dir == 0));
+                            }
 
         // The marker: unmarked is never the world thread; only the marking
         // thread is; a re-mark from another thread moves it.
@@ -615,6 +635,21 @@ namespace
             r.join();
         CHECK(falseWorld.load() == 0);
         CHECK(marker.IsCurrent());
+
+        // World ticks: every mark advances the tick by one, from any thread;
+        // a record from an earlier tick is never valid again.
+        P::WorldThreadMarker ticks;
+        CHECK(ticks.Tick() == 0);
+        std::uint64_t const recorded = ticks.Tick();
+        ticks.Mark();
+        CHECK(ticks.Tick() == 1);
+        CHECK(!P::OwnedScopeValid(true, recorded, ticks.Tick()));
+        std::vector<std::thread> markers;
+        for (int i = 0; i < 4; ++i)
+            markers.emplace_back([&] { for (int n = 0; n < 1000; ++n) ticks.Mark(); });
+        for (std::thread& m : markers)
+            m.join();
+        CHECK(ticks.Tick() == 4001);
     }
 }
 

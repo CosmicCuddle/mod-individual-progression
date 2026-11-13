@@ -72,7 +72,16 @@ Two identity notions are in use, and they are **deliberately different**. A sour
 
 ## Threads
 - **Client-initiated (a real player's packet):** the four opcodes (`CMSG_MESSAGECHAT`, `CMSG_INITIATE_TRADE`, `CMSG_GROUP_INVITE`, `CMSG_GROUP_ACCEPT`) are `PROCESS_THREADUNSAFE` in Core25 (`Opcodes.cpp`), and `MapSessionFilter` refuses them. They therefore run in `World::UpdateSessions` while no map is updating, so reading the other player (and, for accept, every member) is safe.
-- **Bot-initiated (Playerbots AI):** on the locally inspected Playerbots `0d754d19`, bot AI runs from `OnPlayerAfterUpdate`, inside the bot's **map** update. Its invite, accept and trade actions call `HandleGroupInviteOpcode`, `HandleGroupAcceptOpcode` and `HandleInitiateTradeOpcode` directly, and its whispers use `Player::Whisper`. So the same hooks fire there, but on a **map thread**. Reading a player on a **different** map from there would be a cross-thread read (T1). **T1 guard (owner decision 13 Nov 2026: allow, i.e. fail-open):** off the world thread, nothing is read from a player on a different map, and that pair is not restricted (the existing "unknown means not restricted" fallback). Same-map pairs and every client-initiated attempt are unchanged. The world thread is recognised by a one-line `WorldScript::OnUpdate` marker that reads nothing; only the two players' map pointers are compared.
+- **Bot-initiated (Playerbots AI):** on the locally inspected Playerbots `0d754d19`, bot AI runs from `OnPlayerAfterUpdate`, inside the bot's **map** update. Its invite, accept and trade actions call `HandleGroupInviteOpcode`, `HandleGroupAcceptOpcode` and `HandleInitiateTradeOpcode` directly, and its whispers use `Player::Whisper`. So the same hooks fire there, but on a **map thread**. Reading a player on a **different** map from there would be a cross-thread read (T1). **T1 guard (owner decision 13 Nov 2026: allow, i.e. fail-open):** off the world thread, **no foreign `Player` is touched** until ownership is proven (CS01 review 6860967009 rev 2).
+  - **How ownership is proven:**
+    - At the start of every player update (`OnPlayerBeforeUpdate`), the thread records that player's own map and the current world tick.
+    - The thread itself is updating that map, and each map is updated once per tick; the world waits for all of them before the tick ends.
+    - So, for the rest of that tick, the recorded map is either the one this thread is updating or one it already finished, which nothing else updates until the next tick.
+    - A pair is read only if that record is from the current tick **and both players' pointers are found in that map's own player list**. That's pointer comparison only; neither candidate object is dereferenced.
+  - **Group accept off the world thread:** the acceptor must pass the same check. Leader and members are resolved only from the owned map's list, never through a global lookup.
+  - **Anything else:** nothing is read, and the pair is not restricted (the existing "unknown means not restricted" fallback; owner decision: allow).
+  - **Client-initiated attempts** run on the world thread and are unchanged.
+  - **The world thread and tick** come from a one-line `WorldScript::OnUpdate` marker that reads nothing.
 - **What the adapter reads:** only race, GM flag, session headless flag and security, in-memory quest status, and IP's lock-protected verified cache.
 - The reply text is behind a small mutex, because `.reload` can rewrite it.
 - The /who hook reads only the viewer's own state and the verified cache, by GUID.
@@ -110,11 +119,12 @@ Two identity notions are in use, and they are **deliberately different**. A sour
   - exact one-line login OR change, additive-only edits, existing hooks unchanged, every other file byte-identical;
   - the two identity sources: restriction uses only the verified cache, and the existing group-sync write population is every non-normal account.
 - **Local Core25 header syntax check** (`-fsyntax-only`) of the new script and both modified IP sources. Not a link.
-- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 33 lines:
+- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 45 lines:
   - the four hook declarations and enums, plus `BuildChatPacket`;
   - Core's wrong-faction checks before the whisper (ChatHandler.cpp:428 → :448) and trade (TradeHandler.cpp:830 → :842) hooks;
   - the /who exclusion (MiscHandler.cpp:401) before `matchCount++` (:407), so the visible list and count stay consistent;
-  - for the group-accept member scan: the accept hook call, `Group::GetMemberSlots` and `MemberSlot::guid`, `ObjectAccessor::FindPlayer` returning in-world players only, and the four social opcodes being `PROCESS_THREADUNSAFE` (with `MapSessionFilter` refusing them), so they run on the world thread.
+  - for the group-accept member scan: the accept hook call, `Group::GetMemberSlots` and `MemberSlot::guid`, `ObjectAccessor::FindPlayer` returning in-world players only, and the four social opcodes being `PROCESS_THREADUNSAFE` (with `MapSessionFilter` refusing them), so they run on the world thread;
+  - for T1: `WORLDHOOK_ON_UPDATE` and `OnWorldUpdate` after `sMapMgr->Update`, the before/after player-update hooks at the start and end of `Player::Update`, `Map::Update` calling `player->Update`, `Map::GetPlayers`, and `MapMgr` scheduling every map before `m_updater.wait()`.
 
 ## Evidence levels and rollback
 Source and model proof, plus a local header syntax check. No Worldserver link, gameplay or client test has been done.

@@ -138,12 +138,77 @@ namespace
         return marker;
     }
 
-    // T1: never read a player another map thread may be updating. Only the
-    // map pointers are compared; nothing else of either player is read.
-    bool MayReadPair(Player const* a, Player const* b)
+    // T1: the map this thread owns in the current world tick, recorded at
+    // the start of each player update it runs (that player's own map).
+    struct OwnedMapRecord
     {
-        Map const* map = a->FindMap();
-        return Policy::MayReadPair(WorldThread().IsCurrent(), map && map == b->FindMap());
+        Map const* map = nullptr;
+        uint64 tick = 0;
+        bool recorded = false;
+    };
+
+    OwnedMapRecord& ThisThreadOwnedMap()
+    {
+        thread_local OwnedMapRecord record;
+        return record;
+    }
+
+    // What this thread may read. On the world thread: any player. Off it:
+    // only players whose POINTER is in the owned map's player list; the
+    // candidate Player object itself is never touched to decide that.
+    struct ReadScope
+    {
+        bool anyPlayer = false;
+        Map const* ownedMap = nullptr;
+
+        bool Contains(Player const* candidate) const
+        {
+            if (!candidate)
+                return false;
+            if (anyPlayer)
+                return true;
+            if (!ownedMap)
+                return false;
+            for (auto const& ref : ownedMap->GetPlayers())
+                if (ref.GetSource() == candidate)
+                    return true;
+            return false;
+        }
+
+        // Members and leaders: off the world thread, only from the owned
+        // map's own list (no global lookup that touches foreign players).
+        Player* Resolve(ObjectGuid const& guid) const
+        {
+            if (anyPlayer)
+                return ObjectAccessor::FindPlayer(guid);
+            if (!ownedMap || !guid)
+                return nullptr;
+            for (auto const& ref : ownedMap->GetPlayers())
+                if (Player* owned = ref.GetSource())
+                    if (owned->GetGUID() == guid)
+                        return owned->IsInWorld() ? owned : nullptr;
+            return nullptr;
+        }
+    };
+
+    ReadScope CurrentReadScope()
+    {
+        ReadScope scope;
+        if (WorldThread().IsCurrent())
+        {
+            scope.anyPlayer = true;
+            return scope;
+        }
+        OwnedMapRecord const& owned = ThisThreadOwnedMap();
+        if (Policy::OwnedScopeValid(owned.recorded && owned.map, owned.tick, WorldThread().Tick()))
+            scope.ownedMap = owned.map;
+        return scope;
+    }
+
+    bool MayReadPair(ReadScope const& scope, Player const* a, Player const* b)
+    {
+        return Policy::MayReadPair(scope.anyPlayer, scope.ownedMap != nullptr,
+                                   scope.Contains(a), scope.Contains(b));
     }
 
     // initiator -> other. Returns true to ALLOW. Either side may be the bot.
@@ -151,7 +216,7 @@ namespace
     {
         if (!OptionOn() || !initiator || !other || initiator == other)
             return true;
-        if (!MayReadPair(initiator, other))
+        if (!MayReadPair(CurrentReadScope(), initiator, other))
             return true; // T1: unknown facts, not restricted (stock)
 
         // Human started it: block and (maybe) answer from the bot.
@@ -175,7 +240,18 @@ namespace
     public:
         F14SocialIsolationPlayerScript() : PlayerScript("IndividualProgression_F14SocialIsolation",
             {PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT, PLAYERHOOK_CAN_INIT_TRADE,
-             PLAYERHOOK_CAN_GROUP_INVITE, PLAYERHOOK_CAN_GROUP_ACCEPT}) { }
+             PLAYERHOOK_CAN_GROUP_INVITE, PLAYERHOOK_CAN_GROUP_ACCEPT,
+             PLAYERHOOK_ON_BEFORE_UPDATE}) { }
+
+        // T1 only: this thread is about to update `player`, so it owns that
+        // player's map for the rest of this world tick. Records, reads no
+        // other player.
+        void OnPlayerBeforeUpdate(Player* player, uint32 /*p_time*/) override
+        {
+            if (!OptionOn() || !player)
+                return;
+            ThisThreadOwnedMap() = {player->FindMap(), WorldThread().Tick(), true};
+        }
 
         using PlayerScript::OnPlayerCanUseChat;
 
@@ -212,17 +288,20 @@ namespace
         {
             if (!OptionOn() || !player || !group)
                 return true;
+            ReadScope const scope = CurrentReadScope();
+            if (!scope.Contains(player))
+                return true; // T1: the acceptor is not ours to read
             // 1. The leader, in both directions (unchanged pair rule).
-            Player* leader = ObjectAccessor::FindPlayerByLowGUID(group->GetLeaderGUID().GetCounter());
+            Player* leader = scope.Resolve(group->GetLeaderGUID());
             if (leader && !AllowPair(Policy::Surface::GroupAccept, player, leader, false))
                 return false;
             // 2. Every other current member, for a human who is still in
             // Vanilla. Unresolved members are skipped: never guessed by race.
-            return AllowGroupMembers(player, group);
+            return AllowGroupMembers(scope, player, group);
         }
 
     private:
-        bool AllowGroupMembers(Player* human, Group const* group)
+        bool AllowGroupMembers(ReadScope const& scope, Player* human, Group const* group)
         {
             Policy::Human const facts = ReadHuman(human);
             if (!Policy::HumanStillVanilla(facts))
@@ -233,11 +312,11 @@ namespace
             {
                 if (slot.guid == human->GetGUID() || slot.guid == group->GetLeaderGUID())
                     continue;
-                Player* member = ObjectAccessor::FindPlayer(slot.guid);
+                // Off the world thread only members on the owned map
+                // resolve; others are never touched (T1).
+                Player* member = scope.Resolve(slot.guid);
                 if (!member)
                     continue; // offline/unresolved: no facts, never restricted
-                if (!MayReadPair(human, member))
-                    continue; // T1: another map thread's player, never read
                 players.push_back(member);
                 bots.push_back(ReadBot(member));
             }
@@ -253,7 +332,7 @@ namespace
         }
     };
 
-    // T1 only: remembers which thread is the world thread. Reads nothing.
+    // T1 only: remembers the world thread and counts world ticks. Reads nothing.
     class F14SocialIsolationWorldThreadScript final : public WorldScript
     {
     public:

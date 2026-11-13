@@ -172,31 +172,50 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         return index;
     }
 
-    // T1: which thread may read another player's state. Client packets for
-    // the social opcodes run on the world thread while no map updates, so
-    // any pair is safe there. Playerbots AI calls the same handlers from a
-    // map update; there only players on the SAME map (one map thread) are
-    // safe. Otherwise nothing is read and the pair is not restricted,
-    // which is the existing "unknown means not restricted" fallback.
-    constexpr bool MayReadPair(bool onWorldThread, bool sameMap)
+    // T1: which thread may read another player's state.
+    //
+    // Client packets for the social opcodes run on the world thread while no
+    // map updates, so any pair may be read there. Playerbots AI calls the
+    // same handlers from a bot's update inside a map update. There, a player
+    // may be read only when its pointer is found in the player list of the
+    // map this thread owns in the current world tick: either the map it is
+    // updating now, or one it already finished this tick (each map updates
+    // once per tick, and the world waits for all of them before the tick
+    // ends). The foreign Player object is never touched to decide this.
+    // Anything else is not read and not restricted: the existing "unknown
+    // means not restricted" fallback (owner decision: allow).
+    constexpr bool OwnedScopeValid(bool recorded, std::uint64_t recordedTick, std::uint64_t currentTick)
     {
-        return onWorldThread || sameMap;
+        return recorded && recordedTick == currentTick;
     }
 
-    // Remembers the world thread (marked from the world update). Before the
-    // first mark nothing counts as the world thread.
+    constexpr bool MayReadPair(bool onWorldThread, bool ownedScopeValid, bool firstInOwnedMap,
+                               bool secondInOwnedMap)
+    {
+        return onWorldThread || (ownedScopeValid && firstInOwnedMap && secondInOwnedMap);
+    }
+
+    // Remembers the world thread and counts world ticks; marked from the
+    // world update, which runs after every map update of the tick. Before
+    // the first mark nothing counts as the world thread.
     class WorldThreadMarker
     {
     public:
-        void Mark() { _id.store(std::this_thread::get_id(), std::memory_order_release); }
+        void Mark()
+        {
+            _id.store(std::this_thread::get_id(), std::memory_order_release);
+            _tick.fetch_add(1, std::memory_order_acq_rel);
+        }
         bool IsCurrent() const
         {
             std::thread::id const id = _id.load(std::memory_order_acquire);
             return id != std::thread::id() && id == std::this_thread::get_id();
         }
+        std::uint64_t Tick() const { return _tick.load(std::memory_order_acquire); }
 
     private:
         std::atomic<std::thread::id> _id{};
+        std::atomic<std::uint64_t> _tick{0};
     };
 
     // /who carries only a cached GUID and race: the target is restricted

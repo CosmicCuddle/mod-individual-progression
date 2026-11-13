@@ -88,30 +88,66 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertEqual(hooks, sorted([
             "PLAYERHOOK_CAN_GROUP_ACCEPT", "PLAYERHOOK_CAN_GROUP_INVITE", "PLAYERHOOK_CAN_INIT_TRADE",
             "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT", "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY",
-            "WORLDHOOK_ON_UPDATE"]))
+            "WORLDHOOK_ON_UPDATE", "PLAYERHOOK_ON_BEFORE_UPDATE"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
-            "OnPlayerCanInitTrade", "OnPlayerCanUseChat", "OnUpdate"]))
+            "OnPlayerCanInitTrade", "OnPlayerCanUseChat", "OnUpdate", "OnPlayerBeforeUpdate"]))
+
+    def body(self, signature, end="\n    }\n"):
+        return self.src.split(signature, 1)[1].split(end, 1)[0]
 
     def test_t1_no_cross_map_read_off_the_world_thread(self):
-        # The world-update hook only marks the thread; it reads nothing.
+        # The world-update hook only marks the thread and tick; it reads nothing.
         upd = re.search(r"void OnUpdate\(uint32\s*\)\s*override\s*\{([^}]*)\}", self.src)
         self.assertIsNotNone(upd)
         self.assertEqual(upd.group(1).strip(), "WorldThread().Mark();")
-        guard = self.src.split("bool MayReadPair(Player const* a, Player const* b)", 1)[1].split("\n    }\n", 1)[0]
-        self.assertIn("Map const* map = a->FindMap();", guard)
-        self.assertIn("Policy::MayReadPair(WorldThread().IsCurrent(), map && map == b->FindMap())", guard)
-        # The guard runs before any fact is read, in the pair rule and the scan.
-        allow = self.src.split("bool AllowPair(", 1)[1].split("\n    }\n", 1)[0]
-        self.assertRegex(allow, r"if \(!MayReadPair\(initiator, other\)\)\s*return true;")
-        self.assertLess(allow.index("MayReadPair("), allow.index("ReadHuman("))
-        scan = self.src.split("bool AllowGroupMembers(", 1)[1].split("\n        }\n", 1)[0]
-        self.assertRegex(scan, r"if \(!MayReadPair\(human, member\)\)\s*continue;")
-        self.assertLess(scan.index("MayReadPair("), scan.index("ReadBot(member)"))
+        # The per-update record touches only the player this thread updates.
+        rec = self.body("void OnPlayerBeforeUpdate(Player* player, uint32 ) override", "\n        }\n")
+        self.assertIn("ThisThreadOwnedMap() = {player->FindMap(), WorldThread().Tick(), true};", rec)
+        self.assertEqual(self.src.count("->FindMap()"), 1, "FindMap only on the player being updated")
         policy = strip_comments(read(POLICY))
-        self.assertIn("return onWorldThread || sameMap;", policy)
+        self.assertIn("return onWorldThread || (ownedScopeValid && firstInOwnedMap && secondInOwnedMap);", policy)
+        self.assertIn("return recorded && recordedTick == currentTick;", policy)
         self.assertIn("return id != std::thread::id() && id == std::this_thread::get_id();", policy)
+
+    def test_t1_zero_foreign_access_before_ownership(self):
+        # Membership is decided by pointer identity in the owned map's list.
+        contains = self.body("bool Contains(Player const* candidate) const", "\n        }\n")
+        self.assertIn("if (ref.GetSource() == candidate)", contains)
+        self.assertNotIn("candidate->", contains)
+        self.assertLess(contains.index("if (anyPlayer)"), contains.index("ownedMap->GetPlayers()"))
+        # Off the world thread, resolution uses only the owned map's list.
+        resolve = self.body("Player* Resolve(ObjectGuid const& guid) const", "\n        }\n")
+        self.assertRegex(resolve, r"if \(anyPlayer\)\s*return ObjectAccessor::FindPlayer\(guid\);")
+        self.assertEqual(resolve.count("ObjectAccessor::"), 1)
+        guard = self.body("bool MayReadPair(ReadScope const& scope, Player const* a, Player const* b)")
+        self.assertNotRegex(guard, r"\b[ab]->")
+        self.assertIn("scope.Contains(a), scope.Contains(b)", guard)
+        # Pair rule: nothing of either player before the guard.
+        allow = self.body("bool AllowPair(")
+        pre = allow[:allow.index("MayReadPair(")]
+        self.assertNotRegex(pre, r"\b(initiator|other)->")
+        self.assertRegex(allow, r"if \(!MayReadPair\(CurrentReadScope\(\), initiator, other\)\)\s*return true;")
+        self.assertLess(allow.index("MayReadPair("), allow.index("ReadHuman("))
+        # Hooks: arguments are passed straight through, never dereferenced first.
+        for sig, names in (("bool OnPlayerCanUseChat(Player* player", ("player", "receiver")),
+                           ("bool OnPlayerCanInitTrade(Player* player", ("player", "target")),
+                           ("bool OnPlayerCanGroupInvite(Player* player", ("player", "invitee"))):
+            hook = self.body(sig, "\n        }\n")
+            for name in names:
+                self.assertNotIn(name + "->", hook, sig)
+        invite = self.body("bool OnPlayerCanGroupInvite(Player* player", "\n        }\n")
+        self.assertIn("ObjectAccessor::FindPlayerByName(membername, false)", invite)  # no IsInWorld read
+        # Accept: the acceptor must be ours before anything of it is read.
+        accept = self.body("bool OnPlayerCanGroupAccept(Player* player, Group* group) override", "\n        }\n")
+        self.assertRegex(accept, r"if \(!scope\.Contains\(player\)\)\s*return true;")
+        self.assertNotIn("player->", accept)
+        self.assertIn("Player* leader = scope.Resolve(group->GetLeaderGUID());", accept)
+        self.assertNotIn("FindPlayerByLowGUID", self.src)
+        scan = self.body("bool AllowGroupMembers(", "\n        }\n")
+        self.assertIn("Player* member = scope.Resolve(slot.guid);", scan)
+        self.assertNotIn("ObjectAccessor::", scan)
 
     def test_no_world_hiding_or_mutation(self):
         for token in ("OnF14ShouldSuppressPlayerForViewer", "SuppressCreature", "SetPhaseMask", "UpdateObjectVisibility",
@@ -158,12 +194,12 @@ class HooksAndAuthority(unittest.TestCase):
         accept = self.src.split("bool OnPlayerCanGroupAccept(", 1)[1].split("\n        }\n", 1)[0]
         # 1. The leader pair rule is kept, in both directions.
         self.assertIn("if (leader && !AllowPair(Policy::Surface::GroupAccept, player, leader, false))", accept)
-        self.assertLess(accept.index("AllowPair("), accept.index("AllowGroupMembers(player, group)"))
+        self.assertLess(accept.index("AllowPair("), accept.index("AllowGroupMembers(scope, player, group)"))
         scan = self.src.split("bool AllowGroupMembers(", 1)[1].split("\n        }\n", 1)[0]
         # 2. Only a human still in Vanilla is checked; every current member is read.
         self.assertIn("if (!Policy::HumanStillVanilla(facts))", scan)
         self.assertIn("group->GetMemberSlots()", scan)
-        self.assertIn("Player* member = ObjectAccessor::FindPlayer(slot.guid);", scan)
+        self.assertIn("Player* member = scope.Resolve(slot.guid);", scan)
         # 3. Unresolved members are skipped, never classified from the slot.
         self.assertRegex(scan, r"if \(!member\)\s*continue;")
         self.assertIn("bots.push_back(ReadBot(member));", scan)

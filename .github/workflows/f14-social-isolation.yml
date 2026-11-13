@@ -124,6 +124,17 @@ jobs:
               ("Scripting/ScriptDefines/WorldScript.h", 71, "virtual void OnUpdate(uint32 /*diff*/) { }"),
               ("World/World.cpp", 1255, "sMapMgr->Update(diff);"),
               ("World/World.cpp", 1356, "sScriptMgr->OnWorldUpdate(diff);"),
+              # T1 ownership proof: a player update starts with the before-update hook on the
+              # thread updating its map; Playerbots AI runs later in the after-update hook; each
+              # map is scheduled once per tick and the world waits for all before the tick ends.
+              ("Scripting/ScriptDefines/PlayerScript.h", 59, "PLAYERHOOK_ON_BEFORE_UPDATE,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 306, "virtual void OnPlayerBeforeUpdate(Player* /*player*/, uint32 /*p_time*/) { }"),
+              ("Entities/Player/PlayerUpdates.cpp", 60, "sScriptMgr->OnPlayerBeforeUpdate(this, p_time);"),
+              ("Entities/Player/PlayerUpdates.cpp", 427, "sScriptMgr->OnPlayerAfterUpdate(this, p_time);"),
+              ("Maps/Map.cpp", 489, "player->Update(s_diff);"),
+              ("Maps/Map.h", 335, "PlayerList const& GetPlayers() const { return m_mapRefMgr; }"),
+              ("Maps/MapMgr.cpp", 274, "m_updater.schedule_update(*iter->second"),
+              ("Maps/MapMgr.cpp", 280, "m_updater.wait();"),
           ]
           bad = 0
           for name, line, text in anchors:
@@ -133,5 +144,5 @@ jobs:
                   print(f"FAIL {name}:{line}: expected {text!r}, got {got!r}")
           if bad:
               raise SystemExit(f"{bad} Core25 social anchor(s) drifted")
-          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook")
+          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership")
           PY
