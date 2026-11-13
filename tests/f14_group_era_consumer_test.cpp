@@ -142,6 +142,54 @@ int main()
                       C::Departure::Relog).status == C::Status::Stale);
     CHECK(wrap.Current(nearWrap).temporary);
 
+    // Per-group counters are not ordering keys. Moving A -> B with B's
+    // restarted counter is stale even though B's group GUID is different.
+    C::Tracker<1> move;
+    C::Input groupA = human;
+    groupA.identity.membershipGeneration = 5;
+    CHECK(move.ObserveGrouped(groupA).temporary);
+    C::Input groupB = groupA;
+    groupB.identity.groupGuid = 202;
+    groupB.identity.membershipGeneration = 1;
+    CHECK(move.ObserveGrouped(groupB).status == C::Status::Stale);
+    CHECK(move.Current(groupA).temporary);
+    groupB.identity.membershipGeneration = 5;
+    CHECK(move.ObserveGrouped(groupB).status == C::Status::Ambiguous);
+    CHECK(!move.Current(groupA).temporary);
+    CHECK(!move.Current(groupB).temporary);
+
+    // A higher-order increment may reset lower-order fields. Without that
+    // increment, changing a current identity never reads the old override.
+    C::Tracker<1> lex;
+    C::Input ordered = human;
+    ordered.identity.mapGeneration = 10;
+    ordered.identity.membershipGeneration = 10;
+    ordered.identity.leaderRevision = 10;
+    CHECK(lex.ObserveGrouped(ordered).temporary);
+    C::Input changed = ordered;
+    ++changed.identity.sessionEpoch;
+    CHECK(!lex.Current(changed).temporary);
+    changed = ordered;
+    ++changed.identity.mapGeneration;
+    CHECK(!lex.Current(changed).temporary);
+    changed = ordered;
+    ++changed.identity.membershipGeneration;
+    CHECK(!lex.Current(changed).temporary);
+    ordered.identity.mapGeneration = 11;
+    ordered.identity.membershipGeneration = 1;
+    ordered.identity.leaderRevision = 1;
+    CHECK(lex.ObserveGrouped(ordered).temporary);
+    ordered.identity.sessionEpoch = 2;
+    ordered.identity.mapGeneration = 1;
+    CHECK(lex.ObserveGrouped(ordered).temporary);
+
+    // A blind revoke for a never-observed bot consumes a permanent slot.
+    // Runtime callers must avoid meaningless revokes or prove retirement.
+    C::Tracker<1> blind;
+    CHECK(blind.Revoke(human.identity, true, human.race, human.earnedStage,
+                       C::Departure::Leave).status == C::Status::Revoked);
+    CHECK(blind.ObserveGrouped(elf).status == C::Status::Capacity);
+
     std::size_t combinations = 0;
     for (std::uint8_t race : std::array<std::uint8_t, 10>{1, 2, 3, 4, 5, 6, 7, 8, 10, 11})
         for (std::uint8_t earned = 0; earned <= 18; ++earned)

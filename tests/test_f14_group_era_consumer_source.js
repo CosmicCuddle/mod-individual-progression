@@ -54,4 +54,20 @@ check(model.includes("std::array<Entry, Capacity>") && !model.includes("std::vec
 check(test.includes("combinations") && test.includes("Status::Capacity") &&
       test.includes("Status::Ambiguous") && test.includes("Status::Stale"),
       "missing matrix or failure-state witnesses");
+function exactCurrent(source) {
+    const current = source.split("View Current(")[1]?.split("View Revoke(")[0];
+    return current?.includes("Same(input.identity, entry->identity)") &&
+           current.includes("entry->race == input.race") &&
+           current.includes("entry->groupStage == input.groupStage");
+}
+check(exactCurrent(model), "Current must reject a changed session/map/membership context");
+mutant = model.replace(/(View Current\([\s\S]*?)Same\(input\.identity, entry->identity\)/,
+                       "$1true");
+check(mutant !== model && !exactCurrent(mutant), "G1 changed-identity read mutation escaped");
+for (const caseName of ["groupB.identity.membershipGeneration = 1",
+                       "groupB.identity.membershipGeneration = 5",
+                       "++changed.identity.sessionEpoch", "++changed.identity.mapGeneration",
+                       "++changed.identity.membershipGeneration",
+                       "ordered.identity.mapGeneration = 11", "C::Tracker<1> blind"])
+    check(test.includes(caseName), "missing producer-contract fixture: " + caseName);
 console.log("PASS F14 group-era consumer source: exact contexts, stale revoke, earned departure, no writes");
