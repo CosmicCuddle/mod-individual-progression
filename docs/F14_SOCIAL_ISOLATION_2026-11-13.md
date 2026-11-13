@@ -66,6 +66,8 @@ None of these is ever restricted. An unknown human stage (out of world) is treat
 - **Mail:** a hook exists, but an offline receiver can't be verified. Not included.
 - **/who:** inert in Core builds without `COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT`.
 - **Stage range:** only the Vanilla-vs-TBC restriction for now. Later-era isolation (TBC human vs Wrath bot) is not in scope.
+- **Group accept checks the leader only.** A Vanilla human can still accept a group led by someone else that already contains a restricted bot (when `EnforceGroupRules = 0`). Checking every member would be a gameplay-policy choice, so it awaits an owner decision.
+- **Identity timing:** the verified cache is filled only for bots that log in while an F14 option is on. Bots already online when the option is enabled by `.reload` stay unrestricted until they relog (this fails toward stock behaviour).
 
 ## Tests
 - **Native** (`tests/f14_social_isolation_policy_test.cpp`, GCC/Clang, C++17/20, with and without NDEBUG):
