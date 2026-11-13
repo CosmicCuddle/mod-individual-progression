@@ -1260,11 +1260,12 @@ Focused native tests require every completeness family independently, exercise t
   - New: `src/IndividualProgressionF14SocialIsolationPolicy.h` (pure) and `src/IndividualProgressionF14SocialIsolationScript.cpp` (separate PlayerScript plus a /who-only WorldObjectScript).
   - Changed: additive config members and load, plus one AddSC call (`src/IndividualProgression.h/.cpp`); one OR-reason in the login identity gate (`src/IndividualProgressionPlayer.cpp`); three default-safe keys (`conf/individualProgression.conf.dist`).
   - Tests, a dispatch-only workflow and `docs/F14_SOCIAL_ISOLATION_2026-11-13.md`.
-- **Affected paths** (exactly 14 vs `aed05a92`; pinned by the workflow scope step):
+- **Affected paths** (exactly 15 vs `aed05a92`; pinned by the workflow scope step):
   - `.github/workflows/f14-social-isolation.yml`
   - `conf/individualProgression.conf.dist`
   - `docs/CUSTOM_MODIFICATIONS_REGISTER.md`
   - `docs/F14_SOCIAL_ISOLATION_2026-11-13.md`
+  - `docs/F14_SOCIAL_ISOLATION_PLAYERBOTS_DISPATCH_DESIGN_2026-11-13.md` (design only; no Playerbots edit)
   - `docs/F14_SOCIAL_ISOLATION_RUNTIME_TEST_PLAN_2026-11-13.md`
   - `src/IndividualProgression.cpp`
   - `src/IndividualProgression.h`
@@ -1293,6 +1294,7 @@ Focused native tests require every completeness family independently, exercise t
   - **(b)** a restricted bot's solo queue join is quietly refused while a still-Vanilla human (re-validated live) waits in a matching queue and bracket;
   - **(a)** its "enter battle" is refused when it's invited to an instance that holds a still-Vanilla human (value-only roster; ownership-proven bot reads only).
   - Leaving a queue is never refused; TBC/Wrath humans are stock.
+- **Bot-started group invite (CS01 6865093100, CHANGES REQUIRED):** Playerbots calls thread-unsafe Core handlers directly from bot AI, so Core's own name lookup runs on a map thread before any hook. IP no longer adds a global lookup there. The cross-repository fix (queue the packet, or use a world-thread `PlayerbotOperation`) is a design awaiting CS01 review.
 - **Guild invite (owner-approved Core change):** a new `OnPlayerCanGuildInvite` Core hook, delivered as an additive patch script for the Core lane; the module refuses a restricted pair through it and is compiled out against an unpatched Core.
 - **Duel and mail:** a duel request between a restricted pair fails through the global `AllSpellScript::OnSpellCheckCast` (no DB row). Mail is refused for a restricted pair when the receiver is online (`OnPlayerCanSendMail`, world thread).
 - **Battleground matcher (option (d), owner-approved 13 Nov 2026):** `AllBattlegroundScript::CanAddGroupToMatchingPool` (an existing Core25 hook, so **no Core change**) refuses a candidate group that would put a still-Vanilla human and a restricted bot in one match, whichever came first. It is read-only and runs on the world thread.

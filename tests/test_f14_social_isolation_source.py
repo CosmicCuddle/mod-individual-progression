@@ -322,6 +322,14 @@ class HooksAndAuthority(unittest.TestCase):
                 self.assertNotIn(name + "->", hook, sig)
         invite = self.body("bool OnPlayerCanGroupInvite(Player* player", "\n        }\n")
         self.assertIn("ObjectAccessor::FindPlayerByName(membername, false)", invite)  # no IsInWorld read
+        # CS01 6865093100: the global name map only on the world thread;
+        # off it, the name is resolved only among the owned map's players.
+        self.assertIn("Player* invitee = scope.anyPlayer ? ObjectAccessor::FindPlayerByName(membername, false)\n"
+                      "                                              : scope.ResolveByName(membername);", invite)
+        self.assertIn("return AllowPairIn(scope, Policy::Surface::GroupInvite, player, invitee, false);", invite)
+        byname = self.body("Player* ResolveByName(std::string const& name) const", "\n        }\n")
+        self.assertIn("ownedMap->GetPlayers()", byname)
+        self.assertNotIn("ObjectAccessor", byname)
         # Accept: the acceptor must be ours before anything of it is read.
         accept = self.body("bool OnPlayerCanGroupAccept(Player* player, Group* group) override", "\n        }\n")
         self.assertRegex(accept, r"if \(!scope\.Contains\(player\)\)\s*return true;")

@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: "Verify #172 ancestry and EXACT fourteen-path scope"
+      - name: "Verify #172 ancestry and EXACT fifteen-path scope"
         shell: bash
         run: |
           set -euo pipefail
@@ -35,6 +35,7 @@ jobs:
             'conf/individualProgression.conf.dist' \
             'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
             'docs/F14_SOCIAL_ISOLATION_2026-11-13.md' \
+            'docs/F14_SOCIAL_ISOLATION_PLAYERBOTS_DISPATCH_DESIGN_2026-11-13.md' \
             'docs/F14_SOCIAL_ISOLATION_RUNTIME_TEST_PLAN_2026-11-13.md' \
             'src/IndividualProgression.cpp' \
             'src/IndividualProgression.h' \

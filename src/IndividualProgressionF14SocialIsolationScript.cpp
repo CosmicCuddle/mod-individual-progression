@@ -243,6 +243,20 @@ namespace
             return Policy::OwnedListContains(ownedMap->GetPlayers(), candidate);
         }
 
+        // Off the world thread: a player name only among the owned map's
+        // players (never the global name map). Exact, case-sensitive match,
+        // as Core's name map uses the normalized name.
+        Player* ResolveByName(std::string const& name) const
+        {
+            if (!ownedMap || name.empty())
+                return nullptr;
+            for (auto const& ref : ownedMap->GetPlayers())
+                if (Player* owned = ref.GetSource())
+                    if (owned->GetName() == name)
+                        return owned->IsInWorld() ? owned : nullptr;
+            return nullptr;
+        }
+
         // Members and leaders: off the world thread, only from the owned
         // map's own list (no global lookup that touches foreign players).
         Player* Resolve(ObjectGuid const& guid) const
@@ -508,14 +522,22 @@ namespace
             return AllowPair(Policy::Surface::Trade, player, target, false);
         }
 
+        // A client CMSG_GROUP_INVITE is PROCESS_THREADUNSAFE (world thread),
+        // where the global name lookup is safe. Playerbots may call the
+        // handler from bot AI on a map thread (CS01 6865093100): there IP
+        // never uses the global name map and resolves the name only among
+        // the owned map's players. Core's own earlier lookup on that route is
+        // a cross-repository issue (Playerbots dispatch), not fixed here.
         bool OnPlayerCanGroupInvite(Player* player, std::string& membername) override
         {
             if (!OptionOn() || !player)
                 return true;
-            Player* invitee = ObjectAccessor::FindPlayerByName(membername, false);
+            ReadScope const scope = CurrentReadScope();
+            Player* invitee = scope.anyPlayer ? ObjectAccessor::FindPlayerByName(membername, false)
+                                              : scope.ResolveByName(membername);
             if (!invitee)
                 return true; // unknown target: not ours to decide
-            return AllowPair(Policy::Surface::GroupInvite, player, invitee, false);
+            return AllowPairIn(scope, Policy::Surface::GroupInvite, player, invitee, false);
         }
 
         // Accepting an invitation. A client CMSG_GROUP_ACCEPT is
