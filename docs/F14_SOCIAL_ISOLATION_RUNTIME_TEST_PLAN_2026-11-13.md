@@ -1,0 +1,63 @@
+# F14 social isolation — runtime test plan (PLAN ONLY)
+
+**Owner:** CosmicCuddle. **Developer:** CS03-IP. **Date:** 13 November 2026.
+**Applies to:** social branch head at or after `b4df7b35`. **Status:** a plan for a future, owner-approved **test realm**. Nothing here has been run. It doesn't authorise any action on the live server, its databases or its configuration.
+
+## Why a runtime plan
+The native and source tests prove the policy and the wiring, but these things can only be shown on a running Worldserver with a real client:
+- hook ordering on login and relog;
+- map transfers;
+- concurrent /who;
+- the Playerbots code paths;
+- what the client actually displays.
+
+## Preconditions (test realm only)
+- **Build:** Core25-compatible, with Playerbots, and with Core's `COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT` for the /who cases (W1–W3). Without it, W1–W3 are expected to be inert.
+- **IP options:**
+  - `IndividualProgression.Enable = 1`;
+  - `IndividualProgression.F14.RandomBotSocialIsolation = 1`;
+  - every other F14 option and Paid stay `0`.
+- **Characters:**
+  - **H0**, a human player at stage 0–7 (set with `.ip set <name> 7` from a GM account; read back with `.ip get <name>`);
+  - **H8**, a second human at stage 8 or above;
+  - **G**, a GM account.
+- **Bots:** at least one Blood Elf or Draenei RandomBot (**R**) and one ordinary-race RandomBot (**N**). Both must **log in after** the option is on, because identity is only cached at login.
+- **Optional bots:** an Altbot (**A**) and a SelfBot (**S**) of race 10/11, if available.
+- **Logging:** the module writes **no log lines** for this feature. All evidence comes from client chat, the trade window, group frames and the /who list.
+
+## Cases
+Expected results assume the option is ON. Each case lists the steps and then the expected result.
+
+| ID | Steps | Expected |
+|---|---|---|
+| P1 | H0 whispers R | the whisper isn't delivered; H0 receives one in-character whisper from R |
+| P2 | H0 whispers R five times within 60 s | still exactly one reply |
+| P3 | wait 60 s or more, then H0 whispers R | one more reply |
+| P4 | H0 opens trade with R, then invites R to a group | every attempt is declined. Replies follow the per-pair cooldown, which is shared across surfaces. (Accepting an invite from R can't be reached here, because R's own invite to H0 is already declined at the invite step) |
+| P5 | R initiates (if a bot can be made to whisper, trade or invite H0) | declined silently, with no reply |
+| P6 | H8 does P1 and P4 | normal stock behaviour |
+| P7 | `.ip set H0 8` while H0 is online, then H0 whispers R | delivered normally (the restriction lifts at once). Then `.ip set H0 7` and repeat: restricted again |
+| N1 | H0 interacts with N, and with A and S if available | normal stock behaviour (never decided by race) |
+| N2 | G in `.gm on` interacts with R | stock |
+| N3 | R logged in **before** the option was turned on, then `.reload config` | R stays unrestricted until it relogs (documented fail-open) |
+| W1 | H0 runs /who for R's name or zone | R isn't listed, and the result count excludes R |
+| W2 | H8 runs the same /who | R is listed |
+| W3 | R logs out, then H0 runs /who repeatedly; R logs back in | no stale entry and no error; R is still excluded for H0 after the relog (checks S10) |
+| L1 | H0 relogs within 60 s of a reply, then whispers R | no new reply until the cooldown ends (the cooldown is in memory and keyed by GUID) |
+| L2 | R relogs, then H0 whispers R | restricted. One reply, subject to the pair cooldown |
+| L3 | H0 whispers R at the moment R zones or changes map | no crash. Either restricted, or Core's own "not found" |
+| L4 | H0 whispers R, then logs out immediately | no crash; the reply is simply lost |
+| C1 | two humans on different maps whisper R at the same time, for 60 s | no crash; each human gets at most one reply per cooldown |
+| G1 | H8 leads a group that contains R; H0 accepts H8's invite | **H0 joins** (current leader-only rule, S1). Record the result for the owner decision |
+| PB1 | ask R, through Playerbots commands or its AI, to invite or trade with H0 | **UNKNOWN.** Record whether Core's invite and trade hooks fire for bot-initiated actions |
+| OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |
+
+## Pass criteria and evidence
+- **Pass criteria:**
+  - every expected result above is met;
+  - no crash, assert or error spam appears in the Worldserver console;
+  - no character's stage changes, except for the explicit `.ip set` steps.
+- **Evidence to capture:** for each case, screenshots or chat-log excerpts plus `.ip get` before and after, along with the build fingerprint and the configuration values used.
+
+## Rollback
+Set the option to `0` and `.reload config`, or restart without the module build. No database or client change is involved.
