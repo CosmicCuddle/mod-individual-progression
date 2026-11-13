@@ -1,4 +1,6 @@
 #include "IndividualProgressionF14CurrentPassIdentity.h"
+#include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <iostream>
 
@@ -9,6 +11,7 @@ int main()
 {
     P::ViewerIdentity const a{100, 10, 1000, {1, 2}};
     P::ViewerIdentity const b{101, 11, 1001, {1, 2}};
+    P::ViewerIdentity const c{102, 13, 1004, {1, 2}};
     P::ViewerIdentity const newEpoch{100, 12, 1002, {1, 2}};
     P::ViewerIdentity const newMap{100, 10, 1003, {1, 3}};
 
@@ -140,6 +143,46 @@ int main()
         CHECK(t.Inspect().admissionsClosed && !t.Inspect().poisoned);
         CHECK(t.Begin(3002, newEpoch) == P::Result::Refused);
         CHECK(t.Begin(3000, a) == P::Result::Refused);
+    }
+    {
+        std::array<std::uint64_t, 3> order{3100, 3101, 3102};
+        do
+        {
+            P::Tracker<3, 3> t;
+            CHECK(t.Begin(3100, a) == P::Result::Recorded);
+            CHECK(t.Begin(3101, b) == P::Result::Recorded);
+            CHECK(t.Begin(3102, c) == P::Result::Recorded);
+            for (std::uint64_t token : order)
+            {
+                P::ViewerIdentity const owner = token == 3100 ? a : token == 3101 ? b : c;
+                CHECK(t.End(token, owner) == P::Result::Ended);
+            }
+            CHECK(t.Inspect().active == 0 && t.Inspect().closed == 3);
+            CHECK(t.Inspect().admissionsClosed && !t.Inspect().poisoned);
+            CHECK(t.Begin(3100, a) == P::Result::Refused);
+            CHECK(t.Begin(3101, b) == P::Result::Refused);
+            CHECK(t.Begin(3102, c) == P::Result::Refused);
+            for (std::uint64_t i = 0; i < 20; ++i)
+                CHECK(t.Begin(3200 + i, {200 + i, 100 + i, 4000 + i, {1, 2}}) ==
+                      P::Result::Refused);
+            CHECK(t.Inspect().closed == 3 && !t.Inspect().poisoned);
+        } while (std::next_permutation(order.begin(), order.end()));
+    }
+    {
+        P::Tracker<2, 2> t;
+        CHECK(t.Begin(3300, a) == P::Result::Recorded);
+        CHECK(t.Begin(3301, b) == P::Result::Recorded);
+        CHECK(t.End(3300, a) == P::Result::Ended);
+        CHECK(t.Begin(3302, c) == P::Result::Recorded);
+        CHECK(t.End(3302, c) == P::Result::Ended);
+        CHECK(t.Inspect().admissionsClosed && t.Inspect().active == 1);
+        CHECK(t.IsActive(3301, b));
+        CHECK(t.ObserveBatch(3301, b) == P::Result::BatchObserved);
+        CHECK(t.End(3399, a) == P::Result::Refused);
+        CHECK(t.IsActive(3301, b) && !t.Inspect().poisoned);
+        CHECK(t.End(3301, b) == P::Result::Ended);
+        CHECK(t.Begin(3301, b) == P::Result::Refused);
+        CHECK(t.Begin(3303, c) == P::Result::Refused);
     }
 
     // A real whole-table token ownership contradiction still fails closed.

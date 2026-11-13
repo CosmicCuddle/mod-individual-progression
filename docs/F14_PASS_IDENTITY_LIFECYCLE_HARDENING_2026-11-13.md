@@ -40,7 +40,7 @@ done
 node tests/test_f14_pass_identity_lifecycle_source.js
 ```
 
-The standalone test covers normal Begin/Batch/End; nested A/B; unrelated viewer isolation; closed replay; duplicate and unknown End; nonzero invalid-identity Begin replay and active-owner quarantine; stale login epoch and map generation; delayed old-identity revoke and safe legacy GUID refusal; exact capacity and capacity+1; slot reuse; local quarantine; closed-history exhaustion; and genuine global corruption. The source contract checks bounded arrays, refusal of GUID-only deletion, unchanged runtime callsite, and absence of concealment/restoration-debt authority. An in-memory negative mutation must fail if the invalid-Begin replay fence is removed.
+The standalone test covers normal Begin/Batch/End; nested A/B; unrelated viewer isolation; closed replay; duplicate and unknown End; nonzero invalid-identity Begin replay and active-owner quarantine; stale login epoch and map generation; delayed old-identity revoke and safe legacy GUID refusal; exact capacity and capacity+1; slot reuse; local quarantine; closed-history exhaustion across all six three-token End orders; a live pass that survives saturation; and genuine global corruption. The source contract checks bounded arrays, refusal of GUID-only deletion, unchanged runtime callsite, and absence of concealment/restoration-debt authority. In-memory negative mutations must fail if either the invalid-Begin replay fence or hard admission stop is removed.
 
 ## Evidence and release gate
 

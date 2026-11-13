@@ -30,6 +30,15 @@ requireContract(retainsInvalidBeginToken(begin),
 const replayRegression = begin.replace("RememberClosedLocked(token, {}, false);", "");
 requireContract(replayRegression !== begin && !retainsInvalidBeginToken(replayRegression),
                 "source guard must reject loss of the invalid-Begin replay fence");
+function admissionsStopAtSaturation(source) {
+    return source?.includes("if (_admissionsClosed)") &&
+           source.includes("return RefuseLocked();");
+}
+requireContract(admissionsStopAtSaturation(begin),
+                "new Begin admissions must stop after bounded history saturation");
+const saturationRegression = begin.replace("if (_admissionsClosed)", "if (false)");
+requireContract(saturationRegression !== begin && !admissionsStopAtSaturation(saturationRegression),
+                "source guard must reject bypass of hard saturation");
 const legacyRevoke = header.split("std::size_t RevokeViewer(std::uint64_t)")[1]?.split(
     "// Reserved for independently proven whole-table corruption.")[0];
 requireContract(legacyRevoke?.includes("return 0;") && !legacyRevoke.includes("_slots"),
