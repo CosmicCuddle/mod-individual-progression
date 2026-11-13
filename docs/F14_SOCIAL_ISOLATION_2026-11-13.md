@@ -61,7 +61,8 @@ Two identity notions are in use, and they are **deliberately different**. A sour
 - That floor *protects* (it prevents a downgrade), so its `eligibleBot` input should cover **at least the whole sync write population**. Otherwise a Blood Elf/Draenei Altbot or excluded account could still be synced down to a Vanilla leader with `EnforceGroupRules = 0`.
 - Feeding it from the verified RandomBot cache alone would leave that hole.
 - Feeding the social restriction from `!isNormalAccount` would be wrong in the opposite direction, because Altbots and excluded humans would be restricted.
-- Whether the owner's "BE/Draenei bots" rule includes Altbots and excluded accounts is **UNKNOWN**. It's recorded for CS01/the owner; this branch doesn't decide it.
+- **Owner decision (13 Nov 2026, relayed in Coordination #13):** Altbots are included in the BE/Draenei TBC group floor, and Altbots get the same treatment as normal players. This branch already never socially restricts Altbots, so nothing changes here. The floor itself is Codex's line (#175/#176).
+- Excluded (non-bot) accounts were not addressed by that decision, so they remain **UNKNOWN**.
 
 ## What is left unchanged
 - These are new, separate scripts. Core ANDs boolean hooks across scripts, so every existing IP hook (including the `EnforceGroupRules` invite/accept checks) is byte-identical and still runs.
