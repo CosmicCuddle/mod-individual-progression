@@ -1,0 +1,106 @@
+# Codex F14 candidate graph and readiness audit (13 November 2026)
+
+This is a review record, not a merged Register or a release plan. All commits below are source candidates, F14/Paid remain OFF, and the installed binary, gameplay and client state are unknown. Coordination: [#51](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/51). The common IP parent is `aed05a92f262362608f5d643c8570b504189aae0` (IP PR #172). No candidate here has been merged or deployed.
+
+| Candidate | Parent → HEAD | Scope | Evidence / unknown |
+| --- | --- | --- | --- |
+| [#174](https://github.com/CosmicCuddle/mod-individual-progression/pull/174) | `aed05a92` → `3bf97b4d6edc746cb0ff7e7e02a55d6ab9fc5b32` | Pure current-pass identity tracker, source test, Register, design note | CS01 reconstructed-source GCC/Clang C++17/20 normal/NDEBUG 8/8 at this head; no full Worldserver/gameplay |
+| [#175](https://github.com/CosmicCuddle/mod-individual-progression/pull/175) | `aed05a92` → `005d8949334b11c7c985225d6aa9a1cc120157a1` | Pure BE/Draenei grouped era floor, test, Register, note | CS01 independent native 8/8 at this head; no runtime wiring/gameplay |
+| [#176](https://github.com/CosmicCuddle/mod-individual-progression/pull/176) | `005d8949` (#175) → `971ad2ce160e29a8c426d2650e1d665c56e2ee01` | Pure bounded group-era consumer, tests, Register, note | Claude independent 8/8 native at prior `b40ba6f`; new test-only head source contract PASS, native rerun unknown; generation producer/capacity lifetime unknown |
+| [#177](https://github.com/CosmicCuddle/mod-individual-progression/pull/177) | `3bf97b4d` (#174) → `49af2465898e318481e9ad9de17699aea6f9338d` | Test-only negative composition witness, Register, note | Claude independent 8/8 native at prior `b75cabf`; new test-only head source contract PASS, native rerun unknown |
+| [#178](https://github.com/CosmicCuddle/mod-individual-progression/pull/178) | `aed05a92` → `e75e2fe7033ccee35fd476fb008f6d231d4f6d5e` | Offline read-only module-sync preflight, fixture, Register, note | Local Node fixtures 7/7 at prior code head; current head corrects Register placement only; installed source inventory unknown |
+| Claude social source | `aed05a92` → `d8a43a77f012d3e5aca1912a91eed2b6cbbffbbf` | IP runtime C++/config, social policy/script, tests/workflow, Register | Parked separate branch; independent social source candidate, not a Codex implementation or release proof |
+
+Changed-path overlap: all six candidates modify `docs/CUSTOM_MODIFICATIONS_REGISTER.md`. There is no other exact changed path shared between Claude social and #174–#178. #176 inherits #175's pure floor header, and #177 inherits #174's pure pass header; those are semantic dependencies, not independently mergeable sibling diffs. #178's tool is separate from F14 runtime. Claude social touches `src/IndividualProgression.cpp`, `.h`, `src/IndividualProgressionPlayer.cpp` and `conf/individualProgression.conf.dist`; future group wiring would touch some of these paths and must coordinate before any implementation. F15 Core/WHO/Playerbots work is cross-repository reference only.
+
+Exact changed-path overlap matrix (`R` = Register only; `—` = same candidate). This compares each candidate's diff against its stated parent, not the inherited child tree.
+
+| | #174 | #175 | #176 | #177 | #178 | Claude social |
+| --- | --- | --- | --- | --- | --- | --- |
+| #174 | — | R | R | R (plus inherited #174 behavior) | R | R |
+| #175 | R | — | R (plus inherited #175 behavior) | R | R | R |
+| #176 | R | R (child) | — | R | R | R |
+| #177 | R | R | R | — | R | R |
+| #178 | R | R | R | R | — | R |
+| Claude social | R | R | R | R | R | — |
+
+No present source-contract test in the #176/#177 deltas pins an absolute parent SHA; the child branches nevertheless require their parent headers and documented source behavior. Reparenting either child changes the tested tree and voids exact-head evidence. Claude's workflow/source assertions and earlier IP frozen-path contracts must be checked on a disposable composition tree before any rebase or integration PR. Keep original parent-pinned PRs intact.
+
+Register reconciliation is required: each branch adds its own row to the same historical file. A textually clean union alone cannot prove unique feature IDs, consistent live status, dependency refs, test status or rollback. The candidate-specific register rows should be compared by ID and field against the current protected base, then integrated once in a separate review tree. No source/test result implies a live feature.
+
+## #176 generation producer contract — audit only
+
+`Identity` requires nonzero `botGuid`, `sessionEpoch`, `mapGeneration`, `groupGuid`, `membershipGeneration`, `leaderGuid`, `leaderRevision`; `mapId=0` is valid. It compares versions lexicographically in that order. Every version component must strictly increase **before** the corresponding context can be reused during one tracker lifetime. Equal generation with different map/group/leader/race/stage facts is ambiguous and locally quarantined. A lower numeric value after `uint64_t` wrap is stale; it cannot be treated as a fresh session. After a process restart, a fresh tracker has no old tombstones, so any callback from the old process must be impossible or fenced by a process incarnation. Persisting counters is one possible producer strategy but is neither shown nor required by the pure model. Non-persisted counters require a proven callback quiescence and tracker-lifetime boundary. GUID reuse after disband/recreation also requires a newer membership generation. A leader leaving and returning requires a newer leader revision even if the GUID is equal. Delayed leave must carry the **old captured** identity; looking up the current identity at callback time could revoke a new override.
+
+The current tests demonstrate refusal of numeric wrap and conflict on equal versions; they do not demonstrate that Core or Playerbots emits the required counters. Before runtime wiring, collect exact producer/callback code and thread ownership for login/reconnect, map transfer including map ID 0, group join/leave/kick/disband/recreate, leader change/return, logout and delayed callback delivery. Establish whether each counter persists, where it resets, how process restarts fence work, and what event-time snapshot survives loss of bot eligibility. A race or account type alone is not bot identity proof. Claude/CS01 must settle any overlapping producer or social callback ownership before changing semantics.
+
+Claude's [independent verdict](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/51#issuecomment-6857731743) is PASS WITH DOCUMENTATION CONDITION for #176 at `b40ba6f` and PASS for #177 at `b75cabf`, with 8/8 native matrices at those exact earlier heads. #176 `971ad2ce` and #177 `49af2465` add the requested documentation/negative tests without consumer semantics changes; their new C++ fixtures have source-contract PASS but no exact-head native rerun here. The [producer audit](F14_GROUP_GENERATION_PRODUCER_AUDIT_2026-11-13.md) records the confirmed lazy map observation and absent membership/leader issuers. The [Register audit](F14_REGISTER_RECONCILIATION_AUDIT_2026-11-13.md) records the #178 row-placement correction and remaining Claude row ID issue.
+
+## #176 tombstone capacity alternatives
+
+The current `Tracker<64>` has one permanent occupied slot per bot GUID, including revoked or invalid contexts. It is safe against an old replay within its lifetime but can admit at most 64 distinct bot GUIDs; a 65th returns `Capacity`. Raising the bound only delays saturation and increases linear lookup cost (`O(capacity)` per operation) and storage; it does not establish a lifetime proof. The existing hard saturation is the only proven safe behavior at this pin.
+
+| Alternative | Evidence needed before forgetting a tombstone | Impact |
+| --- | --- | --- |
+| Per-bot horizon/quiescence | Maximum callback delay and proof no older event survives the retirement point, including reconnect and map workers | Allows bounded retirement only after verified grace period; time alone is insufficient without queue ownership |
+| Session-owned replacement | All events routed through one session lifetime, cancellation/join of old callbacks, unique session incarnation | Bounded active sessions, but process/group events and GUID reuse still need fencing |
+| Map/group scope | Proof a callback cannot arrive after leaving the scoped owner, with exact transfer/disband barriers | Smaller tables, but cross-map and delayed group callbacks are the danger cases |
+| Epoch-key rotation | Globally unique process/session namespace and rejection of old namespace before slot reuse | Avoids equal ABA if every producer and callback carries the namespace; wrap and durable reuse still need a policy |
+
+No eviction, LRU, timeout or arbitrary table reset is safe without one of these proofs. A runtime design must quantify peak concurrently tracked bots, distinct GUID churn per tracker lifetime, memory per slot, callback delay and failure behavior at capacity. Until then #176 stays pure and unwired.
+
+## #177 negative witness coverage audit
+
+The current test-only witness at `49af2465` establishes exact old-session pass revoke alongside raw-GUID, all-epoch ledger revoke; matched E1 correlation leaves restore debt; pass/candidate saturation and local quarantine cannot complete debt; a different viewer survives; and incarnation mismatch refuses matching. The source mutation test rejects ledger epoch narrowing, broad stale-correlation cleanup, completion/reset calls, quarantine spread and positive hide authority in the witness. It does **not** prove a Core token producer, a client receipt, or callback order.
+
+The follow-ups fixture server relink plus proposed batch handoff without debt completion, unknown-viewer end before late nomination, rights-change candidate drop, creature retirement/map unload debt preservation, same-key incarnation reuse freezing recovery, and G2's nominated send before `ObserveBatch` refusing a match. The source contract mutates the post-handoff debt assertion into improper client-proof completion and rejects it. Remaining gaps: all cancel/successor-pass and stale-token interleavings on a real Core pass producer, actual callback ordering, and genuine client receipt. No test calls `CompleteRestoreOnlyWithClientProof(..., true)` or `ClearFrozenAfterGlobalProof(true)` as a purported integration success. Any runtime consumer needs independently verified client receipt evidence that does not exist at this pin.
+
+## Disposable composition plan — no shared branch/rebase
+
+Use a throwaway local worktree with base `aed05a92`, preserving all original branches and PR heads. Proposed deterministic application order: Claude social source `d8a43a77` first; #174, then #177 as its child delta; #175, then #176 as its child delta; #178 last. Apply with `git diff <parent> <head>` per candidate or equivalent commits to the disposable tree, resolve **only** the Register union and any demonstrated source-contract/workflow conflicts, and record resulting tree SHA and exact file blobs. This order is a test plan, not permission to merge/rebase or modify Claude's parked runtime paths. Stop and coordinate in #51 before any shared integration branch or changed runtime resolution.
+
+Before the experiment, compare all candidate changed paths and Register IDs against the base. After each application run that candidate's source contract; after the final tree rerun every source contract from the combined checkout, including Claude's Python policy/source tests, plus any historical frozen-path checks affected by reparenting. Source assertions that encode an original parent or exact blob should be reported as a pin conflict, not silently loosened. A later approved native matrix would need GCC/Clang C++17/20 normal and NDEBUG for pure tests, full macro-ON Worldserver compile/link on a pinned Core/Playerbots/Naxx tuple, config OFF regression, owner-controlled gameplay, and explicit rollback to the unmodified worktree and branch tips. No hosted Actions or gameplay run is authorized by this note.
+
+## Register reconciliation blueprint
+
+Treat `docs/CUSTOM_MODIFICATIONS_REGISTER.md` as a feature-keyed record, not a concatenation target. For each Claude and #174–#178 delta, extract each added/changed feature heading ID, owning repo/path, parent/head, implementation versus pure/test-only status, dependencies, config/SQL/DBC/client requirements, evidence, unknowns, rollback and live status. Compare against base and each other; block duplicate IDs with conflicting intent, contradictory live claims, stale parent/head links, missing tests/dependencies or rollback, and any wording that upgrades source evidence to compiled/gameplay/live. Preserve historical rows unless the owning change explicitly justifies an update. F15 Core/WHO/Playerbots references stay cross-repo links, never claimed as IP implementation. The reconciliation result should be a reviewable single Register diff on a later integration tree, with each field traced to a candidate ref and conflict decision. This document itself does not create that merged Register.
+
+## Core #25 compatibility pin (read-only source inspection)
+
+Preferred Grim Core base: `0d754d1921261dfd939f91060ebc022eae280f71`; active [CosmicCuddle Core restack #25](https://github.com/CosmicCuddle/azerothcore-wotlk/pull/25) head `240f625033e6388ad73ba61282b3f62340301a02`, based on that Grim commit. These are source refs, not the installed server tuple. The table records exact symbols found at the restack head through GitHub source reads; a symbol's presence is not a verified runtime producer or full compile.
+
+| Candidate / seam | Symbol and path at Core #25 | Status / thread context / risk |
+| --- | --- | --- |
+| #174/#177 pass | `VisibleNotifier::BeginF14NotifierPass`, `OnF14ViewerVisibilityPassBegin/BatchSendAttempt/End`; `GridNotifiers.cpp`, `ScriptMgr.h` | Present behind `COSMIC_F14_NOTIFIER_PASS_LIFECYCLE_EXPERIMENT`; notifier/map pass, numeric token generated by `VisibilityPassTokenSource`. No client ACK; #174 still needs exact viewer login/map identity captured at callback. Macro-ON composition unproven. |
+| #177 E1 creature send | `OnF14ViewerCreatureBatchGuidSendAttempt`, `OnF14ViewerCreaturePositiveQueryOutPreSend`; `GridNotifiers.cpp`, `ScriptMgr.h`, `PlayerUpdates.cpp` | Experimental macro-gated source-attributed attempt; batch candidate requires pass experiment. Attempt is not client receipt. Incarnation/current-viewer cross-check remains IP consumer obligation. |
+| Claude social/player visibility | `ShouldF14SuppressPlayerForViewer` in `PlayerUpdates.cpp`; `OnF14PlayerSessionRebound` in `CharacterHandler.cpp`/`PlayerScript.h` | Experimental client-query/rebind macros; ordinary build inert. Claude runtime source and flags require separate exact-head compile and OFF-path regression. This is not proof of positive world concealment safety. |
+| #175/#176 group events | `GroupScript::OnAddMember/OnRemoveMember/OnChangeLeader` in `GroupScript.h`; calls in `Group.cpp`, plus `OnGroupDisband` | Present. Existing IP implements add only. Hooks provide event source, **not** nonzero session/map/membership/leader generations or guaranteed captured old context. Remove has two call sites; exact ordering and thread ownership need runtime audit. |
+| #176 map/reconnect | `OnF14BeforePlayerMapRemoval` in `ScriptMgr.h` and `OnF14PlayerSessionRebound` in `PlayerScript.h` | Both experimental macro-gated; no map generation producer located in these symbols. Logout/login hooks present. Map transfer and retained-Player reconnect need exact old/new snapshot and ordering proof. |
+| #176 Playerbots identity | Core contains no RandomPlayerbotMgr identity producer in this pin; external Playerbots `e88cc4099e69f35126b28942a412ca702d20453b` | IP login proves a selected headless bot via Playerbots, then caches epoch. Core group/map callbacks must consume a lock-protected event-time snapshot, never query mutable PB membership on worker threads. |
+| #178 offline preflight | Git metadata only; no Core runtime symbol | No compile/runtime dependency. Supplied repo refs must be explicit; missing evidence remains UNKNOWN. |
+
+The restack contains world/character SQL paths and other unrelated code changes. This source audit does not authorize applying migrations. Core #25 also does not establish the installed host or Playerbots API version. F15 WHO and visibility seam work remains a cross-repository dependency and separate ownership area.
+
+## Playerbots positive identity boundary
+
+At pinned Playerbots `e88cc409`, `RandomPlayerbotMgr::IsRandomBot(lowGuid)` reads `currentBots.contains(lowGuid)`; the `Player*` overload excludes `IsSelfBot`. `currentBots` is mutated by bot creation/logout/update and reconstructed by `GetBots`. It is mutable lifecycle state, not a worker-safe classification call. Current IP `OnPlayerLogin` checks bot account, race 10/11, nonnull headless session, then the low-GUID `IsRandomBot`; the optional actor publication adds `!IsGameMaster()`, full Player GUID, in-world and account checks under its experimental macro. `isBotAccount` alone includes bot accounts beyond positively verified RandomBots. The group identity cache is invalidated at login entry and logout, and the login epoch refuses uint64 wrap. This source path does not prove arbitrary group/map callbacks are on the same thread or that disconnected/rebound Players retain valid proof.
+
+For #176, `eligibleBot` must be a current, positive, event-time lease with full GUID/session incarnation and explicit exclusion of human, GM, Altbot, SelfBot, disconnected and unknown actors. Race 10/11 is an **additional floor condition**, never classification. On proof loss, exact captured teardown may remove temporary state but must return no usable override. Verify source callbacks for negative controls and renewal on login/reconnect; never reconstruct an old lease from a live low-GUID lookup after delayed leave. Future fixtures: ordinary human BE/Draenei; GM; bot-account Altbot; SelfBot; selected RandomBot removed from `currentBots`; headless disconnect; rebind with same Player pointer; GUID reuse; unknown/unavailable PB header; concurrent logout and group callback. Any uncertain identity fails to earned-only/no temporary view.
+
+## #175/#176 runtime wiring design — not an implementation
+
+The smallest safe seam is a read-only, map/group-owned adapter that snapshots a positively verified bot lease and the exact current earned quest stage, computes `Floor::WhileGrouped` through #176, and exposes a temporary **effective era for presentation only**. It must not feed `ForceUpdateProgressionState`, reward quests, entitlement/cap decisions or the existing persistent `SyncBotsProgressionToLeader` write path. For race 10/11, grouped Vanilla stage yields temporary TBC, grouped TBC/Wrath yields at least TBC, earned Wrath may remain Wrath, and leaving always reveals the caller's exact earned era (including `EarnedFloorMissing`). No permanent marker repair is implied.
+
+Event sources: `GroupScript::OnAddMember` (join), `OnRemoveMember` (leave/kick), `OnChangeLeader` (away/back), `OnDisband` (all members); `PlayerScript::OnPlayerLogin/Logout`, experimental session rebind/disconnect where available; map leave/enter with experimental pre-removal only if enabled. Each event needs an immutable old and new identity snapshot with process/session incarnation, map ID plus generation, group GUID plus membership generation, leader GUID plus revision, and current earned stage. Counters must be issued by one owner before publication, refuse wrap, and remain ordered across map/group workers. No verified source currently supplies the full generation tuple, so no runtime wiring is ready.
+
+| Failure | Required output / action |
+| --- | --- |
+| Unknown/non-RandomBot/GM/disconnected proof | No temporary view; exact old teardown may tombstone only its own context |
+| Missing earned stage or race 10/11 below earned TBC floor | Report missing/invalid earned evidence; never fabricate persistent tier 8 |
+| Missing/zero/reused generation or equal ABA | Refuse or quarantine that bot; do not infer newer from arrival order |
+| Old leave after new membership/session/map | Stale old snapshot cannot revoke new override; ledger/other lifecycle concerns remain separate |
+| Leader away/back or group GUID reuse | Increment correct revision/generation before new view, else refuse ambiguous context |
+| Tracker saturated/wrapped/process restart without fence | Refuse new temporary admission; keep earned state and preserve tombstone proof |
+| EnforceGroupRules ON/OFF and cap mismatch | Preserve existing admission policy separately; temporary view cannot bypass group admission or server cap |
+
+This plan deliberately overlaps Claude's parked `IndividualProgression.cpp/.h` and `IndividualProgressionPlayer.cpp` only as a future design dependency. Coordinate the exact hook and ownership split in #51 before implementation; do not edit that source as part of this audit.

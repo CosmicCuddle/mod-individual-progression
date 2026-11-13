@@ -1,0 +1,64 @@
+{
+  "repository": "..",
+  "registerPath": "docs/CUSTOM_MODIFICATIONS_REGISTER.md",
+  "candidates": [
+    {
+      "name": "IP #174 pass lifecycle",
+      "ref": "feature/coding-support-f14-pass-identity-lifecycle-20261113",
+      "expectedHead": "3bf97b4d6edc746cb0ff7e7e02a55d6ab9fc5b32",
+      "parent": "aed05a92f262362608f5d643c8570b504189aae0"
+    },
+    {
+      "name": "IP #175 group floor",
+      "ref": "feature/codex-f14-min-tbc-group-floor-20261113",
+      "expectedHead": "005d8949334b11c7c985225d6aa9a1cc120157a1",
+      "parent": "aed05a92f262362608f5d643c8570b504189aae0"
+    },
+    {
+      "name": "IP #176 group consumer",
+      "ref": "feature/codex-f14-group-era-consumer-20261113",
+      "expectedHead": "971ad2ce160e29a8c426d2650e1d665c56e2ee01",
+      "parent": "005d8949334b11c7c985225d6aa9a1cc120157a1"
+    },
+    {
+      "name": "IP #177 negative witness",
+      "ref": "feature/codex-f14-negative-integration-witness-20261113",
+      "expectedHead": "281c2ca736c300275aaefd5229d4ea025f3ef980",
+      "parent": "3bf97b4d6edc746cb0ff7e7e02a55d6ab9fc5b32"
+    },
+    {
+      "name": "IP #178 module sync preflight",
+      "ref": "feature/codex-module-sync-preflight-20261113",
+      "expectedHead": "701c4a41b3034731eb9916965bccc301b6172345",
+      "parent": "aed05a92f262362608f5d643c8570b504189aae0"
+    }
+  ],
+  "externalRows": [
+    {
+      "name": "Claude social exact source snapshot",
+      "heading": "13 November 2026 — F14 safer social isolation for verified BE/Draenei RandomBots (default OFF) — CS03-IP",
+      "parent": "aed05a92f262362608f5d643c8570b504189aae0",
+      "head": "c4e0c7a9920bf65e6b636b0f625a287f87bf9095",
+      "source": "https://github.com/CosmicCuddle/mod-individual-progression/compare/aed05a92f262362608f5d643c8570b504189aae0...c4e0c7a9920bf65e6b636b0f625a287f87bf9095",
+      "paths": [
+        ".github/workflows/f14-social-isolation.yml",
+        "conf/individualProgression.conf.dist",
+        "docs/CUSTOM_MODIFICATIONS_REGISTER.md",
+        "docs/F14_SOCIAL_ISOLATION_2026-11-13.md",
+        "docs/F14_SOCIAL_ISOLATION_RUNTIME_TEST_PLAN_2026-11-13.md",
+        "src/IndividualProgression.cpp",
+        "src/IndividualProgression.h",
+        "src/IndividualProgressionF14SocialIsolationPolicy.h",
+        "src/IndividualProgressionF14SocialIsolationScript.cpp",
+        "src/IndividualProgressionPlayer.cpp",
+        "tests/f14_social_isolation_policy_test.cpp",
+        "tests/test_f14_social_isolation_source.py"
+      ],
+      "configDefaults": {
+        "IndividualProgression.F14.RandomBotSocialIsolation": "0",
+        "IndividualProgression.F14.RandomBotSocialIsolation.Reply": "\"You are not yet ready for the road I walk. Return when your journey has carried you into a later age.\"",
+        "IndividualProgression.F14.RandomBotSocialIsolation.ReplyCooldownSeconds": "60"
+      }
+    }
+  ]
+}

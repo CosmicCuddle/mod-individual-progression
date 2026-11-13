@@ -1,0 +1,30 @@
+# Auction browse visibility seam — implementation-independent test specification
+
+Owner CosmicCuddle; [coordination #53](https://github.com/CosmicCuddle/Naxxramas-Server-Coordination/issues/53). This is a source/design test plan only; no Core, module, SQL, config or live change. Pin for source assertions: Grim/CosmicCuddle Core `0d754d1921261dfd939f91060ebc022eae280f71`; Core restack #25 `240f625033e6388ad73ba61282b3f62340301a02` has the same examined auction blobs. Actual installed source is unknown.
+
+## Oracle and fixture
+
+Build a deterministic oracle from a stable auction snapshot: evaluate a pure value-only viewer capability against each immutable auction requirement first, then apply stock search filters, stock sort comparator, `listfrom`, and page cap. Return visible `totalCount` independently of emitted count. Define fixtures with distinct auction IDs, item names/levels/quality/classes, prices, bids, owners, bidders, house/faction, time, and visible/hidden tags. Test with no provider and with a provider that grants a known subset. Exact ordering ties should follow Core's existing comparator; the new seam must not introduce a tie rule. Record the request snapshot/version and each entry tag/version in test diagnostics, never a live `Player*` on the worker.
+
+| Case | Setup / assertion |
+| --- | --- |
+| Stock/no-provider parity | With provider absent, every browse/getAll/owner/bidder response, count, order and bid outcome matches the pinned stock implementation for identical data, including unrestricted tag zero. No worker calls module/ScriptMgr/DB or dereferences Player/Item. |
+| Normal browse | Mix hidden and visible matches. Hidden IDs never serialize; visible IDs appear in oracle order; `totalCount` equals visible filtered candidates before pagination. |
+| No-filter fast path | Empty/default search fields with an active snapshot still filter before vector append. Compare against the same oracle and ensure hidden IDs/count do not leak. |
+| Search filters | Cross product representative name, class/subclass, quality, level, usable-only and house/faction constraints with both visible and hidden matches. Eligibility is applied before sort/page/count, without changing stock filter meanings. |
+| Every sort order | For each Core-supported sort key/direction, include at least three visible and hidden candidates with interleaved keys and ties. Visible order equals stock comparator restricted to visible IDs. |
+| Page/listfrom boundaries | Test 0, last valid visible index, exactly one page, page+1, beyond end, and a hidden run immediately before page boundary. No short page caused by post-pagination filtering. |
+| Filtered `totalCount` | Assert it equals all visible matches even when page empty or capped; it is independent of `listfrom` and serialized count. |
+| `getAll` below/at/above cap | Visible set sizes `MAX_GETALL_RETURN-1`, exact cap, cap+1; hidden entries interleaved. Emitted count is capped, `totalCount` counts **all** visible entries, and scanning continues after cap. Compare no-provider stock parity separately. |
+| Owner's hidden listing | Normal browse can hide ineligible owner item under the finally approved browse rule; owner-list still includes it and permits existing management actions. This owner-browse policy remains an Information decision. |
+| Bidder management | Previously bid item remains in bidder-list after browse eligibility changes; no accidental use of browse predicate on bidder request. |
+| Browse→bid race | Capture eligible browse snapshot, then revoke progression before bid/buyout. Independent live `OnPlayerCanPlaceAuctionBid` gate rejects both; converse eligibility gain permits only if all stock bid checks pass. |
+| Null auction in bid hook | Invoke the hook at its actual early call position with null entry; no crash, dereference, or invented eligibility. Preserve stock error handling. |
+| Add/remove/update | Publish a newly listed auction only after its tag is populated; remove deletes it from every worker copy; item or policy-relevant update yields a new tag/version atomically before exposure. No stale tag may be paired with new item facts. |
+| Startup-loaded auctions | Initial load tags every entry before worker publication, with same behavior as newly listed entries. Distinguish unknown metadata from unrestricted eligibility. |
+| Retag/version mismatch | Change policy version while requests are queued and entries already copied. Mismatched/stale snapshot or tag cannot silently grant visibility; require deterministic refusal/rebuild behavior and test recovery after retag. The exact fallback contract must be agreed before implementation. |
+| Concurrent workers | Repeated mixed browse/getAll/add/remove/retag requests across worker threads under a race detector where available. Assert immutable request and entry values, no UAF/data race, stable per-request version, no module/Player/DB access from worker. |
+| Large pool | Benchmark stock versus active value-only comparison with representative large pool, filters and default fast path; report latency/throughput, allocations and memory, with an agreed budget before accepting implementation. |
+| Stale/unknown player snapshot | Logout, map/session change, missing classification, provider error and queue delay must not turn unknown into unrestricted access. Define the policy's explicit fail-closed response and retry semantics; keep owner/bidder management independent. |
+
+The semantic rule and encoding are open: Information must specify whether compact capabilities/requirements can express all buyer rules, how multiple providers combine without bit collisions, and the owner's own ordinary-browse treatment. Until that contract is settled, tests should use an abstract `Visible(snapshot, tag)` oracle and avoid assuming an IP stage mapping. Integration gates after a future authorised candidate: exact Core/module build, worker tests, in-client browse/page/getAll, bid race, owner/bidder management, performance and rollback. A successful source/unit test alone is not gameplay evidence.
