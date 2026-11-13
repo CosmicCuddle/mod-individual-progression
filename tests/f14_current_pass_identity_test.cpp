@@ -162,9 +162,22 @@ int main()
         P::Tracker<2> t;
         CHECK(t.Begin(0, a) == P::Result::Refused);
         CHECK(t.Begin(1, {}) == P::Result::Refused);
+        CHECK(t.Begin(1, a) == P::Result::Refused);
+        CHECK(t.Begin(2, b) == P::Result::Recorded);
+        CHECK(t.IsActive(2, b));
         CHECK(t.End(0, a) == P::Result::Refused);
         CHECK(t.RevokeViewer(P::ViewerIdentity{}) == 0);
         CHECK(!t.Inspect().poisoned);
+    }
+    {
+        P::Tracker<3> t;
+        CHECK(t.Begin(5, a) == P::Result::Recorded);
+        CHECK(t.Begin(5, {}) == P::Result::Mismatch);
+        CHECK(!t.IsActive(5, a));
+        CHECK(t.Begin(6, b) == P::Result::Recorded);
+        CHECK(t.IsActive(6, b) && !t.Inspect().poisoned);
+        CHECK(t.End(5, a) == P::Result::Quarantined);
+        CHECK(t.Begin(5, a) == P::Result::Refused);
     }
 
     std::cout << "PASS F14 pass identity lifecycle hardening\n";

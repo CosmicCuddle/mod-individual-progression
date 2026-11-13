@@ -56,8 +56,21 @@ namespace IndividualProgressionF14CurrentPassIdentity
             std::lock_guard<std::mutex> lock(_mutex);
             if (_poisoned)
                 return Result::Poisoned;
-            if (!token || !identity)
+            if (!token)
                 return RefuseLocked();
+            if (!identity)
+            {
+                if (Slot* prior = FindToken(token))
+                {
+                    prior->quarantined = true;
+                    ++_mismatches;
+                    return Result::Mismatch;
+                }
+                // A nonzero token was presented even though its viewer facts
+                // were missing. It must not later become a fresh admission.
+                RememberClosedLocked(token, {}, false);
+                return RefuseLocked();
+            }
             if (Slot* prior = FindToken(token))
             {
                 if (prior->identity.guid != identity.guid)

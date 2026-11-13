@@ -20,6 +20,16 @@ requireContract(header.includes("std::array<Closed, ClosedCapacity>"), "closed e
 requireContract(header.includes("_admissionsClosed = true"), "exhausted history must refuse new passes");
 requireContract(header.includes("std::lock_guard<std::mutex>"), "tracker state must be synchronized");
 requireContract(header.includes("RevokeViewer(ViewerIdentity identity)"), "revoke needs exact identity");
+const begin = header.split("Result Begin(")[1]?.split("Result ObserveBatch(")[0];
+function retainsInvalidBeginToken(source) {
+    return source?.includes("RememberClosedLocked(token, {}, false)") &&
+           source.includes("prior->quarantined = true;");
+}
+requireContract(retainsInvalidBeginToken(begin),
+                "a nonzero invalid-identity Begin must retain or quarantine its token");
+const replayRegression = begin.replace("RememberClosedLocked(token, {}, false);", "");
+requireContract(replayRegression !== begin && !retainsInvalidBeginToken(replayRegression),
+                "source guard must reject loss of the invalid-Begin replay fence");
 const legacyRevoke = header.split("std::size_t RevokeViewer(std::uint64_t)")[1]?.split(
     "// Reserved for independently proven whole-table corruption.")[0];
 requireContract(legacyRevoke?.includes("return 0;") && !legacyRevoke.includes("_slots"),
