@@ -186,6 +186,15 @@ jobs:
               ("Battlegrounds/Battleground.h", 418, "BattlegroundPlayerMap const& GetPlayers() const { return m_Players; }"),
               ("Battlegrounds/BattlegroundMgr.cpp", 146, "m_BattlegroundQueues[bgQueueTypeId].BattlegroundQueueUpdate(diff, bgTypeId, bracket_id, arenaType, arenaMMRating > 0, arenaMMRating);"),
               ("World/World.cpp", 1270, "sBattlegroundMgr->Update(diff);"),
+              # Premade order: both premades are checked before either is added, each the first
+              # not-yet-invited group of its premade queue (the peer the hook mirrors).
+              ("Battlegrounds/BattlegroundQueue.h", 57, "BG_QUEUE_PREMADE_ALLIANCE,"),
+              ("Battlegrounds/BattlegroundQueue.h", 58, "BG_QUEUE_PREMADE_HORDE,"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 576, "for (ali_group = m_QueuedGroups[bracket_id][BG_QUEUE_PREMADE_ALLIANCE].begin();"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 577, "if (!(*ali_group)->IsInvitedToBGInstanceGUID)"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 580, "for (horde_group = m_QueuedGroups[bracket_id][BG_QUEUE_PREMADE_HORDE].begin();"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 590, "if (!sScriptMgr->CanAddGroupToMatchingPool(this, (*horde_group), m_SelectionPools[TEAM_ALLIANCE].GetPlayerCount(), nullptr, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 593, "m_SelectionPools[TEAM_ALLIANCE].AddGroup((*ali_group), MaxPlayersPerTeam);"),
           ]
           bad = 0
           for name, line, text in anchors:

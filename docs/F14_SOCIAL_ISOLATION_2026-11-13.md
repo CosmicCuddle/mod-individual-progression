@@ -161,6 +161,7 @@ This social feature is unaffected: it never restricts Altbots.
       - All queue updates run in `BattlegroundMgr::Update` on the world thread, after the map phase (World.cpp:1270, after :1255).
       - The hook reads the candidate group's players, the groups already selected (both teams), and for an existing instance its players plus the groups already invited to it. All reads are live, through `ReadHuman`/`ReadBot`.
       - It refuses the candidate if it would meet the other kind. It never mutates the queue, the pools or the battleground.
+      - **Premade path:** Core checks the Alliance and Horde premades one after the other and only then adds both. So a premade candidate is also compared with the premade Core will pair it with (the first not-yet-invited group of the other premade queue, mirroring `CheckPremadeMatch`). Found in self-review after the first (d) delivery.
       - **Whoever is matched first decides; the other kind waits for another match.**
     - **Remaining notes:**
       - (a) and (b) stay as extra layers.
@@ -192,7 +193,7 @@ This social feature is unaffected: it never restricts Altbots.
   - exact one-line login OR change, additive-only edits, existing hooks unchanged, every other file byte-identical;
   - the two identity sources: restriction uses only the verified cache, and the existing group-sync write population is every non-normal account.
 - **Local Core25 header syntax check** (`-fsyntax-only`) of the new script and both modified IP sources. Not a link.
-- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 88 lines:
+- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 95 lines:
   - the four hook declarations and enums, plus `BuildChatPacket`;
   - Core's wrong-faction checks before the whisper (ChatHandler.cpp:428 → :448) and trade (TradeHandler.cpp:830 → :842) hooks;
   - the /who exclusion (MiscHandler.cpp:401) before `matchCount++` (:407), so the visible list and count stay consistent;

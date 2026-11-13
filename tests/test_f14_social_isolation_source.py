@@ -156,6 +156,12 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertIn("queue->m_SelectionPools", m)
         self.assertIn("bg->GetPlayers()", m)
         self.assertIn("invited->IsInvitedToBGInstanceGUID == bg->GetInstanceID()", m)
+        # Premade: compared with the opposite premade Core will pair it with.
+        self.assertIn("if (GroupQueueInfo const* peer = PremadePeer(*queue, group, bracketId))", m)
+        peer = self.body("GroupQueueInfo const* PremadePeer(BattlegroundQueue const& queue, GroupQueueInfo const* group,")
+        self.assertIn("queue.m_QueuedGroups[bracketId][BG_QUEUE_PREMADE_ALLIANCE + side]", peer)
+        self.assertIn("queue.m_QueuedGroups[bracketId][BG_QUEUE_PREMADE_ALLIANCE + (1 - side)]", peer)
+        self.assertIn("if (other && !other->IsInvitedToBGInstanceGUID)", peer)
         self.assertRegex(m, r"if \(!candidate\.Any\(\)\)\s*return true;")
         self.assertIn("return !Policy::MatchPoolRejects(true, candidate, others);", m)
         self.assertEqual(len(re.findall(r"\breturn\b[^;]*;", m)), 3)

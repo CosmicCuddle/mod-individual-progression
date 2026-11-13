@@ -37,6 +37,7 @@
 #include "WorldPacket.h"
 #include "WorldScript.h"
 #include "WorldSession.h"
+#include <algorithm>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -550,6 +551,27 @@ namespace
         return kinds;
     }
 
+    // Premade path: CheckPremadeMatch asks about the Alliance premade, then
+    // the Horde premade, and only then adds both. So a premade candidate is
+    // also compared with the premade it would be paired with: the first
+    // not-yet-invited group of the other premade queue, exactly as Core
+    // picks it. Not a premade candidate: no peer.
+    GroupQueueInfo const* PremadePeer(BattlegroundQueue const& queue, GroupQueueInfo const* group,
+                                      BattlegroundBracketId bracketId)
+    {
+        for (uint8 side = 0; side < 2; ++side)
+        {
+            auto const& own = queue.m_QueuedGroups[bracketId][BG_QUEUE_PREMADE_ALLIANCE + side];
+            if (std::find(own.begin(), own.end(), group) == own.end())
+                continue;
+            for (GroupQueueInfo const* other : queue.m_QueuedGroups[bracketId][BG_QUEUE_PREMADE_ALLIANCE + (1 - side)])
+                if (other && !other->IsInvitedToBGInstanceGUID)
+                    return other;
+            return nullptr;
+        }
+        return nullptr;
+    }
+
     // Battleground roster (a): which instances hold a still-Vanilla human.
     // Humans enter on their worldport ack, a world-thread client packet, so
     // they are read only there; anything else records nothing. Leaving and
@@ -581,6 +603,10 @@ namespace
                 for (GroupQueueInfo const* selected : pool.SelectedGroups)
                     if (selected && selected != group)
                         others.Add(KindsOfGroup(*selected));
+            // A premade candidate: the opposite premade it would be paired with.
+            if (bracketId < MAX_BATTLEGROUND_BRACKETS)
+                if (GroupQueueInfo const* peer = PremadePeer(*queue, group, bracketId))
+                    others.Add(KindsOfGroup(*peer));
             // An existing instance: players inside and groups already invited.
             if (bg && bg->GetInstanceID())
             {

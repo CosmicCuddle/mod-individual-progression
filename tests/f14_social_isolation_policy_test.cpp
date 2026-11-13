@@ -957,6 +957,24 @@ namespace
         CHECK(P::MatchPoolRejects(true, both, vanilla) && P::MatchPoolRejects(true, both, bot));
         CHECK(!P::MatchPoolRejects(true, both, tbc));
         CHECK(!P::MatchPoolRejects(false, vanilla, bot));
+
+        // Premade order in Core: check Alliance premade, check Horde
+        // premade, THEN add both. Without the peer, each sees an empty pool
+        // (the gap); comparing each with its paired premade closes it.
+        P::MatchKinds const kindsList[] = {vanilla, bot, tbc, ordinary, unknown};
+        for (P::MatchKinds const& ali : kindsList)
+            for (P::MatchKinds const& horde : kindsList)
+            {
+                P::MatchKinds const emptyPool{};
+                bool const withoutPeer = !P::MatchPoolRejects(true, ali, emptyPool) &&
+                    !P::MatchPoolRejects(true, horde, emptyPool);
+                bool const withPeer = !P::MatchPoolRejects(true, ali, horde) &&
+                    !P::MatchPoolRejects(true, horde, ali);
+                bool const mixed = (ali.stillVanillaHuman && horde.restrictedBot) ||
+                    (ali.restrictedBot && horde.stillVanillaHuman);
+                CHECK(withoutPeer);            // the gap the peer check closes
+                CHECK(withPeer == !mixed);     // never a mixed premade match
+            }
     }
 }
 
