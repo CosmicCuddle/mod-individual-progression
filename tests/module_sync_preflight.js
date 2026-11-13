@@ -25,7 +25,10 @@ function localPath(base, relative) {
 function within(repo, relative) {
     if (typeof relative !== "string" || !relative) return null;
     const target = path.resolve(repo, relative);
-    return target === repo || target.startsWith(repo + path.sep) ? target : null;
+    if (!(target === repo || target.startsWith(repo + path.sep))) return null;
+    if (!fs.existsSync(target)) return target;
+    const actual = fs.realpathSync(target);
+    return actual === repo || actual.startsWith(repo + path.sep) ? actual : null;
 }
 function globMatch(value, pattern) {
     const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
@@ -43,11 +46,11 @@ function dependencies(paths) {
     }
     return result;
 }
-function publicChanges(repo, base, paths) {
+function publicChanges(repo, base, paths, target = "HEAD") {
     if (paths === UNKNOWN) return UNKNOWN;
     const headers = paths.filter(p => /\.(h|hpp|hh)$/i.test(p));
     if (!headers.length) return [];
-    const diff = git(repo, "diff", "--unified=0", `${base}...HEAD`, "--", ...headers);
+    const diff = git(repo, "diff", "--unified=0", `${base}...${target}`, "--", ...headers);
     if (diff === null) return UNKNOWN;
     const changes = [];
     let current = "";
@@ -70,13 +73,15 @@ function publicChanges(repo, base, paths) {
 function registerHits(repo, paths, files) {
     if (paths === UNKNOWN || !files.length) return UNKNOWN;
     const hits = [];
+    let readable = 0;
     for (const file of files) {
         const target = within(repo, file);
         if (!target || !fs.existsSync(target) || !fs.statSync(target).isFile()) continue;
+        ++readable;
         const text = fs.readFileSync(target, "utf8");
         for (const changed of paths) if (text.includes(changed)) hits.push({register: file, path: changed});
     }
-    return hits;
+    return readable ? hits : UNKNOWN;
 }
 function pins(repo, supplied) {
     const files = new Set(supplied);
@@ -86,13 +91,15 @@ function pins(repo, supplied) {
             if (/\.ya?ml$/i.test(name)) files.add(`.github/workflows/${name}`);
     if (!files.size) return UNKNOWN;
     const result = [];
+    let readable = 0;
     for (const file of [...files].sort()) {
         const target = within(repo, file);
         if (!target || !fs.existsSync(target) || !fs.statSync(target).isFile()) continue;
+        ++readable;
         for (const sha of new Set(fs.readFileSync(target, "utf8").match(/\b[0-9a-f]{40}\b/gi) || []))
             result.push({file, sha: sha.toLowerCase()});
     }
-    return result;
+    return readable ? result : UNKNOWN;
 }
 function risksAndGates(r) {
     const risks = [], gates = [];
@@ -112,7 +119,8 @@ function risksAndGates(r) {
         risks.push("Local and supplied upstream changes touch the same paths.");
         gates.push("Review both diffs and resolve likely conflicts on a development branch.");
     }
-    if (r.publicChanges !== UNKNOWN && r.publicChanges.length) {
+    if ((r.publicChanges !== UNKNOWN && r.publicChanges.length) ||
+        (r.upstreamPublicChanges !== UNKNOWN && r.upstreamPublicChanges.length)) {
         risks.push("Changed public headers, APIs or macros may affect the installed module tuple.");
         gates.push("Compile/link the pinned Core and dependent modules together.");
     }
@@ -133,7 +141,8 @@ function inspectModule(spec, manifestDir) {
                base: UNKNOWN, upstream: UNKNOWN, dirty: UNKNOWN, dirtyPaths: UNKNOWN,
                untrackedPaths: UNKNOWN, aheadBehind: UNKNOWN, changedPaths: UNKNOWN,
                upstreamChangedPaths: UNKNOWN, likelyConflictPaths: UNKNOWN,
-               publicChanges: UNKNOWN, customOverlap: UNKNOWN, dependencies: UNKNOWN,
+               publicChanges: UNKNOWN, upstreamPublicChanges: UNKNOWN,
+               customOverlap: UNKNOWN, dependencies: UNKNOWN,
                registerHits: UNKNOWN, pins: UNKNOWN};
     const repo = localPath(manifestDir, spec.path);
     if (!repo || !fs.existsSync(repo) || git(repo, "rev-parse", "--is-inside-work-tree") !== "true")
@@ -166,11 +175,15 @@ function inspectModule(spec, manifestDir) {
     r.likelyConflictPaths = r.changedPaths === UNKNOWN || r.upstreamChangedPaths === UNKNOWN ?
         UNKNOWN : r.changedPaths.filter(p => r.upstreamChangedPaths.includes(p));
     r.publicChanges = publicChanges(repo, r.base, r.changedPaths);
+    r.upstreamPublicChanges = publicChanges(repo, r.base, r.upstreamChangedPaths, r.upstream);
     r.customOverlap = r.changedPaths === UNKNOWN ? UNKNOWN :
         [...new Set([...r.changedPaths, ...(r.upstreamChangedPaths === UNKNOWN ? [] : r.upstreamChangedPaths)]
             .filter(p => (spec.customPaths || []).some(pattern => globMatch(p, pattern))))].sort();
     r.dependencies = dependencies(r.changedPaths);
-    r.registerHits = registerHits(repo, r.changedPaths, spec.registerPaths || []);
+    r.registerHits = registerHits(repo,
+        r.changedPaths === UNKNOWN ? UNKNOWN :
+            [...new Set([...r.changedPaths, ...(r.upstreamChangedPaths === UNKNOWN ? [] : r.upstreamChangedPaths)])],
+        spec.registerPaths || []);
     r.pins = pins(repo, spec.pinFiles || []);
     return {...r, ...risksAndGates(r)};
 }
@@ -191,7 +204,8 @@ function markdown(report) {
                    `Base: ${m.base}  Upstream: ${m.upstream}`,
                    `Dirty: ${m.dirty}  Ahead/behind: ${JSON.stringify(m.aheadBehind)}`);
         for (const key of ["dirtyPaths", "untrackedPaths", "changedPaths", "upstreamChangedPaths",
-                           "likelyConflictPaths", "publicChanges", "customOverlap", "dependencies",
+                           "likelyConflictPaths", "publicChanges", "upstreamPublicChanges",
+                           "customOverlap", "dependencies",
                            "registerHits", "pins", "risks", "testGates"])
             lines.push(`- ${key}: ${JSON.stringify(m[key])}`);
         lines.push("");

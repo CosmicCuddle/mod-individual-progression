@@ -80,6 +80,8 @@ test("dirty divergent refs, API/macro, SQL/config/DBC/client, custom overlap and
     assert.ok(item.changedPaths.includes("src/PublicAPI.h"));
     assert.ok(item.publicChanges.some(x => x.kind === "macro"));
     assert.ok(item.publicChanges.some(x => x.kind === "API"));
+    assert.ok(item.upstreamPublicChanges.some(x => x.kind === "macro"));
+    assert.ok(item.upstreamPublicChanges.some(x => x.path === "src/Upstream.h"));
     assert.ok(item.dependencies.SQL.includes("data/sql/world/change.sql"));
     assert.ok(item.dependencies.config.includes("conf/module.conf.dist"));
     assert.ok(item.dependencies.DBC.includes("data/dbc/Test.dbc"));
@@ -97,10 +99,19 @@ test("unresolved refs are UNKNOWN and mutating Git verbs are rejected", () => fi
     put(repo, "README.md", "baseline\n");
     commit(repo, "baseline");
     const report = preflight.inspectModule({name: "AzerothCore", path: "core",
-                                            baseRef: "missing", upstreamRef: "missing"}, root);
+                                            baseRef: "missing", upstreamRef: "missing",
+                                            registerPaths: ["docs/missing.md"],
+                                            pinFiles: [".github/workflows/missing.yml"]}, root);
     assert.equal(report.base, preflight.UNKNOWN);
     assert.equal(report.upstream, preflight.UNKNOWN);
     assert.equal(report.changedPaths, preflight.UNKNOWN);
     assert.equal(report.aheadBehind, preflight.UNKNOWN);
+    assert.equal(report.pins, preflight.UNKNOWN);
+    const missingFiles = preflight.inspectModule({name: "AzerothCore", path: "core",
+        baseRef: "HEAD", registerPaths: ["docs/missing.md"],
+        pinFiles: [".github/workflows/missing.yml"]}, root);
+    assert.deepEqual(missingFiles.changedPaths, []);
+    assert.equal(missingFiles.registerHits, preflight.UNKNOWN);
+    assert.equal(missingFiles.pins, preflight.UNKNOWN);
     assert.throws(() => preflight.git(repo, "fetch", "origin"), /inspection commands only/);
 }));
