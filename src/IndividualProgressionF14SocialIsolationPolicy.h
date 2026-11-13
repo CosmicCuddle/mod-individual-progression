@@ -20,9 +20,11 @@
 #define INDIVIDUAL_PROGRESSION_F14_SOCIAL_ISOLATION_POLICY_H
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <thread>
 
 namespace IndividualProgressionF14SocialIsolationPolicy
 {
@@ -169,6 +171,33 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         }
         return index;
     }
+
+    // T1: which thread may read another player's state. Client packets for
+    // the social opcodes run on the world thread while no map updates, so
+    // any pair is safe there. Playerbots AI calls the same handlers from a
+    // map update; there only players on the SAME map (one map thread) are
+    // safe. Otherwise nothing is read and the pair is not restricted,
+    // which is the existing "unknown means not restricted" fallback.
+    constexpr bool MayReadPair(bool onWorldThread, bool sameMap)
+    {
+        return onWorldThread || sameMap;
+    }
+
+    // Remembers the world thread (marked from the world update). Before the
+    // first mark nothing counts as the world thread.
+    class WorldThreadMarker
+    {
+    public:
+        void Mark() { _id.store(std::this_thread::get_id(), std::memory_order_release); }
+        bool IsCurrent() const
+        {
+            std::thread::id const id = _id.load(std::memory_order_acquire);
+            return id != std::thread::id() && id == std::this_thread::get_id();
+        }
+
+    private:
+        std::atomic<std::thread::id> _id{};
+    };
 
     // /who carries only a cached GUID and race: the target is restricted
     // only when that exact GUID holds a current verified RandomBot identity.

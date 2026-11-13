@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
+#include <atomic>
 #include <vector>
 
 namespace P = IndividualProgressionF14SocialIsolationPolicy;
@@ -552,6 +554,70 @@ namespace
     }
 }
 
+namespace
+{
+    // T1: cross-map reads off the world thread are never made; the pair is
+    // then not restricted (the existing unknown-facts fallback).
+    void TestThreadSafeReads()
+    {
+        CHECK(P::MayReadPair(true, true));
+        CHECK(P::MayReadPair(true, false));   // client packet: world thread
+        CHECK(P::MayReadPair(false, true));   // bot AI, same map thread
+        CHECK(!P::MayReadPair(false, false)); // bot AI, other map: never read
+
+        // Composition model of the script: read facts only when allowed.
+        for (int world = 0; world < 2; ++world)
+            for (int same = 0; same < 2; ++same)
+                for (P::Surface s : kSurfaces)
+                    for (int dir = 0; dir < 2; ++dir)
+                    {
+                        bool const readable = P::MayReadPair(world != 0, same != 0);
+                        P::Direction const d = dir ? P::Direction::BotToHuman : P::Direction::HumanToBot;
+                        P::Decision const decided = readable
+                            ? P::Decide(true, s, d, VanillaHuman(), VerifiedBot(), false)
+                            : P::Decision{};
+                        CHECK(decided.block == readable);
+                        CHECK(decided.reply == (readable && dir == 0));
+                    }
+
+        // The marker: unmarked is never the world thread; only the marking
+        // thread is; a re-mark from another thread moves it.
+        P::WorldThreadMarker marker;
+        CHECK(!marker.IsCurrent());
+        bool otherSeesUnmarked = true;
+        std::thread([&] { otherSeesUnmarked = !marker.IsCurrent(); }).join();
+        CHECK(otherSeesUnmarked);
+        marker.Mark();
+        CHECK(marker.IsCurrent());
+        bool otherSeesWorld = true;
+        std::thread([&] { otherSeesWorld = marker.IsCurrent(); }).join();
+        CHECK(!otherSeesWorld);
+        bool remarkedThere = false;
+        std::thread([&] { marker.Mark(); remarkedThere = marker.IsCurrent(); }).join();
+        CHECK(remarkedThere);
+        CHECK(!marker.IsCurrent());
+        marker.Mark();
+        CHECK(marker.IsCurrent());
+
+        // Concurrent readers on many threads never see themselves as the
+        // world thread while the main thread keeps marking.
+        std::atomic<unsigned> falseWorld{0};
+        std::vector<std::thread> readers;
+        for (int i = 0; i < 4; ++i)
+            readers.emplace_back([&] {
+                for (int n = 0; n < 20000; ++n)
+                    if (marker.IsCurrent())
+                        ++falseWorld;
+            });
+        for (int n = 0; n < 20000; ++n)
+            marker.Mark(); // the world thread keeps marking meanwhile
+        for (std::thread& r : readers)
+            r.join();
+        CHECK(falseWorld.load() == 0);
+        CHECK(marker.IsCurrent());
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -569,6 +635,7 @@ int main()
     TestLifecycleScenarios();
     TestMultiViewerCooldowns();
     TestGroupAcceptMemberScan();
+    TestThreadSafeReads();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

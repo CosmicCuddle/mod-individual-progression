@@ -84,14 +84,34 @@ class HooksAndAuthority(unittest.TestCase):
         self.src = strip_comments(read(SCRIPT))
 
     def test_only_social_hooks_and_who(self):
-        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z_]+|WORLDOBJECTHOOK_[A-Z0-9_]+)\b", self.src)))
+        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+)\b", self.src)))
         self.assertEqual(hooks, sorted([
             "PLAYERHOOK_CAN_GROUP_ACCEPT", "PLAYERHOOK_CAN_GROUP_INVITE", "PLAYERHOOK_CAN_INIT_TRADE",
-            "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT", "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY"]))
+            "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT", "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY",
+            "WORLDHOOK_ON_UPDATE"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
-            "OnPlayerCanInitTrade", "OnPlayerCanUseChat"]))
+            "OnPlayerCanInitTrade", "OnPlayerCanUseChat", "OnUpdate"]))
+
+    def test_t1_no_cross_map_read_off_the_world_thread(self):
+        # The world-update hook only marks the thread; it reads nothing.
+        upd = re.search(r"void OnUpdate\(uint32\s*\)\s*override\s*\{([^}]*)\}", self.src)
+        self.assertIsNotNone(upd)
+        self.assertEqual(upd.group(1).strip(), "WorldThread().Mark();")
+        guard = self.src.split("bool MayReadPair(Player const* a, Player const* b)", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("Map const* map = a->FindMap();", guard)
+        self.assertIn("Policy::MayReadPair(WorldThread().IsCurrent(), map && map == b->FindMap())", guard)
+        # The guard runs before any fact is read, in the pair rule and the scan.
+        allow = self.src.split("bool AllowPair(", 1)[1].split("\n    }\n", 1)[0]
+        self.assertRegex(allow, r"if \(!MayReadPair\(initiator, other\)\)\s*return true;")
+        self.assertLess(allow.index("MayReadPair("), allow.index("ReadHuman("))
+        scan = self.src.split("bool AllowGroupMembers(", 1)[1].split("\n        }\n", 1)[0]
+        self.assertRegex(scan, r"if \(!MayReadPair\(human, member\)\)\s*continue;")
+        self.assertLess(scan.index("MayReadPair("), scan.index("ReadBot(member)"))
+        policy = strip_comments(read(POLICY))
+        self.assertIn("return onWorldThread || sameMap;", policy)
+        self.assertIn("return id != std::thread::id() && id == std::this_thread::get_id();", policy)
 
     def test_no_world_hiding_or_mutation(self):
         for token in ("OnF14ShouldSuppressPlayerForViewer", "SuppressCreature", "SetPhaseMask", "UpdateObjectVisibility",

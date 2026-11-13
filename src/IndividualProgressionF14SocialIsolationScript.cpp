@@ -28,6 +28,7 @@
 #include "ScriptMgr.h"
 #include "WorldObjectScript.h"
 #include "WorldPacket.h"
+#include "WorldScript.h"
 #include "WorldSession.h"
 #include <mutex>
 #include <string>
@@ -131,11 +132,27 @@ namespace
         human->SendDirectMessage(&data);
     }
 
+    Policy::WorldThreadMarker& WorldThread()
+    {
+        static Policy::WorldThreadMarker marker;
+        return marker;
+    }
+
+    // T1: never read a player another map thread may be updating. Only the
+    // map pointers are compared; nothing else of either player is read.
+    bool MayReadPair(Player const* a, Player const* b)
+    {
+        Map const* map = a->FindMap();
+        return Policy::MayReadPair(WorldThread().IsCurrent(), map && map == b->FindMap());
+    }
+
     // initiator -> other. Returns true to ALLOW. Either side may be the bot.
     bool AllowPair(Policy::Surface surface, Player* initiator, Player* other, bool addonMessage)
     {
         if (!OptionOn() || !initiator || !other || initiator == other)
             return true;
+        if (!MayReadPair(initiator, other))
+            return true; // T1: unknown facts, not restricted (stock)
 
         // Human started it: block and (maybe) answer from the bot.
         Policy::Decision const fromHuman = Policy::Decide(true, surface, Policy::Direction::HumanToBot,
@@ -219,6 +236,8 @@ namespace
                 Player* member = ObjectAccessor::FindPlayer(slot.guid);
                 if (!member)
                     continue; // offline/unresolved: no facts, never restricted
+                if (!MayReadPair(human, member))
+                    continue; // T1: another map thread's player, never read
                 players.push_back(member);
                 bots.push_back(ReadBot(member));
             }
@@ -231,6 +250,19 @@ namespace
             if (d.reply)
                 SendInCharacterReply(players[index], human);
             return !d.block;
+        }
+    };
+
+    // T1 only: remembers which thread is the world thread. Reads nothing.
+    class F14SocialIsolationWorldThreadScript final : public WorldScript
+    {
+    public:
+        F14SocialIsolationWorldThreadScript() : WorldScript("IndividualProgression_F14SocialIsolationWorldThread",
+            {WORLDHOOK_ON_UPDATE}) { }
+
+        void OnUpdate(uint32 /*diff*/) override
+        {
+            WorldThread().Mark();
         }
     };
 
@@ -258,4 +290,5 @@ void AddSC_mod_individual_progression_f14_social_isolation()
 {
     new F14SocialIsolationPlayerScript();
     new F14SocialIsolationWhoScript();
+    new F14SocialIsolationWorldThreadScript();
 }

@@ -56,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           for ndebug in "" "-DNDEBUG"; do
-            ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 $ndebug \
+            ${{ matrix.cxx }} -std=${{ matrix.std }} -pthread -Wall -Wextra -Werror -pedantic -O2 $ndebug \
               -Isrc tests/f14_social_isolation_policy_test.cpp -o /tmp/f14-social
             /tmp/f14-social | tee /tmp/out.txt
             grep -Eq '^F14 SOCIAL ISOLATION POLICY ([0-9]+)/\1 passed' /tmp/out.txt
@@ -119,6 +119,11 @@ jobs:
               ("Server/Protocol/Opcodes.cpp", 409, "PROCESS_THREADUNSAFE,   &WorldSession::HandleInitiateTradeOpcode"),
               ("Server/WorldSession.cpp", 76, "if (opHandle->ProcessingPlace == PROCESS_THREADUNSAFE)"),
               ("Server/WorldSession.cpp", 77, "return false;"),
+              # T1: the world-thread marker hook runs on the world thread, after the map update.
+              ("Scripting/ScriptDefines/WorldScript.h", 34, "WORLDHOOK_ON_UPDATE,"),
+              ("Scripting/ScriptDefines/WorldScript.h", 71, "virtual void OnUpdate(uint32 /*diff*/) { }"),
+              ("World/World.cpp", 1255, "sMapMgr->Update(diff);"),
+              ("World/World.cpp", 1356, "sScriptMgr->OnWorldUpdate(diff);"),
           ]
           bad = 0
           for name, line, text in anchors:
@@ -128,5 +133,5 @@ jobs:
                   print(f"FAIL {name}:{line}: expected {text!r}, got {got!r}")
           if bad:
               raise SystemExit(f"{bad} Core25 social anchor(s) drifted")
-          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only")
+          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook")
           PY
