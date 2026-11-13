@@ -19,6 +19,7 @@
 #ifndef INDIVIDUAL_PROGRESSION_F14_SOCIAL_ISOLATION_POLICY_H
 #define INDIVIDUAL_PROGRESSION_F14_SOCIAL_ISOLATION_POLICY_H
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -27,6 +28,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace IndividualProgressionF14SocialIsolationPolicy
 {
@@ -229,28 +231,59 @@ namespace IndividualProgressionF14SocialIsolationPolicy
             if (guid)
                 _facts[guid] = facts;
         }
-        void Erase(std::uint64_t guid) { _facts.erase(guid); }
-        std::size_t Size() const { return _facts.size(); }
+        // A party that queued together: Core's proposal may name it only by
+        // its group GUID (a full proposal carries no roles map), so its
+        // members are recorded at join and expanded here.
+        void RecordGroup(std::uint64_t groupGuid, std::vector<std::uint64_t> members)
+        {
+            if (groupGuid)
+                _groups[groupGuid] = std::move(members);
+        }
 
-        // True when this candidate group must not be formed.
+        // Logout: forget the player's facts and every party that lists them.
+        void Erase(std::uint64_t guid)
+        {
+            _facts.erase(guid);
+            for (auto it = _groups.begin(); it != _groups.end();)
+            {
+                if (std::find(it->second.begin(), it->second.end(), guid) != it->second.end())
+                    it = _groups.erase(it);
+                else
+                    ++it;
+            }
+        }
+        std::size_t Size() const { return _facts.size(); }
+        std::size_t Groups() const { return _groups.size(); }
+
+        // True when this candidate group must not be formed. `guids` may
+        // mix player GUIDs and recorded party GUIDs.
         template<typename GuidRange>
         bool Rejects(bool optionEnabled, GuidRange const& guids) const
         {
             bool vanillaHuman = false;
             bool restrictedBot = false;
-            for (std::uint64_t guid : guids)
+            auto const consider = [&](std::uint64_t guid)
             {
                 auto const found = _facts.find(guid);
                 if (found == _facts.end())
-                    continue; // unknown: no facts, never restricts
+                    return; // unknown: no facts, never restricts
                 vanillaHuman = vanillaHuman || found->second.stillVanillaHuman;
                 restrictedBot = restrictedBot || found->second.restrictedBot;
+            };
+            for (std::uint64_t guid : guids)
+            {
+                consider(guid);
+                auto const party = _groups.find(guid);
+                if (party != _groups.end())
+                    for (std::uint64_t member : party->second)
+                        consider(member);
             }
             return QueueGroupRejected(optionEnabled, vanillaHuman, restrictedBot);
         }
 
     private:
         std::unordered_map<std::uint64_t, QueueFacts> _facts;
+        std::unordered_map<std::uint64_t, std::vector<std::uint64_t>> _groups;
     };
 
     // Battlegrounds (owner decision 13 Nov 2026, option (c)): restricted

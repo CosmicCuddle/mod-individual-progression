@@ -149,6 +149,13 @@ jobs:
               ("DungeonFinding/LFG.h", 125, "std::array<ObjectGuid, 5> guids = { };"),
               ("DungeonFinding/LFG.h", 126, "LfgRolesMap* roles;"),
               ("Maps/MapMgr.cpp", 261, "m_updater.schedule_lfg_update(diff);"),
+              # A FULL proposal carries no roles map: strGuids is copied without roles and only the
+              # fewer-players branch attaches them, so parties appear only as group GUIDs.
+              ("DungeonFinding/LFGQueue.cpp", 251, "Lfg5Guids strGuids(checkWith, false);"),
+              ("DungeonFinding/LFG.h", 146, "Lfg5Guids(Lfg5Guids const& x, bool /*copyRoles*/)"),
+              ("DungeonFinding/LFG.h", 149, "roles = nullptr;"),
+              ("DungeonFinding/LFGQueue.cpp", 396, "strGuids.addRoles(proposalRoles);"),
+              ("DungeonFinding/LFGQueue.cpp", 409, "proposal.queues = strGuids;"),
               # Battlegrounds, owner option (c): (b) queue join and (a) enter battle, both through
               # world-thread packets for humans; the roster is fed on the human worldport ack.
               ("Server/Protocol/Opcodes.cpp", 881, "PROCESS_THREADUNSAFE,   &WorldSession::HandleBattlemasterJoinOpcode"),

@@ -144,6 +144,7 @@ This social feature is unaffected: it never restricts Altbots.
     - **Recording facts:** at queue join (`OnPlayerCanJoinLfg`, world thread: `CMSG_LFG_JOIN` is `PROCESS_THREADUNSAFE`, and Playerbots queues that same packet), the joiner and every group member get a GUID-keyed `{restrictedBot, stillVanillaHuman}` record, under a mutex. It's erased at logout.
     - **The veto:** `CanCreateLfgProposal` runs on the LFG worker thread beside the map updates, so it reads **no Player**: only the proposal's player GUIDs (its `roles` map) and those records. If they mix a still-Vanilla human with a restricted bot, that one combination is refused (`LFG_INCOMPATIBLES_REJECTED_BY_SCRIPT`), and Core keeps matching others.
     - **Joining is never blocked.** Unknown GUIDs never restrict.
+    - **Parties (self-review fix):** Core builds a **full** 5-player proposal without a roles map (`LFGQueue.cpp:251`; roles are attached only on the fewer-players branch at :396). So a party that queued together appears only as its group GUID. At join, IP also records `group GUID → member GUIDs`, and the veto expands it. Value-only; logout forgets the player and any party listing them.
     - **Stale record:** a human who reaches TBC while still queued keeps the Vanilla record until they re-queue. That's conservative (keeps bots out), never an admission.
   - **Battlegrounds: option (c) implemented** (owner decision, 13 Nov 2026). Core25 has no per-group battleground seam, so two checks combine:
     - **(b) Queue join.** `CMSG_BATTLEMASTER_JOIN` is `PROCESS_THREADUNSAFE`, and Playerbots queues the same packet, so this runs on the world thread.
@@ -194,7 +195,7 @@ This social feature is unaffected: it never restricts Altbots.
   - exact one-line login OR change, additive-only edits, existing hooks unchanged, every other file byte-identical;
   - the two identity sources: restriction uses only the verified cache, and the existing group-sync write population is every non-normal account.
 - **Local Core25 header syntax check** (`-fsyntax-only`) of the new script and both modified IP sources. Not a link.
-- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 95 lines:
+- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 100 lines:
   - the four hook declarations and enums, plus `BuildChatPacket`;
   - Core's wrong-faction checks before the whisper (ChatHandler.cpp:428 → :448) and trade (TradeHandler.cpp:830 → :842) hooks;
   - the /who exclusion (MiscHandler.cpp:401) before `matchCount++` (:407), so the visible list and count stay consistent;

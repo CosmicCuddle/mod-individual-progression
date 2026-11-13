@@ -183,6 +183,11 @@ class HooksAndAuthority(unittest.TestCase):
                       "sIndividualProgression->Has"):
             self.assertNotIn(token, veto, token)
         self.assertIn("guids.push_back(guid.GetRawValue());", veto)
+        # A full proposal has no roles map: the raw GUIDs (players AND party
+        # group GUIDs) are always passed, never filtered to players only.
+        self.assertNotIn("IsPlayer()", veto)
+        self.assertRegex(veto, r"for \(ObjectGuid const& guid : proposal\.guids\)\s*if \(guid\)\s*guids\.push_back")
+        pass
         self.assertIn("std::lock_guard<std::mutex> lock(QueueFactsLock());", veto)
         self.assertIn("return !QueueFacts().Rejects(true, guids);", veto)
         # Facts are recorded only on the world thread, and joining is never blocked.
@@ -192,6 +197,7 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertEqual(set(re.findall(r"\breturn\b[^;]*;", join)), {"return true;"})  # never blocks a queue
         self.assertIn("Policy::MakeQueueFacts(ReadHuman(player), ReadBot(player))", join)
         self.assertIn("group->GetFirstMember()", join)
+        self.assertIn("QueueFacts().RecordGroup(groupGuid, std::move(members));", join)
         logout = self.body("void OnPlayerLogout(Player* player) override", "\n        }\n")
         self.assertIn("QueueFacts().Erase(player->GetGUID().GetRawValue());", logout)
         policy = strip_comments(read(POLICY))

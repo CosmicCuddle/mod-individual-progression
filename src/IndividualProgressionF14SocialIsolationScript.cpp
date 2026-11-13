@@ -392,15 +392,25 @@ namespace
             std::vector<std::pair<uint64, Policy::QueueFacts>> facts;
             facts.emplace_back(player->GetGUID().GetRawValue(),
                                Policy::MakeQueueFacts(ReadHuman(player), ReadBot(player)));
+            uint64 groupGuid = 0;
+            std::vector<uint64> members{player->GetGUID().GetRawValue()};
             if (Group const* group = player->GetGroup())
+            {
+                groupGuid = group->GetGUID().GetRawValue();
                 for (GroupReference const* itr = group->GetFirstMember(); itr; itr = itr->next())
                     if (Player const* member = itr->GetSource())
                         if (member != player)
+                        {
                             facts.emplace_back(member->GetGUID().GetRawValue(),
                                                Policy::MakeQueueFacts(ReadHuman(member), ReadBot(member)));
+                            members.push_back(member->GetGUID().GetRawValue());
+                        }
+            }
             std::lock_guard<std::mutex> lock(QueueFactsLock());
             for (auto const& [guid, value] : facts)
                 QueueFacts().Record(guid, value);
+            if (groupGuid)
+                QueueFacts().RecordGroup(groupGuid, std::move(members));
             return true;
         }
 
@@ -520,14 +530,15 @@ namespace
         {
             if (!OptionOn())
                 return true;
+            // A full proposal carries no roles map and names a party only by
+            // its group GUID; recorded parties are expanded by the table.
             std::vector<uint64> guids;
             if (proposal.roles)
                 for (auto const& [guid, role] : *proposal.roles)
                     guids.push_back(guid.GetRawValue());
-            else
-                for (ObjectGuid const& guid : proposal.guids)
-                    if (guid && guid.IsPlayer())
-                        guids.push_back(guid.GetRawValue());
+            for (ObjectGuid const& guid : proposal.guids)
+                if (guid)
+                    guids.push_back(guid.GetRawValue());
             std::lock_guard<std::mutex> lock(QueueFactsLock());
             return !QueueFacts().Rejects(true, guids);
         }

@@ -784,6 +784,45 @@ namespace
         // Exhaustive: groups of up to 5 drawn from 8 kinds, every subset.
         std::uint64_t const ids[] = {1, 2, 3, 10, 11, 20, 21, 22};
         table.Record(1, vanilla);
+        // Parties: a FULL proposal names a party only by its group GUID (no
+        // roles map). Members recorded at join are expanded.
+        {
+            P::QueueFactsTable parties;
+            std::uint64_t const vanillaParty = 1000, tbcParty = 1001, botParty = 1002, unknownParty = 1003;
+            parties.Record(501, vanilla);
+            parties.Record(502, tbc);
+            parties.Record(503, wrath);
+            parties.Record(504, restricted);
+            parties.Record(505, ordinaryBot);
+            parties.RecordGroup(vanillaParty, {501, 502});   // Vanilla human queued with a TBC friend
+            parties.RecordGroup(tbcParty, {502, 503});
+            parties.RecordGroup(botParty, {505, 504});       // a party carrying a restricted bot
+            parties.RecordGroup(0, {501});                   // no group GUID: ignored
+            CHECK(parties.Groups() == 3);
+            CHECK(parties.Rejects(true, G{vanillaParty, 504}));   // the gap: party GUID + solo bot
+            CHECK(parties.Rejects(true, G{501, botParty}));       // solo Vanilla + bot party
+            CHECK(parties.Rejects(true, G{vanillaParty, botParty}));
+            CHECK(!parties.Rejects(true, G{tbcParty, 504}));      // TBC/Wrath party: stock
+            CHECK(!parties.Rejects(true, G{tbcParty, botParty}));
+            CHECK(!parties.Rejects(true, G{vanillaParty, 505}));  // ordinary bot: stock
+            CHECK(!parties.Rejects(true, G{unknownParty, 504}));  // unrecorded party: no facts
+            CHECK(!parties.Rejects(false, G{vanillaParty, 504})); // option OFF
+            // Both views of the same proposal agree (roles keys + party GUID).
+            CHECK(parties.Rejects(true, G{501, 502, vanillaParty, 504}));
+            // A member logs out: their facts and every party listing them go.
+            parties.Erase(501);
+            CHECK(parties.Groups() == 2);
+            CHECK(!parties.Rejects(true, G{vanillaParty, 504}));
+            parties.Erase(504);
+            CHECK(parties.Groups() == 1);
+            CHECK(!parties.Rejects(true, G{501, botParty}));
+            // Re-queue as a party refreshes its member list.
+            parties.Record(501, vanilla);
+            parties.RecordGroup(vanillaParty, {501});
+            parties.Record(504, restricted);
+            CHECK(parties.Rejects(true, G{vanillaParty, 504}));
+        }
+
         for (unsigned mask = 0; mask < 256; ++mask)
         {
             G group;
