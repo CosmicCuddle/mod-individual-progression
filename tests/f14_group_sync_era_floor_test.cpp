@@ -19,18 +19,20 @@ constexpr Era ExpectedGroup(std::uint8_t race, std::uint8_t groupStage)
         ? Era::BurningCrusade : group;
 }
 
-static_assert(Floor::WhileGrouped(true, 1, 14, 0).effectiveEra == Era::Vanilla,
+static_assert(Floor::WhileGrouped(true, 1, 14, 0).temporaryEra == Era::Vanilla,
               "normal bot can downsync to Vanilla");
-static_assert(Floor::WhileGrouped(true, 10, 14, 0).effectiveEra == Era::BurningCrusade,
+static_assert(Floor::WhileGrouped(true, 10, 14, 0).temporaryEra == Era::BurningCrusade,
               "Blood Elf has a hard TBC minimum");
-static_assert(Floor::WhileGrouped(true, 11, 14, 0).effectiveEra == Era::BurningCrusade,
+static_assert(Floor::WhileGrouped(true, 11, 14, 0).temporaryEra == Era::BurningCrusade,
               "Draenei has a hard TBC minimum");
-static_assert(Floor::WhileGrouped(true, 10, 8, 13).effectiveEra == Era::Wrath,
+static_assert(Floor::WhileGrouped(true, 10, 8, 13).temporaryEra == Era::Wrath,
               "TBC-race bot can rise to Wrath");
-static_assert(Floor::AfterLeaving(true, 10, 14).effectiveEra == Era::Wrath,
-              "leaving restores earned Wrath era");
-static_assert(Floor::AfterLeaving(true, 11, 0).effectiveEra == Era::BurningCrusade,
-              "missing earned marker does not make solo TBC race Vanilla");
+static_assert(Floor::AfterLeaving(true, 10, 14).earnedEra == Era::Wrath,
+              "leaving exposes earned Wrath era");
+static_assert(Floor::AfterLeaving(true, 11, 0).earnedEra == Era::Vanilla,
+              "missing earned marker remains visible as Vanilla evidence");
+static_assert(Floor::AfterLeaving(true, 11, 0).status == Floor::Status::EarnedFloorMissing,
+              "missing earned floor is not usable solo evidence");
 
 int main()
 {
@@ -44,15 +46,16 @@ int main()
                 std::uint8_t const originalEarned = earned;
                 auto const decision = Floor::WhileGrouped(true, race, earned, group);
                 CHECK(decision.status == Floor::Status::Available);
-                CHECK(decision.effectiveEra == ExpectedGroup(race, group));
+                CHECK(decision.temporaryEra == ExpectedGroup(race, group));
                 CHECK(earned == originalEarned); // No earned quest/stage mutation.
                 ++checks;
             }
             auto const solo = Floor::AfterLeaving(true, race, earned);
-            Era const expectedSolo = (race == 10 || race == 11) && earned <= 7
-                ? Era::BurningCrusade : ExpectedEarned(earned);
-            CHECK(solo.status == Floor::Status::Available);
-            CHECK(solo.effectiveEra == expectedSolo);
+            bool const missingFloor = (race == 10 || race == 11) && earned <= 7;
+            CHECK(solo.status == (missingFloor ? Floor::Status::EarnedFloorMissing
+                                              : Floor::Status::Available));
+            CHECK(solo.earnedEra == ExpectedEarned(earned));
+            CHECK(bool(solo) == !missingFloor);
         }
     }
 
@@ -60,29 +63,31 @@ int main()
     // recover its legitimate earned Wrath era on leave without a stage write.
     {
         std::uint8_t earned = 15;
-        CHECK(Floor::WhileGrouped(true, 10, earned, 8).effectiveEra == Era::BurningCrusade);
-        CHECK(Floor::WhileGrouped(true, 10, earned, 13).effectiveEra == Era::Wrath);
-        CHECK(Floor::WhileGrouped(true, 10, earned, 0).effectiveEra == Era::BurningCrusade);
-        CHECK(Floor::AfterLeaving(true, 10, earned).effectiveEra == Era::Wrath);
+        CHECK(Floor::WhileGrouped(true, 10, earned, 8).temporaryEra == Era::BurningCrusade);
+        CHECK(Floor::WhileGrouped(true, 10, earned, 13).temporaryEra == Era::Wrath);
+        CHECK(Floor::WhileGrouped(true, 10, earned, 0).temporaryEra == Era::BurningCrusade);
+        CHECK(Floor::AfterLeaving(true, 10, earned).earnedEra == Era::Wrath);
         CHECK(earned == 15);
     }
     {
         std::uint8_t earned = 0; // Missing marker is not silently granted.
-        CHECK(Floor::WhileGrouped(true, 11, earned, 0).effectiveEra == Era::BurningCrusade);
-        CHECK(Floor::AfterLeaving(true, 11, earned).effectiveEra == Era::BurningCrusade);
+        CHECK(Floor::WhileGrouped(true, 11, earned, 0).temporaryEra == Era::BurningCrusade);
+        auto const departure = Floor::AfterLeaving(true, 11, earned);
+        CHECK(departure.earnedEra == Era::Vanilla);
+        CHECK(departure.status == Floor::Status::EarnedFloorMissing && !departure);
         CHECK(earned == 0);
     }
 
     // Race does not establish bot eligibility; invalid stages confer no era.
     CHECK(Floor::WhileGrouped(false, 10, 8, 0).status == Floor::Status::UnverifiedBot);
-    CHECK(Floor::WhileGrouped(false, 10, 8, 0).effectiveEra == Era::Invalid);
+    CHECK(Floor::WhileGrouped(false, 10, 8, 0).temporaryEra == Era::Invalid);
     CHECK(Floor::AfterLeaving(false, 11, 14).status == Floor::Status::UnverifiedBot);
     CHECK(Floor::WhileGrouped(true, 0, 8, 8).status == Floor::Status::InvalidRace);
     CHECK(Floor::WhileGrouped(true, 9, 8, 8).status == Floor::Status::InvalidRace);
-    CHECK(Floor::AfterLeaving(true, 255, 8).effectiveEra == Era::Invalid);
+    CHECK(Floor::AfterLeaving(true, 255, 8).earnedEra == Era::Invalid);
     CHECK(Floor::WhileGrouped(true, 10, 19, 8).status == Floor::Status::InvalidStage);
     CHECK(Floor::WhileGrouped(true, 10, 8, 19).status == Floor::Status::InvalidStage);
-    CHECK(Floor::AfterLeaving(true, 10, 255).effectiveEra == Era::Invalid);
+    CHECK(Floor::AfterLeaving(true, 10, 255).earnedEra == Era::Invalid);
 
     std::cout << "PASS F14 temporary group-era floor: " << checks
               << " grouped combinations plus solo, transitions and invalid input\n";

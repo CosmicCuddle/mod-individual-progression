@@ -14,13 +14,21 @@ namespace IndividualProgressionF14GroupSyncEraFloor
         Available,
         UnverifiedBot,
         InvalidRace,
-        InvalidStage
+        InvalidStage,
+        EarnedFloorMissing
     };
 
-    struct Decision
+    struct GroupedDecision
     {
         Status status = Status::UnverifiedBot;
-        Era effectiveEra = Era::Invalid;
+        Era temporaryEra = Era::Invalid;
+        explicit constexpr operator bool() const { return status == Status::Available; }
+    };
+
+    struct DepartureEvidence
+    {
+        Status status = Status::UnverifiedBot;
+        Era earnedEra = Era::Invalid;
         explicit constexpr operator bool() const { return status == Status::Available; }
     };
 
@@ -34,8 +42,8 @@ namespace IndividualProgressionF14GroupSyncEraFloor
     // this is a bot eligible for group synchronization. Race alone is never
     // proof of RNDBOT/Altbot/SelfBot identity. The result is an Era, not a
     // ProgressionState or quest-stage write authorization.
-    constexpr Decision WhileGrouped(bool eligibleBot, std::uint8_t race,
-                                    std::uint8_t earnedStage, std::uint8_t groupStage)
+    constexpr GroupedDecision WhileGrouped(bool eligibleBot, std::uint8_t race,
+                                           std::uint8_t earnedStage, std::uint8_t groupStage)
     {
         if (!eligibleBot)
             return {Status::UnverifiedBot, Era::Invalid};
@@ -50,11 +58,10 @@ namespace IndividualProgressionF14GroupSyncEraFloor
         return {Status::Available, group};
     }
 
-    // Leaving a group restores the bot's earned era as its solo view. A
-    // TBC-race bot with missing/Vanilla stage evidence still has only a
-    // temporary TBC minimum; this function does not invent earned stage 8.
-    constexpr Decision AfterLeaving(bool eligibleBot, std::uint8_t race,
-                                    std::uint8_t earnedStage)
+    // Leaving exposes exact earned-era evidence. A TBC-race bot with a
+    // Vanilla/missing earned marker is diagnosed, not given a TBC solo view.
+    constexpr DepartureEvidence AfterLeaving(bool eligibleBot, std::uint8_t race,
+                                             std::uint8_t earnedStage)
     {
         if (!eligibleBot)
             return {Status::UnverifiedBot, Era::Invalid};
@@ -64,7 +71,7 @@ namespace IndividualProgressionF14GroupSyncEraFloor
         if (earned == Era::Invalid)
             return {Status::InvalidStage, Era::Invalid};
         if (GroupPolicy::IsExpansionRace(race) && earned == Era::Vanilla)
-            return {Status::Available, Era::BurningCrusade};
+            return {Status::EarnedFloorMissing, earned};
         return {Status::Available, earned};
     }
 }

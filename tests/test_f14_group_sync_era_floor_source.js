@@ -14,6 +14,7 @@ for (const required of [
     "GroupPolicy::GetExpansion(earnedStage)", "GroupPolicy::GetExpansion(groupStage)",
     "GroupPolicy::IsExpansionRace(race)", "IsSupportedRace(race)", "Era::BurningCrusade",
     "Status::UnverifiedBot", "Status::InvalidRace", "Status::InvalidStage",
+    "Status::EarnedFloorMissing", "struct DepartureEvidence",
 ])
     requireContract(model.includes(required), "missing group-floor contract: " + required);
 for (const required of ["FirstTbcStage = 8", "FirstWrathStage = 13", "LastSupportedStage = 18"])
@@ -29,7 +30,8 @@ for (const forbidden of [
 for (const required of [
     "normal bot can downsync to Vanilla", "Blood Elf has a hard TBC minimum",
     "Draenei has a hard TBC minimum", "TBC-race bot can rise to Wrath",
-    "leaving restores earned Wrath era", "No earned quest/stage mutation",
+    "leaving exposes earned Wrath era", "No earned quest/stage mutation",
+    "missing earned floor is not usable solo evidence",
     "Missing marker is not silently granted", "Race does not establish bot eligibility",
 ])
     requireContract(tests.includes(required), "missing focused test scenario: " + required);
