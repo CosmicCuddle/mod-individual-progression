@@ -51,7 +51,7 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | G1 | H8 leads a group that contains R; H0 accepts H8's invite | **H0 is refused** and receives one reply from R (member scan, CS01 decision 6857686419) |
 | G2 | the same group, but R is offline when H0 accepts | H0 joins (an offline member is never classified). Once R is back online, whispering, trading and inviting R are still declined |
 | G3 | H8 leads a group with N, A or S only; H0 accepts | H0 joins (stock) |
-| PB1 | ask R, through Playerbots commands or its AI, to invite or trade with H0 | **UNKNOWN.** Record whether Core's invite and trade hooks fire for bot-initiated actions |
+| PB1 | ask R, through Playerbots commands or its AI, to invite or trade with H0, on the same map and on a different map | On Playerbots `0d754d19`, the source shows these call Core's handlers, so they are expected to be declined silently. Confirm on the installed version. Cross-map is the T1 thread case: watch for crashes |
 | OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |
 
 ## Pass criteria and evidence

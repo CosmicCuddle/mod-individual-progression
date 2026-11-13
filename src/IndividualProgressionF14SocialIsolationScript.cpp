@@ -188,8 +188,9 @@ namespace
             return AllowPair(Policy::Surface::GroupInvite, player, invitee, false);
         }
 
-        // Accepting an invitation. CMSG_GROUP_ACCEPT is PROCESS_THREADUNSAFE,
-        // so this runs in World::UpdateSessions while no map is updating.
+        // Accepting an invitation. A client CMSG_GROUP_ACCEPT is
+        // PROCESS_THREADUNSAFE (world thread, no map updating); Playerbots
+        // AI calls the same handler from the bot's map update (doc: T1).
         bool OnPlayerCanGroupAccept(Player* player, Group* group) override
         {
             if (!OptionOn() || !player || !group)
