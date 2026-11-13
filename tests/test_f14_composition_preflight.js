@@ -117,3 +117,29 @@ test("exact external Git diff verifies paths and all three config defaults", () 
     assert.ok(preflight.inspect(bad, path.dirname(file)).candidates[5].problems
               .includes("supplied external config defaults differ from exact local Git diff"));
 });
+
+test("delivered social head includes offline mail and guild patch without executable path overlap", () => {
+    const file = path.resolve(__dirname, "../docs/F14_REGISTER_RECONCILIATION_MANIFEST_V6_2026-11-13.json");
+    const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+    const report = preflight.inspect(manifest, path.dirname(file));
+    const social = report.candidates[5];
+    if (social.verification === "UNKNOWN") {
+        assert.equal(social.paths, "UNKNOWN");
+        assert.equal(social.configDefaults, "UNKNOWN");
+        return; // Partial/offline clones cannot verify an absent exact object.
+    }
+    assert.equal(social.verification, "LOCAL EXACT GIT OBJECTS; moving branch not checked");
+    assert.equal(social.HEAD, manifest.externalRows[0].head);
+    assert.deepEqual(social.problems, []);
+    assert.equal(social.paths.length, 14);
+    assert.ok(social.paths.includes("tests/core_patches/apply_f14_guild_invite_hook.py"));
+    assert.ok(social.paths.includes("tests/test_f14_guild_invite_hook_patch.py"));
+    assert.equal(social.configDefaults["IndividualProgression.F14.RandomBotSocialIsolation"], "0");
+    assert.deepEqual(report.duplicateFeatureIds, []);
+    assert.ok(report.overlaps.every(x => x.common.length === 1 && x.registerOverlap &&
+                                       x.runtimeOverlap.length === 0));
+    assert.deepEqual(report.objectOverlaps.map(x => [x.path, x.verdict]),
+                     [["docs/CUSTOM_MODIFICATIONS_REGISTER.md", "DIVERGENT_TREE_ENTRIES"]]);
+    assert.deepEqual(report.externalRegisterRows[0].problems, []);
+    assert.deepEqual(report.externalRegisterRows[0].gaps, []);
+});
