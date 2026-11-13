@@ -69,6 +69,16 @@ int main()
     CHECK(!tracker.Current(elf).temporary);
     CHECK(tracker.Current(elf).effectiveEra == Era::Wrath);
     CHECK(tracker.Current(human).temporary);
+
+    // Eligibility proof may be revoked before session teardown arrives.
+    // The captured exact context still clears and tombstones the override.
+    C::Tracker<1> lostEligibility;
+    CHECK(lostEligibility.ObserveGrouped(human).temporary);
+    CHECK(lostEligibility.Revoke(human.identity, false, human.race, human.earnedStage,
+                                 C::Departure::SessionInvalidation).status == C::Status::UnverifiedBot);
+    CHECK(!lostEligibility.Current(human).temporary);
+    CHECK(lostEligibility.Current(human).effectiveEra == Era::Wrath);
+    CHECK(lostEligibility.ObserveGrouped(human).status == C::Status::Ambiguous);
     CHECK(tracker.ObserveGrouped(elf).status == C::Status::Ambiguous);
     CHECK(tracker.Revoke(conflict.identity, true, 10, 15, C::Departure::Leave).status ==
           C::Status::Ambiguous);

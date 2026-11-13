@@ -29,13 +29,25 @@ check(mutant !== model && !hasExactRevocationFence(mutant), "stale-revoke mutati
 
 function hasEarnedDeparture(source) {
     const revoke = source.split("View Revoke(")[1]?.split("private:")[0];
-    return revoke?.includes("EarnedView(true, race, earnedStage)") &&
+    return revoke?.includes("EarnedView(eligibleBot, race, earnedStage)") &&
            !revoke.includes("Floor::WhileGrouped(");
 }
 check(hasEarnedDeparture(model), "departure must expose exact earned evidence");
-mutant = model.replace("EarnedView(true, race, earnedStage)",
+mutant = model.replace("EarnedView(eligibleBot, race, earnedStage)",
                        "{Status::Temporary, Era::BurningCrusade, true}");
 check(mutant !== model && !hasEarnedDeparture(mutant), "TBC-on-departure mutation escaped");
+
+function exactTeardownWithoutEligibility(source) {
+    const revoke = source.split("View Revoke(")[1]?.split("private:")[0];
+    return revoke?.indexOf("if (!Complete(identity))") >= 0 &&
+           revoke.indexOf("*entry = {identity, race, 0, Era::Invalid, true, false, false};") >= 0 &&
+           !revoke.includes("if (!eligibleBot)");
+}
+check(exactTeardownWithoutEligibility(model), "lost eligibility must not block exact teardown");
+mutant = model.replace(/(View Revoke\([\s\S]*?\{)\n\s*\/\/ Teardown/,
+                       "$1\n            if (!eligibleBot) return {Status::UnverifiedBot, Era::Invalid, false};\n            // Teardown");
+check(mutant !== model && !exactTeardownWithoutEligibility(mutant),
+      "lost-eligibility teardown mutation escaped");
 
 check(model.includes("std::array<Entry, Capacity>") && !model.includes("std::vector"),
       "consumer storage must remain bounded");

@@ -185,8 +185,9 @@ namespace IndividualProgressionF14GroupEraConsumer
         View Revoke(Identity const& identity, bool eligibleBot, std::uint8_t race,
                     std::uint8_t earnedStage, Departure)
         {
-            if (!eligibleBot)
-                return {Status::UnverifiedBot, Era::Invalid, false};
+            // Teardown can run after the caller loses eligibility proof.
+            // Exact captured context is sufficient to remove a temporary
+            // override; eligibility is needed only for the returned view.
             if (!Complete(identity))
                 return {Status::InvalidIdentity, Era::Invalid, false};
             Entry* entry = Find(identity.botGuid);
@@ -209,7 +210,7 @@ namespace IndividualProgressionF14GroupEraConsumer
                 }
             }
             *entry = {identity, race, 0, Era::Invalid, true, false, false};
-            View view = EarnedView(true, race, earnedStage);
+            View view = EarnedView(eligibleBot, race, earnedStage);
             if (view.status == Status::Earned)
                 view.status = Status::Revoked;
             return view;
