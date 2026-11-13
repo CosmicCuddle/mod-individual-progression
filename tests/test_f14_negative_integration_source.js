@@ -97,17 +97,25 @@ check(witness.includes("PendingRestores() == 3") &&
 function hasAdditionalNegativeRoutes(source) {
     const handoff = source.split("ObserveProposedBatchFlush(nextKey, otherCreature")[1]?.split(
         "CHECK(!witness.TrySend(old")[0];
+    const unknownEnd = source.split("CorrTable unknownEnd;")[1]?.split(
+        "// Replayed and nested passes")[0];
     return source.includes("ObserveLinkTransition(nextKey, otherCreature") &&
            source.includes("ObserveProposedBatchFlush(nextKey, otherCreature") &&
            handoff?.includes("CHECK(protocol.NeedsRestore(nextKey, otherCreature));") &&
-           source.includes("unknownEnd.ObservePassEnded(oldKey, 41)") &&
-           source.includes("Corr::Result::PassClosed") &&
+           unknownEnd?.includes("unknownEnd.ObservePassEnded(oldKey, 41)") &&
+           unknownEnd.includes("Corr::Result::TokenReorderedOrReused") &&
+           unknownEnd.includes("Corr::Result::ViewerPoisoned") &&
+           unknownEnd.includes("PendingRestores() == 2") &&
            source.includes("correlations.ObserveViewerRightsOrEraChanged(other.guid)") &&
            source.includes("protocol.ObserveCreatureRetired(creature)") &&
            source.includes("protocol.ObserveMapUnloaded(1, 2)") &&
            source.includes("recycled.GlobalRestoreRequired()");
 }
 check(hasAdditionalNegativeRoutes(witness), "missing send/receipt, unknown-end or creature-retirement route");
+const closedTokenMutant = witness.replace("Corr::Result::TokenReorderedOrReused);\n    CHECK(unknownEnd.Nominate",
+                                           "Corr::Result::PassClosed);\n    CHECK(unknownEnd.Nominate");
+check(closedTokenMutant !== witness && !hasAdditionalNegativeRoutes(closedTokenMutant),
+      "closed-token replay expectation mutation escaped");
 const receiptMutant = witness.replace(
     "CHECK(protocol.NeedsRestore(nextKey, otherCreature));\n    CHECK(protocol.LedgerView().PendingRestores() == 2);",
     "CHECK(protocol.CompleteRestoreOnlyWithClientProof(nextKey, otherCreature, 9002, true));\n    CHECK(protocol.LedgerView().PendingRestores() == 2);");

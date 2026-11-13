@@ -168,9 +168,14 @@ int main()
 
     CorrTable unknownEnd;
     CHECK(unknownEnd.ObservePassEnded(oldKey, 41) == Corr::Result::PassAccepted);
+    // Nominate calls AdvancePass: reopening this ended token is a replay and
+    // poisons only this viewer's ephemeral correlation evidence.
     CHECK(unknownEnd.Nominate(oldKey, creature, 9001, Corr::Direction::Create,
                               41, Nomination(protocol, oldKey, creature, 9001)) ==
-          Corr::Result::PassClosed);
+          Corr::Result::TokenReorderedOrReused);
+    CHECK(unknownEnd.Nominate(oldKey, creature, 9001, Corr::Direction::Create,
+                              41, Nomination(protocol, oldKey, creature, 9001)) ==
+          Corr::Result::ViewerPoisoned);
     CHECK(protocol.LedgerView().PendingRestores() == 2);
 
     // Replayed and nested passes cannot upgrade even a nominated send.
