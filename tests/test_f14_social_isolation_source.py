@@ -71,7 +71,7 @@ class DefaultOff(unittest.TestCase):
     def test_every_hook_checks_the_option_first(self):
         src = strip_comments(read(SCRIPT))
         self.assertIn("return sIndividualProgression->enabled && sIndividualProgression->f14RandomBotSocialIsolation;", src)
-        allow = src.split("bool AllowPair(", 1)[1]
+        allow = src.split("bool AllowPairIn(", 1)[1]
         self.assertIn("if (!OptionOn() || !initiator || !other || initiator == other)", allow[:400])
         for sig in ("bool OnPlayerCanGroupInvite(", "bool OnPlayerCanGroupAccept(",
                     "bool OnF14ShouldExcludeWhoEntryForViewer("):
@@ -84,7 +84,7 @@ class HooksAndAuthority(unittest.TestCase):
         self.src = strip_comments(read(SCRIPT))
 
     def test_only_social_hooks_and_who(self):
-        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+|ALLBATTLEGROUNDHOOK_[A-Z0-9_]+)\b", self.src)))
+        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+|ALLBATTLEGROUNDHOOK_[A-Z0-9_]+|ALLSPELLHOOK_[A-Z0-9_]+)\b", self.src)))
         self.assertEqual(hooks, sorted([
             "PLAYERHOOK_CAN_GROUP_ACCEPT", "PLAYERHOOK_CAN_GROUP_INVITE", "PLAYERHOOK_CAN_INIT_TRADE",
             "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT", "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY",
@@ -92,14 +92,15 @@ class HooksAndAuthority(unittest.TestCase):
             "PLAYERHOOK_CAN_JOIN_LFG", "PLAYERHOOK_ON_LOGOUT", "GLOBALHOOK_CAN_CREATE_LFG_PROPOSAL",
             "PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE", "PLAYERHOOK_CAN_BATTLEFIELD_PORT",
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_ADD_PLAYER", "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_REMOVE_PLAYER_AT_LEAVE",
-            "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY", "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL"]))
+            "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY", "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL",
+            "PLAYERHOOK_CAN_SEND_MAIL", "ALLSPELLHOOK_ON_SPELL_CHECK_CAST"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
             "OnPlayerCanInitTrade", "OnPlayerCanUseChat", "OnUpdate", "OnPlayerBeforeUpdate",
             "OnPlayerCanJoinLfg", "OnPlayerLogout", "OnPlayerCanJoinInBattlegroundQueue",
             "OnPlayerCanBattleFieldPort", "OnBattlegroundAddPlayer", "OnBattlegroundRemovePlayerAtLeave",
-            "OnBattlegroundDestroy"]))
+            "OnBattlegroundDestroy", "OnPlayerCanSendMail", "OnSpellCheckCast"]))
         self.assertEqual(sorted(re.findall(r"\b(Can\w+)\([^;{]*\)\s*override", self.src)),
                          ["CanAddGroupToMatchingPool", "CanCreateLfgProposal"])
 
@@ -174,6 +175,27 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertIn("(candidate.stillVanillaHuman && others.restrictedBot));", policy)
         self.assertIn("return MatchKinds{HumanStillVanilla(asHuman), BotIsRestrictedRandomBot(asBot)};", policy)
 
+    def test_duel_and_mail(self):
+        duel = self.body("void OnSpellCheckCast(Spell* spell, bool ", "\n        }\n")
+        # Only duel requests, only when Core has not already refused.
+        self.assertRegex(duel, r"if \(res != SPELL_CAST_OK \|\| !OptionOn\(\) \|\| !spell\)\s*return;")
+        self.assertRegex(duel, r"if \(!info \|\| !info->HasEffect\(SPELL_EFFECT_DUEL\)\)\s*return;")
+        # Off the world thread the scope is the caster's own map; the target
+        # is resolved only by pointer identity among that map's players.
+        self.assertIn("scope.ownedMap = caster->FindMap();", duel)
+        self.assertIn("if (static_cast<Unit const*>(owned) == targetUnit)", duel)
+        off = duel.split("else\n                for (auto const& ref : scope.ownedMap->GetPlayers())", 1)
+        self.assertEqual(len(off), 2)
+        self.assertNotRegex(duel, r"\btargetUnit->(?!ToPlayer)")
+        self.assertLess(duel.index("if (scope.anyPlayer)\n                target = targetUnit->ToPlayer();"),
+                        duel.index("scope.ownedMap->GetPlayers()"))
+        self.assertIn("if (!AllowPairIn(scope, Policy::Surface::Duel, caster, target, false))", duel)
+        self.assertIn("res = SPELL_FAILED_BAD_TARGETS;", duel)
+        mail = self.body("bool OnPlayerCanSendMail(Player* player", "\n        }\n")
+        self.assertRegex(mail, r"if \(!OptionOn\(\) \|\| !player \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return true;")
+        self.assertRegex(mail, r"if \(!receiver\)\s*return true;")
+        self.assertIn("return AllowPair(Policy::Surface::Mail, player, receiver, false);", mail)
+
     def test_dungeon_finder_value_only(self):
         # The matcher hook runs on the LFG worker thread beside the maps: it
         # reads only GUIDs and the facts table, never a Player.
@@ -215,7 +237,9 @@ class HooksAndAuthority(unittest.TestCase):
         # The per-update record touches only the player this thread updates.
         rec = self.body("void OnPlayerBeforeUpdate(Player* player, uint32 ) override", "\n        }\n")
         self.assertIn("ThisThreadOwnedMap() = {player->FindMap(), WorldThread().Tick(), true};", rec)
-        self.assertEqual(self.src.count("->FindMap()"), 1, "FindMap only on the player being updated")
+        # FindMap only on an owned player: the one being updated, or the
+        # caster whose own map update is processing the spell.
+        self.assertEqual(sorted(re.findall(r"\b(\w+)->FindMap\(\)", self.src)), ["caster", "player"])
         policy = strip_comments(read(POLICY))
         self.assertIn("return onWorldThread || (ownedScopeValid && firstInOwnedMap && secondInOwnedMap);", policy)
         self.assertIn("return recorded && recordedTick == currentTick;", policy)
@@ -242,10 +266,12 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertNotRegex(guard, r"\b[ab]->")
         self.assertIn("scope.Contains(a), scope.Contains(b)", guard)
         # Pair rule: nothing of either player before the guard.
-        allow = self.body("bool AllowPair(")
+        allow = self.body("bool AllowPairIn(")
         pre = allow[:allow.index("MayReadPair(")]
         self.assertNotRegex(pre, r"\b(initiator|other)->")
-        self.assertRegex(allow, r"if \(!MayReadPair\(CurrentReadScope\(\), initiator, other\)\)\s*return true;")
+        self.assertRegex(allow, r"if \(!MayReadPair\(scope, initiator, other\)\)\s*return true;")
+        wrapper = self.body("bool AllowPair(Policy::Surface surface")
+        self.assertIn("return AllowPairIn(CurrentReadScope(), surface, initiator, other, addonMessage);", wrapper)
         self.assertLess(allow.index("MayReadPair("), allow.index("ReadHuman("))
         # Hooks: arguments are passed straight through, never dereferenced first.
         for sig, names in (("bool OnPlayerCanUseChat(Player* player", ("player", "receiver")),

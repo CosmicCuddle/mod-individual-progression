@@ -106,7 +106,9 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         Whisper,
         Trade,
         GroupInvite,
-        GroupAccept
+        GroupAccept,
+        Duel,
+        Mail
     };
 
     enum class Direction : std::uint8_t

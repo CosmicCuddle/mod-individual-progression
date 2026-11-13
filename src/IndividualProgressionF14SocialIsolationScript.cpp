@@ -20,6 +20,7 @@
 #include "IndividualProgressionF14SocialIsolationPolicy.h"
 #include "AccountMgr.h"
 #include "AllBattlegroundScript.h"
+#include "AllSpellScript.h"
 #include "Battleground.h"
 #include "BattlegroundMgr.h"
 #include "BattlegroundQueue.h"
@@ -33,6 +34,8 @@
 #include "Player.h"
 #include "PlayerScript.h"
 #include "ScriptMgr.h"
+#include "Spell.h"
+#include "SpellInfo.h"
 #include "WorldObjectScript.h"
 #include "WorldPacket.h"
 #include "WorldScript.h"
@@ -260,11 +263,12 @@ namespace
     }
 
     // initiator -> other. Returns true to ALLOW. Either side may be the bot.
-    bool AllowPair(Policy::Surface surface, Player* initiator, Player* other, bool addonMessage)
+    bool AllowPairIn(ReadScope const& scope, Policy::Surface surface, Player* initiator, Player* other,
+                     bool addonMessage)
     {
         if (!OptionOn() || !initiator || !other || initiator == other)
             return true;
-        if (!MayReadPair(CurrentReadScope(), initiator, other))
+        if (!MayReadPair(scope, initiator, other))
             return true; // T1: unknown facts, not restricted (stock)
 
         // Human started it: block and (maybe) answer from the bot.
@@ -283,6 +287,11 @@ namespace
         return !fromBot.block;
     }
 
+    bool AllowPair(Policy::Surface surface, Player* initiator, Player* other, bool addonMessage)
+    {
+        return AllowPairIn(CurrentReadScope(), surface, initiator, other, addonMessage);
+    }
+
     class F14SocialIsolationPlayerScript final : public PlayerScript
     {
     public:
@@ -290,7 +299,24 @@ namespace
             {PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT, PLAYERHOOK_CAN_INIT_TRADE,
              PLAYERHOOK_CAN_GROUP_INVITE, PLAYERHOOK_CAN_GROUP_ACCEPT,
              PLAYERHOOK_ON_BEFORE_UPDATE, PLAYERHOOK_CAN_JOIN_LFG, PLAYERHOOK_ON_LOGOUT,
-             PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE, PLAYERHOOK_CAN_BATTLEFIELD_PORT}) { }
+             PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE, PLAYERHOOK_CAN_BATTLEFIELD_PORT,
+             PLAYERHOOK_CAN_SEND_MAIL}) { }
+
+        // Mail. CMSG_SEND_MAIL is PROCESS_THREADUNSAFE (world thread), so the
+        // receiver may be looked up. Only an ONLINE receiver has live facts;
+        // an offline one is unknown and never restricted. Core also calls
+        // this when a mail is returned to its sender (same arguments).
+        bool OnPlayerCanSendMail(Player* player, ObjectGuid receiverGuid, ObjectGuid /*mailbox*/,
+                                 std::string& /*subject*/, std::string& /*body*/, uint32 /*money*/,
+                                 uint32 /*COD*/, Item* /*item*/) override
+        {
+            if (!OptionOn() || !player || !WorldThread().IsCurrent())
+                return true;
+            Player* receiver = ObjectAccessor::FindPlayer(receiverGuid);
+            if (!receiver)
+                return true; // offline or unknown: not restricted
+            return AllowPair(Policy::Surface::Mail, player, receiver, false);
+        }
 
         // Battleground queue join (b). CMSG_BATTLEMASTER_JOIN is
         // PROCESS_THREADUNSAFE and Playerbots queues the same packet, so this
@@ -660,6 +686,54 @@ namespace
         }
     };
 
+    // Duel. A duel request is a spell with SPELL_EFFECT_DUEL; this global
+    // check needs no spell_script_names row. A client CMSG_CAST_SPELL is
+    // PROCESS_THREADSAFE, so it is processed inside the caster's own map
+    // update (bot AI casts too): the caster's map is owned here. The target
+    // is accepted only by pointer membership in that map's player list, so
+    // a foreign object is never touched first. On the world thread any
+    // player may be read.
+    class F14SocialIsolationSpellScript final : public AllSpellScript
+    {
+    public:
+        F14SocialIsolationSpellScript() : AllSpellScript("IndividualProgression_F14SocialIsolationDuel",
+            {ALLSPELLHOOK_ON_SPELL_CHECK_CAST}) { }
+
+        void OnSpellCheckCast(Spell* spell, bool /*strict*/, SpellCastResult& res) override
+        {
+            if (res != SPELL_CAST_OK || !OptionOn() || !spell)
+                return;
+            SpellInfo const* info = spell->GetSpellInfo();
+            if (!info || !info->HasEffect(SPELL_EFFECT_DUEL))
+                return;
+            WorldObject* casterObject = spell->GetCaster();
+            Player* caster = casterObject ? casterObject->ToPlayer() : nullptr;
+            Unit* targetUnit = spell->m_targets.GetUnitTarget();
+            if (!caster || !targetUnit)
+                return;
+            ReadScope scope;
+            if (WorldThread().IsCurrent())
+                scope.anyPlayer = true;
+            else
+                scope.ownedMap = caster->FindMap(); // the caster's own map update
+            if (!scope.anyPlayer && !scope.ownedMap)
+                return;
+            // Resolve the target only among the owned map's players.
+            Player* target = nullptr;
+            if (scope.anyPlayer)
+                target = targetUnit->ToPlayer();
+            else
+                for (auto const& ref : scope.ownedMap->GetPlayers())
+                    if (Player* owned = ref.GetSource())
+                        if (static_cast<Unit const*>(owned) == targetUnit)
+                            target = owned;
+            if (!target)
+                return; // not a player on this map: not ours to decide
+            if (!AllowPairIn(scope, Policy::Surface::Duel, caster, target, false))
+                res = SPELL_FAILED_BAD_TARGETS;
+        }
+    };
+
     // T1 only: remembers the world thread and counts world ticks. Reads nothing.
     class F14SocialIsolationWorldThreadScript final : public WorldScript
     {
@@ -700,4 +774,5 @@ void AddSC_mod_individual_progression_f14_social_isolation()
     new F14SocialIsolationWorldThreadScript();
     new F14SocialIsolationLfgScript();
     new F14SocialIsolationBattlegroundScript();
+    new F14SocialIsolationSpellScript();
 }

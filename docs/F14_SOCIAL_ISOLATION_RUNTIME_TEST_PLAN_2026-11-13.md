@@ -65,6 +65,10 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | U1 | a BE/Dr character whose identity was never verified (logged in before the option was on) interacts with H0 | stock, never classified from race |
 | T1a | R on the **same** map as H0 invites or whispers H0 through Playerbots | declined silently (ownership is proven on the bot's map thread) |
 | T1b | R on a **different** map invites H0 through Playerbots (for example via LFG chat) | allowed (stock; owner fail-open), with no crash under load |
+| D1 | H0 challenges R to a duel | the cast fails (no request reaches R); H0 receives one in-character reply |
+| D2 | H8 challenges R; H0 challenges N | stock duel requests |
+| M1 | H0 mails R while R is online | refused with a mail error; one reply |
+| M2 | H0 mails R while R is offline | delivered (offline receiver: no live facts) |
 | OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |
 
 ## Future cases (only once a #176 runtime producer exists; not testable today)

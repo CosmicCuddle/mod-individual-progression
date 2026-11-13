@@ -59,7 +59,8 @@ namespace
     }
 
     P::Surface const kSurfaces[] = {P::Surface::Whisper, P::Surface::Trade,
-                                    P::Surface::GroupInvite, P::Surface::GroupAccept};
+                                    P::Surface::GroupInvite, P::Surface::GroupAccept,
+                                    P::Surface::Duel, P::Surface::Mail};
 
     void TestDefaultsNeverRestrict()
     {
@@ -1017,6 +1018,31 @@ namespace
     }
 }
 
+namespace
+{
+    // Duel and mail follow the same pair rule and reply rule as every other
+    // surface: blocked both ways for a restricted pair; the bot answers only
+    // a human-started attempt; everyone else is stock.
+    void TestDuelAndMail()
+    {
+        for (P::Surface s : {P::Surface::Duel, P::Surface::Mail})
+        {
+            P::Decision const h2b = P::Decide(true, s, P::Direction::HumanToBot, VanillaHuman(), VerifiedBot(), false);
+            P::Decision const b2h = P::Decide(true, s, P::Direction::BotToHuman, VanillaHuman(), VerifiedBot(), false);
+            CHECK(h2b.block && h2b.reply);
+            CHECK(b2h.block && !b2h.reply);
+            CHECK(!P::Decide(true, s, P::Direction::HumanToBot, VanillaHuman(8), VerifiedBot(), false).block);
+            CHECK(!P::Decide(true, s, P::Direction::HumanToBot, VanillaHuman(), VerifiedBot(1), false).block);
+            CHECK(!P::Decide(false, s, P::Direction::HumanToBot, VanillaHuman(), VerifiedBot(), false).block);
+            P::Bot altbot = VerifiedBot();
+            altbot.verifiedRandomBotIdentity = false;
+            CHECK(!P::Decide(true, s, P::Direction::HumanToBot, VanillaHuman(), altbot, false).block);
+            // The addon flag only matters for whispers.
+            CHECK(P::Decide(true, s, P::Direction::HumanToBot, VanillaHuman(), VerifiedBot(), true).reply);
+        }
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -1039,6 +1065,7 @@ int main()
     TestDungeonFinderQueue();
     TestBattlegrounds();
     TestBattlegroundMatcher();
+    TestDuelAndMail();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

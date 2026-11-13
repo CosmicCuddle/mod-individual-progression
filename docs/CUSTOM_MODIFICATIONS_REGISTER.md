@@ -1283,8 +1283,7 @@ Focused native tests require every completeness family independently, exercise t
 - **Thread safety (T1, CS01 review 6860967009):** client-initiated attempts run on the world thread. When Playerbots AI starts an attempt, it runs on a map thread; a pair is read there only if both player pointers are in the map this thread owns in the current world tick. Otherwise it is allowed (stock; owner decision). Two evidence-only hooks were added: `WORLDHOOK_ON_UPDATE` (world-thread and tick marker) and `PLAYERHOOK_ON_BEFORE_UPDATE` (per-thread owned map).
 - **Known gaps:**
   - guild invite (no hook);
-  - duel (notify-only hook);
-  - mail (offline receiver unverifiable);
+  - mail to an offline receiver (unverifiable, not restricted);
   - later-era isolation beyond Vanilla/TBC;
   - battleground matching keeps the two kinds apart at the matcher; a group invited from a different queue type into the same instance is covered by (a) once inside.
 - **Dungeon Finder (owner decision 13 Nov 2026):** a still-Vanilla human who queues is never matched into one group with a restricted RandomBot; TBC/Wrath humans are stock. Facts are recorded at queue join (world thread). The `GlobalScript::CanCreateLfgProposal` veto is value-only: GUIDs plus the recorded facts, no `Player`.
@@ -1292,6 +1291,7 @@ Focused native tests require every completeness family independently, exercise t
   - **(b)** a restricted bot's solo queue join is quietly refused while a still-Vanilla human (re-validated live) waits in a matching queue and bracket;
   - **(a)** its "enter battle" is refused when it's invited to an instance that holds a still-Vanilla human (value-only roster; ownership-proven bot reads only).
   - Leaving a queue is never refused; TBC/Wrath humans are stock.
+- **Duel and mail:** a duel request between a restricted pair fails through the global `AllSpellScript::OnSpellCheckCast` (no DB row). Mail is refused for a restricted pair when the receiver is online (`OnPlayerCanSendMail`, world thread).
 - **Battleground matcher (option (d), owner-approved 13 Nov 2026):** `AllBattlegroundScript::CanAddGroupToMatchingPool` (an existing Core25 hook, so **no Core change**) refuses a candidate group that would put a still-Vanilla human and a restricted bot in one match, whichever came first. It is read-only and runs on the world thread.
 - **Tests:**
   - native policy tests (GCC/Clang, C++17/20, with and without NDEBUG);

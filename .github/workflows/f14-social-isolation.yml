@@ -174,6 +174,21 @@ jobs:
               ("Scripting/ScriptDefines/AllBattlegroundScript.h", 42, "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY,"),
               ("Entities/Player/Player.cpp", 12571, "if (_BgBattlegroundQueueID[i].invitedToInstance == instanceId)"),
               ("../shared/SharedDefines.h", 3894, "ERR_BATTLEGROUND_NONE                   = -1,"),
+              # Duel: a global spell check (no spell_script_names row) early in CheckCast, whose
+              # failure stops the cast; casts are processed in the caster's own map update.
+              ("Spells/Spell.cpp", 5907, "sScriptMgr->OnSpellCheckCast(this, strict, res);"),
+              ("Spells/Spell.cpp", 5909, "if (res != SPELL_CAST_OK)"),
+              ("Scripting/ScriptDefines/AllSpellScript.h", 27, "ALLSPELLHOOK_ON_SPELL_CHECK_CAST,"),
+              ("Scripting/ScriptDefines/AllSpellScript.h", 58, "virtual void OnSpellCheckCast(Spell* /*spell*/, bool /*strict*/, SpellCastResult& /*res*/) { }"),
+              ("Server/Protocol/Opcodes.cpp", 433, "PROCESS_THREADSAFE,     &WorldSession::HandleCastSpellOpcode"),
+              ("Spells/Spell.h", 542, "SpellCastTargets m_targets;"),
+              ("Spells/SpellEffects.cpp", 155, "&Spell::EffectDuel,"),
+              ("../shared/SharedDefines.h", 949, "SPELL_FAILED_BAD_TARGETS = 12,"),
+              # Mail: world-thread handler; the same hook also guards returning a mail to its sender.
+              ("Server/Protocol/Opcodes.cpp", 699, "PROCESS_THREADUNSAFE,   &WorldSession::HandleSendMail"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 152, "PLAYERHOOK_CAN_SEND_MAIL,"),
+              ("Handlers/MailHandler.cpp", 289, "if (!items_count && !sScriptMgr->OnPlayerCanSendMail(player, receiverGuid, mailbox, subject, body, money, COD, nullptr))"),
+              ("Handlers/MailHandler.cpp", 460, "if (item && !sScriptMgr->OnPlayerCanSendMail(player, ObjectGuid(HighGuid::Player, m->sender), mailbox"),
               # Option (d): the per-group matcher veto is consulted at every pool insertion (fill and
               # new match), queue state is public, and queue updates run in BattlegroundMgr::Update on
               # the world thread after the map phase.
@@ -211,5 +226,5 @@ jobs:
                   print(f"FAIL {name}:{line}: expected {text!r}, got {got!r}")
           if bad:
               raise SystemExit(f"{bad} Core25 social anchor(s) drifted")
-          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership; Dungeon Finder seam; battleground options (c)+(d)")
+          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership; Dungeon Finder seam; battleground options (c)+(d); duel and mail")
           PY
