@@ -327,7 +327,18 @@ namespace
              PLAYERHOOK_CAN_GROUP_INVITE, PLAYERHOOK_CAN_GROUP_ACCEPT,
              PLAYERHOOK_ON_BEFORE_UPDATE, PLAYERHOOK_CAN_JOIN_LFG, PLAYERHOOK_ON_LOGOUT,
              PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE, PLAYERHOOK_CAN_BATTLEFIELD_PORT,
-             PLAYERHOOK_CAN_SEND_MAIL}) { }
+             PLAYERHOOK_CAN_SEND_MAIL, PLAYERHOOK_ON_LOGIN}) { }
+
+        // Offline mail: a character that logs in is no longer "remembered";
+        // its next logout re-remembers it only if still a verified
+        // restricted bot (so a revoked identity is not kept until restart).
+        void OnPlayerLogin(Player* player) override
+        {
+            if (!player)
+                return;
+            std::lock_guard<std::mutex> lock(ConfirmedLock());
+            Confirmed().Forget(player->GetGUID().GetRawValue());
+        }
 
         // Mail. CMSG_SEND_MAIL is PROCESS_THREADUNSAFE (world thread), so the
         // receiver may be looked up. Only an ONLINE receiver has live facts;

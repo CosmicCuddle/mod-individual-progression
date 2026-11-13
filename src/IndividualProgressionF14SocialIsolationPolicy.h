@@ -334,6 +334,10 @@ namespace IndividualProgressionF14SocialIsolationPolicy
             if (guid)
                 _guids.insert(guid);
         }
+        // At every login: the live facts take over while online, and the
+        // next logout re-remembers it only if it is still a verified
+        // restricted bot. So the set always reflects the LAST logout.
+        void Forget(std::uint64_t guid) { _guids.erase(guid); }
         bool Contains(std::uint64_t guid) const { return _guids.count(guid) != 0; }
         std::size_t Size() const { return _guids.size(); }
 

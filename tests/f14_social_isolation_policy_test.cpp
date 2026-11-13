@@ -1064,6 +1064,13 @@ namespace
         CHECK(!P::OfflineMailRefused(true, tbcSender, confirmed.Contains(42)));
         CHECK(!P::OfflineMailRefused(true, vanillaSender, confirmed.Contains(43)));
         CHECK(!P::OfflineMailRefused(false, vanillaSender, confirmed.Contains(42)));
+        // Login forgets; a still-verified bot is re-remembered at logout, a
+        // revoked one is not.
+        confirmed.Forget(42);
+        CHECK(!confirmed.Contains(42) && confirmed.Size() == 0);
+        confirmed.Forget(42); // harmless when absent
+        confirmed.Remember(42);
+        CHECK(confirmed.Contains(42));
     }
 }
 

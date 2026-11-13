@@ -93,14 +93,15 @@ class HooksAndAuthority(unittest.TestCase):
             "PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE", "PLAYERHOOK_CAN_BATTLEFIELD_PORT",
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_ADD_PLAYER", "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_REMOVE_PLAYER_AT_LEAVE",
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY", "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL",
-            "PLAYERHOOK_CAN_SEND_MAIL", "ALLSPELLHOOK_ON_SPELL_CHECK_CAST", "PLAYERHOOK_ON_F14_CAN_GUILD_INVITE"]))
+            "PLAYERHOOK_CAN_SEND_MAIL", "ALLSPELLHOOK_ON_SPELL_CHECK_CAST", "PLAYERHOOK_ON_F14_CAN_GUILD_INVITE",
+            "PLAYERHOOK_ON_LOGIN"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
             "OnPlayerCanInitTrade", "OnPlayerCanUseChat", "OnUpdate", "OnPlayerBeforeUpdate",
             "OnPlayerCanJoinLfg", "OnPlayerLogout", "OnPlayerCanJoinInBattlegroundQueue",
             "OnPlayerCanBattleFieldPort", "OnBattlegroundAddPlayer", "OnBattlegroundRemovePlayerAtLeave",
-            "OnBattlegroundDestroy", "OnPlayerCanSendMail", "OnSpellCheckCast", "OnPlayerCanGuildInvite"]))
+            "OnBattlegroundDestroy", "OnPlayerCanSendMail", "OnSpellCheckCast", "OnPlayerCanGuildInvite", "OnPlayerLogin"]))
         # The guild hook is overridden only inside the patched-Core guard.
         self.assertEqual(re.findall(r"\bbool (OnPlayerCanGuildInvite)\(Player\* inviter, Player\* invitee\) override", self.src),
                          ["OnPlayerCanGuildInvite"])
@@ -206,6 +207,8 @@ class HooksAndAuthority(unittest.TestCase):
         logout = self.body("void OnPlayerLogout(Player* player) override", "\n        }\n")
         self.assertRegex(logout, r"if \(OptionOn\(\) && WorldThread\(\)\.IsCurrent\(\) && Policy::BotIsRestrictedRandomBot\(ReadBot\(player\)\)\)")
         self.assertIn("Confirmed().Remember(player->GetGUID().GetRawValue());", logout)
+        login = self.body("void OnPlayerLogin(Player* player) override", "\n        }\n")
+        self.assertIn("Confirmed().Forget(player->GetGUID().GetRawValue());", login)
         # The capture relies on load order: these scripts are registered
         # (via AddSC_mod_individual_progression) BEFORE IP's player script,
         # whose logout forgets the verified identity.
