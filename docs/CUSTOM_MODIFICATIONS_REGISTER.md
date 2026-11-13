@@ -1252,13 +1252,27 @@ No Core pointers/headers, runtime adapter, hook registration, Playerbots lookup,
 Focused native tests require every completeness family independently, exercise the new threat/ownership/service/aura/spell/reward vetoes, preserve lifecycle/quest/group cases and prove no combination can authorize concealment. Full Worldserver/gameplay evidence is intentionally not claimed for this unwired pure model. Rollback: abandon/revert this child; no migration or live-state rollback is required.
 
 
-## 13 November 2026 — F14 safer social isolation for verified BE/Draenei RandomBots (default OFF) — CS03-IP
+## IP-F14-SOCIAL-ISOLATION-20261113 — F14 safer social isolation for verified BE/Draenei RandomBots (DRAFT/OFF) — CS03-IP
 
+- **Previously titled:** "13 November 2026 — F14 safer social isolation for verified BE/Draenei RandomBots (default OFF) — CS03-IP". The content is unchanged apart from the additions below.
 - **Intended behaviour:** with `IndividualProgression.F14.RandomBotSocialIsolation = 1`, a login-verified headless Blood Elf/Draenei RandomBot declines whisper, trade, group invite and group accept with an ordinary human still below stage 8, in both directions. In Core builds with the F14 /who query, it is also left out of that human's /who list and count. When the human starts the interaction, the bot answers once with a configurable in-character whisper, rate-limited per pair. The restriction lifts as soon as the human reaches stage 8. Nobody is hidden in the world.
 - **Owning component/source:** CosmicCuddle/mod-individual-progression, DRAFT branch `feature/cs03-ip-f14-social-isolation-20261113`, child of #172 `aed05a92`.
   - New: `src/IndividualProgressionF14SocialIsolationPolicy.h` (pure) and `src/IndividualProgressionF14SocialIsolationScript.cpp` (separate PlayerScript plus a /who-only WorldObjectScript).
   - Changed: additive config members and load, plus one AddSC call (`src/IndividualProgression.h/.cpp`); one OR-reason in the login identity gate (`src/IndividualProgressionPlayer.cpp`); three default-safe keys (`conf/individualProgression.conf.dist`).
   - Tests, a dispatch-only workflow and `docs/F14_SOCIAL_ISOLATION_2026-11-13.md`.
+- **Affected paths** (exactly 12 vs `aed05a92`; pinned by the workflow scope step):
+  - `.github/workflows/f14-social-isolation.yml`
+  - `conf/individualProgression.conf.dist`
+  - `docs/CUSTOM_MODIFICATIONS_REGISTER.md`
+  - `docs/F14_SOCIAL_ISOLATION_2026-11-13.md`
+  - `docs/F14_SOCIAL_ISOLATION_RUNTIME_TEST_PLAN_2026-11-13.md`
+  - `src/IndividualProgression.cpp`
+  - `src/IndividualProgression.h`
+  - `src/IndividualProgressionF14SocialIsolationPolicy.h`
+  - `src/IndividualProgressionF14SocialIsolationScript.cpp`
+  - `src/IndividualProgressionPlayer.cpp`
+  - `tests/f14_social_isolation_policy_test.cpp`
+  - `tests/test_f14_social_isolation_source.py`
 - **Protection:**
   - Identity is never race alone: verified cache, headless and not GM. Humans, Altbots, SelfBots, GMs and unknown characters are never restricted.
   - Existing IP hooks (including `EnforceGroupRules`) are unchanged.
@@ -1266,7 +1280,13 @@ Focused native tests require every completeness family independently, exercise t
   - The reply is a packet to the human's own session only. Forced OFF without the Playerbots API.
 - **Dependencies:** Core25 social hooks (stock) and its F14 /who query (`COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT` builds only); IP's verified RandomBot cache. No SQL, DBC or client change.
 - **Group accept:** the human is refused when the leader **or any other current, resolvable member** is a restricted bot (CS01 decision 6857686419). Offline or unresolved members are skipped, never guessed from race.
-- **Known gaps:** guild invite (no hook), duel (notify-only hook), mail (offline receiver unverifiable), and later-era isolation beyond Vanilla/TBC.
+- **Thread safety (T1, CS01 review 6860967009):** client-initiated attempts run on the world thread. When Playerbots AI starts an attempt, it runs on a map thread; a pair is read there only if both player pointers are in the map this thread owns in the current world tick. Otherwise it is allowed (stock; owner decision). Two evidence-only hooks were added: `WORLDHOOK_ON_UPDATE` (world-thread and tick marker) and `PLAYERHOOK_ON_BEFORE_UPDATE` (per-thread owned map).
+- **Known gaps:**
+  - guild invite (no hook);
+  - duel (notify-only hook);
+  - mail (offline receiver unverifiable);
+  - later-era isolation beyond Vanilla/TBC;
+  - Dungeon Finder and battleground groups use Core's direct `Group::AddMember` and bypass invite/accept; the response is an owner policy decision.
 - **Tests:**
   - native policy tests (GCC/Clang, C++17/20, with and without NDEBUG);
   - source contracts;
