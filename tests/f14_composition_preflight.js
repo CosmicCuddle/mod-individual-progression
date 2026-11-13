@@ -7,7 +7,7 @@ const register = require("./f14_register_reconcile.js");
 
 const registerPath = "docs/CUSTOM_MODIFICATIONS_REGISTER.md";
 function git(repo, ...args) {
-    if (!["diff", "show", "rev-parse"].includes(args[0]))
+    if (!["diff", "show", "rev-parse", "ls-tree"].includes(args[0]))
         throw new Error("read-only Git inspection only");
     try {
         return cp.execFileSync("git", ["-c", "core.fsmonitor=false", "-C", repo, ...args],
@@ -40,7 +40,16 @@ function overlaps(candidates) {
         }
     return pairs;
 }
-function objectOverlaps(candidates, objectId) {
+function treeEntry(repo, head, file) {
+    const raw = git(repo, "ls-tree", "-z", head, "--", `:(literal)${file}`);
+    if (raw === null) return null;
+    const rows = raw.split("\0").filter(Boolean);
+    if (rows.length !== 1) return null;
+    const match = rows[0].match(/^([0-7]{6}) (blob|tree|commit) ([0-9a-f]{40})\t([^\0]*)$/);
+    if (!match || match[4] !== file) return null;
+    return {mode: match[1], type: match[2], object: match[3]};
+}
+function objectOverlaps(candidates, entryAt) {
     const claims = new Map();
     for (const c of candidates) {
         if (!Array.isArray(c.paths) || !/^[0-9a-f]{40}$/i.test(c.HEAD) ||
@@ -48,13 +57,17 @@ function objectOverlaps(candidates, objectId) {
             continue;
         for (const p of c.paths) {
             if (!claims.has(p)) claims.set(p, []);
-            claims.get(p).push({candidate: c.name, object: objectId(c.HEAD, p) || "UNKNOWN"});
+            const entry = entryAt(c.HEAD, p);
+            claims.get(p).push({candidate: c.name, entry: entry &&
+                /^[0-7]{6}$/.test(entry.mode) && /^(blob|tree|commit)$/.test(entry.type) &&
+                /^[0-9a-f]{40}$/i.test(entry.object) ? entry : "UNKNOWN"});
         }
     }
     return [...claims].filter(([, rows]) => rows.length > 1).map(([path, rows]) => {
-        const ids = rows.map(x => x.object);
-        return {path, claims: rows, verdict: ids.includes("UNKNOWN") ? "UNKNOWN" :
-            ids.every(x => x === ids[0]) ? "IDENTICAL_BLOB" : "DIVERGENT_BLOBS"};
+        const keys = rows.map(x => x.entry === "UNKNOWN" ? null :
+            `${x.entry.mode}:${x.entry.type}:${x.entry.object}`);
+        return {path, claims: rows, verdict: keys.includes(null) ? "UNKNOWN" :
+            keys.every(x => x === keys[0]) ? "IDENTICAL_TREE_ENTRY" : "DIVERGENT_TREE_ENTRIES"};
     });
 }
 function dependencyEdges(candidates, base) {
@@ -121,8 +134,7 @@ function inspect(manifest, manifestDir) {
     }
     return {mode: "offline read-only composition preflight", candidates,
             overlaps: overlaps(candidates), duplicateFeatureIds: registerReport.conflicts,
-            objectOverlaps: objectOverlaps(candidates, (head, p) =>
-                git(repo, "rev-parse", "--verify", `${head}:${p}`)),
+            objectOverlaps: objectOverlaps(candidates, (head, p) => treeEntry(repo, head, p)),
             dependencyEdges: dependencyEdges(candidates, manifest.candidates[0].parent),
             externalRegisterRows: registerReport.externalRows};
 }
@@ -139,4 +151,4 @@ if (require.main === module) {
         process.exitCode = 2;
     }
 }
-module.exports = {configDefaults, overlaps, objectOverlaps, dependencyEdges, inspect};
+module.exports = {configDefaults, overlaps, treeEntry, objectOverlaps, dependencyEdges, inspect};

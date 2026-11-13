@@ -24,18 +24,23 @@ test("overlap classifies Register separately from executable runtime paths", () 
     assert.deepEqual(pairs[0].runtimeOverlap, ["src/Shared.cpp"]);
 });
 
-test("object-level fallback distinguishes identical, divergent and unavailable blobs", () => {
+test("object-level fallback distinguishes content, mode and unavailable tree entries", () => {
     const a = "a".repeat(40), b = "b".repeat(40);
     const candidates = [
-        {name: "a", HEAD: a, paths: ["same.h", "different.h", "unknown.h"]},
-        {name: "b", HEAD: b, paths: ["same.h", "different.h", "unknown.h"]},
+        {name: "a", HEAD: a, paths: ["same.h", "different.h", "mode.h", "unknown.h"]},
+        {name: "b", HEAD: b, paths: ["same.h", "different.h", "mode.h", "unknown.h"]},
         {name: "supplied-only", HEAD: a, paths: ["same.h"],
          verification: "EXTERNAL SUPPLIED METADATA ONLY; recheck branch before use"}
     ];
-    const ids = {"same.h": ["1", "1"], "different.h": ["2", "3"], "unknown.h": ["4", null]};
-    const report = preflight.objectOverlaps(candidates, (head, p) => ids[p][head === a ? 0 : 1]);
+    const entry = (mode, object) => ({mode, type: "blob", object: object.repeat(40)});
+    const entries = {"same.h": [entry("100644", "1"), entry("100644", "1")],
+                     "different.h": [entry("100644", "2"), entry("100644", "3")],
+                     "mode.h": [entry("100644", "4"), entry("100755", "4")],
+                     "unknown.h": [entry("100644", "5"), null]};
+    const report = preflight.objectOverlaps(candidates, (head, p) => entries[p][head === a ? 0 : 1]);
     assert.deepEqual(report.map(x => [x.path, x.verdict]), [
-        ["same.h", "IDENTICAL_BLOB"], ["different.h", "DIVERGENT_BLOBS"], ["unknown.h", "UNKNOWN"]]);
+        ["same.h", "IDENTICAL_TREE_ENTRY"], ["different.h", "DIVERGENT_TREE_ENTRIES"],
+        ["mode.h", "DIVERGENT_TREE_ENTRIES"], ["unknown.h", "UNKNOWN"]]);
     assert.equal(report[0].claims.length, 2); // Supplied metadata is not a local object claim.
     assert.deepEqual(preflight.dependencyEdges([
         {name: "root", HEAD: a, parent: "c".repeat(40)},
@@ -76,7 +81,7 @@ test("exact external Git diff verifies paths and all three config defaults", () 
     assert.equal(social.paths.length, 12);
     assert.equal(Object.keys(social.configDefaults).length, 3);
     assert.deepEqual(report.objectOverlaps.map(x => [x.path, x.verdict]),
-                     [["docs/CUSTOM_MODIFICATIONS_REGISTER.md", "DIVERGENT_BLOBS"]]);
+                     [["docs/CUSTOM_MODIFICATIONS_REGISTER.md", "DIVERGENT_TREE_ENTRIES"]]);
     assert.deepEqual(report.dependencyEdges.filter(x => x.parentCandidate !== "COMMON_BASE")
                      .map(x => [x.candidate, x.parentCandidate]),
                      [["IP #176 group consumer", "IP #175 group floor"],
