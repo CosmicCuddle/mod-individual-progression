@@ -7,11 +7,22 @@ This is a review record, not a merged Register or a release plan. All commits be
 | [#174](https://github.com/CosmicCuddle/mod-individual-progression/pull/174) | `aed05a92` → `3bf97b4d6edc746cb0ff7e7e02a55d6ab9fc5b32` | Pure current-pass identity tracker, source test, Register, design note | CS01 reconstructed-source GCC/Clang C++17/20 normal/NDEBUG 8/8 at this head; no full Worldserver/gameplay |
 | [#175](https://github.com/CosmicCuddle/mod-individual-progression/pull/175) | `aed05a92` → `005d8949334b11c7c985225d6aa9a1cc120157a1` | Pure BE/Draenei grouped era floor, test, Register, note | CS01 independent native 8/8 at this head; no runtime wiring/gameplay |
 | [#176](https://github.com/CosmicCuddle/mod-individual-progression/pull/176) | `005d8949` (#175) → `b40ba6f686883a0fcba90512803d2b0710b7bf39` | Pure bounded group-era consumer, tests, Register, note | Source contract passed; native matrix, generation producer and capacity lifetime unknown |
-| [#177](https://github.com/CosmicCuddle/mod-individual-progression/pull/177) | `3bf97b4d` (#174) → `b75cabf7e8747c4a4d8bf4e7666e279dcd80917b` | Test-only negative composition witness, Register, note | Source/mutation contract passed; native matrix and runtime callbacks unknown |
-| [#178](https://github.com/CosmicCuddle/mod-individual-progression/pull/178) | `aed05a92` → `afb28f4708a74be6110a21444f9791a343b489ed` | Offline read-only module-sync preflight, fixture, Register, note | Local Node fixtures 4/4; installed source inventory remains unknown |
+| [#177](https://github.com/CosmicCuddle/mod-individual-progression/pull/177) | `3bf97b4d` (#174) → `e97f57e38a9702794ceaffeffe535190bd64b113` | Test-only negative composition witness, Register, note | Source/mutation contract passed at current head; native matrix and runtime callbacks unknown |
+| [#178](https://github.com/CosmicCuddle/mod-individual-progression/pull/178) | `aed05a92` → `21b3e73ad337486c94bb838937e70edf6e2ae391` | Offline read-only module-sync preflight, fixture, Register, note | Local Node fixtures 7/7 at current head; installed source inventory remains unknown |
 | Claude social source | `aed05a92` → `d8a43a77f012d3e5aca1912a91eed2b6cbbffbbf` | IP runtime C++/config, social policy/script, tests/workflow, Register | Parked separate branch; independent social source candidate, not a Codex implementation or release proof |
 
 Changed-path overlap: all six candidates modify `docs/CUSTOM_MODIFICATIONS_REGISTER.md`. There is no other exact changed path shared between Claude social and #174–#178. #176 inherits #175's pure floor header, and #177 inherits #174's pure pass header; those are semantic dependencies, not independently mergeable sibling diffs. #178's tool is separate from F14 runtime. Claude social touches `src/IndividualProgression.cpp`, `.h`, `src/IndividualProgressionPlayer.cpp` and `conf/individualProgression.conf.dist`; future group wiring would touch some of these paths and must coordinate before any implementation. F15 Core/WHO/Playerbots work is cross-repository reference only.
+
+Exact changed-path overlap matrix (`R` = Register only; `—` = same candidate). This compares each candidate's diff against its stated parent, not the inherited child tree.
+
+| | #174 | #175 | #176 | #177 | #178 | Claude social |
+| --- | --- | --- | --- | --- | --- | --- |
+| #174 | — | R | R | R (plus inherited #174 behavior) | R | R |
+| #175 | R | — | R (plus inherited #175 behavior) | R | R | R |
+| #176 | R | R (child) | — | R | R | R |
+| #177 | R | R | R | — | R | R |
+| #178 | R | R | R | R | — | R |
+| Claude social | R | R | R | R | R | — |
 
 No present source-contract test in the #176/#177 deltas pins an absolute parent SHA; the child branches nevertheless require their parent headers and documented source behavior. Reparenting either child changes the tested tree and voids exact-head evidence. Claude's workflow/source assertions and earlier IP frozen-path contracts must be checked on a disposable composition tree before any rebase or integration PR. Keep original parent-pinned PRs intact.
 
@@ -38,9 +49,9 @@ No eviction, LRU, timeout or arbitrary table reset is safe without one of these 
 
 ## #177 negative witness coverage audit
 
-The current test-only witness at `b75cabf7` establishes exact old-session pass revoke alongside raw-GUID, all-epoch ledger revoke; matched E1 correlation leaves restore debt; pass/candidate saturation and local quarantine cannot complete debt; a different viewer survives; and incarnation mismatch refuses matching. The source mutation test rejects ledger epoch narrowing, broad stale-correlation cleanup, completion/reset calls, quarantine spread and positive hide authority in the witness. It does **not** prove a Core token producer, a client receipt, or callback order.
+The current test-only witness at `e97f57e3` establishes exact old-session pass revoke alongside raw-GUID, all-epoch ledger revoke; matched E1 correlation leaves restore debt; pass/candidate saturation and local quarantine cannot complete debt; a different viewer survives; and incarnation mismatch refuses matching. The source mutation test rejects ledger epoch narrowing, broad stale-correlation cleanup, completion/reset calls, quarantine spread and positive hide authority in the witness. It does **not** prove a Core token producer, a client receipt, or callback order.
 
-Additional negative cases to fixture on #177 without runtime authority: (1) end/cancel/rights-change and map-unload routes each drop or close only ephemeral candidates while preserving all ledger obligations; (2) source-attributed send attempt and batch handoff never become a separately verified client restore receipt; (3) unknown-viewer end followed by late nomination and stale-token end followed by newer pass must not match; (4) creature retirement, map unload and same GUID/new incarnation must revoke old debt and reject recycled candidate; (5) a local mismatch must not poison another viewer or clear global frozen state. Test the protocol/ledger methods directly and mutate the exact route that would turn a send attempt into completion. No test should call `CompleteRestoreOnlyWithClientProof(..., true)` or `ClearFrozenAfterGlobalProof(true)` as a purported integration success. Any future runtime consumer needs independently verified client receipt evidence that does not exist at this pin.
+The follow-up at `e97f57e3` fixtures server relink plus proposed batch handoff without debt completion, unknown-viewer end before late nomination, rights-change candidate drop, creature retirement/map unload debt preservation, and same-key incarnation reuse freezing recovery. The source contract mutates the post-handoff debt assertion into improper client-proof completion and rejects it. Remaining gaps: all cancel/successor-pass and stale-token interleavings on a real Core pass producer, actual callback ordering, and genuine client receipt. No test calls `CompleteRestoreOnlyWithClientProof(..., true)` or `ClearFrozenAfterGlobalProof(true)` as a purported integration success. Any runtime consumer needs independently verified client receipt evidence that does not exist at this pin.
 
 ## Disposable composition plan — no shared branch/rebase
 
