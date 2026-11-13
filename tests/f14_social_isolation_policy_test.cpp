@@ -183,6 +183,52 @@ namespace
         CHECK(!P::ExcludeFromWho(true, VanillaHuman(8), true, P::BloodElfRace));
     }
 
+    // /who exclusion and the social block agree for every equivalent fact
+    // set: a bot is left out of /who exactly when its social surfaces are
+    // declined, so the list never advertises a bot the human cannot reach.
+    void TestWhoMatchesSocialRestriction()
+    {
+        unsigned agree = 0;
+        for (unsigned mask = 0; mask < (1u << 6); ++mask)
+            for (int stage : {0, 7, 8, 18, 255})
+                for (std::uint32_t race : {1u, 10u, 11u})
+                    for (int verified = 0; verified <= 1; ++verified)
+                    {
+                        P::Human h = VanillaHuman(static_cast<std::uint8_t>(stage));
+                        h.present = mask & 1u;
+                        h.inWorld = mask & 2u;
+                        h.nonHeadlessSession = mask & 4u;
+                        h.playerAccountSecurity = mask & 8u;
+                        h.gameMasterMode = !(mask & 16u);
+                        h.verifiedRandomBot = !(mask & 32u);
+                        P::Bot b = VerifiedBot(static_cast<std::uint8_t>(race));
+                        b.verifiedRandomBotIdentity = verified != 0;
+                        CHECK(P::ExcludeFromWho(true, h, verified != 0, race) == P::IsRestrictedPair(true, h, b));
+                        ++agree;
+                    }
+        CHECK(agree == 64u * 5u * 3u * 2u);
+    }
+
+    // A human hammering a bot gets exactly one answer per cooldown, and the
+    // bot's own answer can never trigger another (replies are never fed
+    // back into the decision; a bot-initiated attempt never replies).
+    void TestNoReplyLoops()
+    {
+        P::ReplyLimiter<4> l;
+        unsigned replies = 0;
+        for (std::uint64_t t = 1000; t < 1000 + 600; ++t)
+        {
+            P::Decision const d = P::Decide(true, P::Surface::Whisper, P::Direction::HumanToBot,
+                                            VanillaHuman(), VerifiedBot(), false);
+            if (d.reply && l.MayReply(7, 9, t, 60))
+                ++replies;
+            P::Decision const back = P::Decide(true, P::Surface::Whisper, P::Direction::BotToHuman,
+                                               VanillaHuman(), VerifiedBot(), false);
+            CHECK(back.block && !back.reply);
+        }
+        CHECK(replies == 10); // 600 s / 60 s
+    }
+
     void TestReplyLimiter()
     {
         P::ReplyLimiter<3> l;
@@ -257,6 +303,8 @@ int main()
     TestHumanFacts();
     TestStageBoundaryAndResume();
     TestWho();
+    TestWhoMatchesSocialRestriction();
+    TestNoReplyLoops();
     TestReplyLimiter();
     TestLimiterSpacingRandomised();
     TestDefaultReplyIsInCharacter();

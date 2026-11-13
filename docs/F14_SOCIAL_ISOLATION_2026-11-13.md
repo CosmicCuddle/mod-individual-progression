@@ -74,6 +74,8 @@ None of these is ever restricted. An unknown human stage (out of world) is treat
   - per-surface direction and reply rules, and /who;
   - the rate limiter (cooldown, per-pair independence, full table, backwards clock, clamping), plus a 100,000-step spacing run;
   - the default reply has no technical words.
+  - /who exclusion equals the social restriction for every equivalent fact set (720 combinations), so /who never lists a bot the human can't reach;
+  - no reply loops: 600 s of continuous attempts yield exactly 10 replies at a 60 s cooldown, and bot-initiated attempts never reply.
 - **Source contracts** (`tests/test_f14_social_isolation_source.py`):
   - default OFF, and forced OFF without Playerbots;
   - every hook checks the option first;
@@ -83,7 +85,10 @@ None of these is ever restricted. An unknown human stage (out of world) is treat
   - the stage mirror matches IP's reader;
   - exact one-line login OR change, additive-only edits, existing hooks unchanged, every other file byte-identical.
 - **Local Core25 header syntax check** (`-fsyntax-only`) of the new script and both modified IP sources. Not a link.
-- **Workflow:** `workflow_dispatch` only (milestone).
+- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 22 lines:
+  - the four hook declarations and enums, plus `BuildChatPacket`;
+  - Core's wrong-faction checks before the whisper (ChatHandler.cpp:428 → :448) and trade (TradeHandler.cpp:830 → :842) hooks;
+  - the /who exclusion (MiscHandler.cpp:401) before `matchCount++` (:407), so the visible list and count stay consistent.
 
 ## Evidence levels and rollback
 Source and model proof, plus a local header syntax check. No Worldserver link, gameplay or client test has been done.

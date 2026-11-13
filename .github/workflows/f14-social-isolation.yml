@@ -60,3 +60,60 @@ jobs:
             /tmp/f14-social | tee /tmp/out.txt
             grep -Eq '^F14 SOCIAL ISOLATION POLICY ([0-9]+)/\1 passed' /tmp/out.txt
           done
+
+  core25-anchors:
+    name: "Core25 395b68ee social-hook anchors (read-only)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Core25 (sparse, read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/azerothcore-wotlk
+          ref: 395b68ee4ce425826c2a79c0ddf3ade3c67c8160
+          path: core
+          persist-credentials: false
+          sparse-checkout: |
+            src/server/game
+      - name: Verify hook placement, ordering and /who count consistency
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C core rev-parse HEAD)" = 395b68ee4ce425826c2a79c0ddf3ade3c67c8160
+          python3 -I - <<'PY'
+          from pathlib import Path
+          base = Path("core/src/server/game")
+          anchors = [
+              ("Scripting/ScriptDefines/PlayerScript.h", 149, "PLAYERHOOK_CAN_GROUP_INVITE,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 150, "PLAYERHOOK_CAN_GROUP_ACCEPT,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 200, "PLAYERHOOK_CAN_INIT_TRADE,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 207, "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 548, "virtual bool OnPlayerCanGroupInvite(Player* /*player*/, std::string& /*membername*/)"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 550, "virtual bool OnPlayerCanGroupAccept(Player* /*player*/, Group* /*group*/)"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 674, "virtual bool OnPlayerCanInitTrade(Player* /*player*/, Player* /*target*/)"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 718, "std::string& /*msg*/, Player* /*receiver*/)"),
+              ("Scripting/ScriptDefines/PlayerScript.cpp", 540, "CALL_ENABLED_BOOLEAN_HOOKS(PlayerScript, PLAYERHOOK_CAN_GROUP_INVITE"),
+              ("Entities/Player/Player.cpp", 9684, "void Player::Whisper(std::string_view text, Language language, Player* target"),
+              ("Entities/Player/Player.cpp", 9695, "if (!sScriptMgr->OnPlayerCanUseChat(this, CHAT_MSG_WHISPER, language, _text, target))"),
+              ("Handlers/ChatHandler.cpp", 428, "SendWrongFactionNotice();"),
+              ("Handlers/ChatHandler.cpp", 448, "GetPlayer()->Whisper(msg, Language(lang), receiver);"),
+              ("Handlers/TradeHandler.cpp", 830, "info.Status = TRADE_STATUS_WRONG_FACTION;"),
+              ("Handlers/TradeHandler.cpp", 842, "if (!sScriptMgr->OnPlayerCanInitTrade(_player, pOther))"),
+              ("Handlers/GroupHandler.cpp", 89, "if (!sScriptMgr->OnPlayerCanGroupInvite(invitingPlayer, membername))"),
+              ("Handlers/MiscHandler.cpp", 397, "#if defined(COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT) && COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT >= 1"),
+              ("Handlers/MiscHandler.cpp", 401, "sScriptMgr->ShouldF14ExcludeWhoEntryForViewer(_player, target.GetGuid(), race))"),
+              ("Handlers/MiscHandler.cpp", 407, "if ((matchCount++) >= sWorld->getIntConfig(CONFIG_MAX_WHO_LIST_RETURN))"),
+              ("Scripting/ScriptDefines/WorldObjectScript.h", 62, "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY,"),
+              ("Scripting/ScriptDefines/WorldObjectScript.h", 159, "virtual bool OnF14ShouldExcludeWhoEntryForViewer("),
+              ("Chat/Chat.h", 48, "static std::size_t BuildChatPacket(WorldPacket& data, ChatMsg chatType, Language language, WorldObject const* sender, WorldObject const* receiver"),
+          ]
+          bad = 0
+          for name, line, text in anchors:
+              got = (base / name).read_text(encoding="utf-8").split("\n")[line - 1]
+              if text not in got:
+                  bad += 1
+                  print(f"FAIL {name}:{line}: expected {text!r}, got {got!r}")
+          if bad:
+              raise SystemExit(f"{bad} Core25 social anchor(s) drifted")
+          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount")
+          PY
