@@ -142,11 +142,15 @@ int main()
     CHECK(missingIdentity.Begin(90, old) == Pass::Result::Refused);
     CHECK(!missingIdentity.IsActive(90, old));
     CHECK(passes.Begin(60, next) == Pass::Result::Recorded);
-    CHECK(passes.ObserveBatch(60, next) == Pass::Result::BatchObserved);
     witness.current = next;
     CHECK(correlations.Nominate(nextKey, otherCreature, 9002, Corr::Direction::Create,
                                 60, Nomination(protocol, nextKey, otherCreature, 9002)) ==
           Corr::Result::Nominated);
+    // G2: nomination and source-attributed send without the actual pass batch
+    // observation cannot upgrade to a match or discharge restore debt.
+    CHECK(!witness.TrySend(next, 60, Send(nextKey, otherCreature, 60), 9002).Matched());
+    CHECK(protocol.LedgerView().PendingRestores() == 2);
+    CHECK(passes.ObserveBatch(60, next) == Pass::Result::BatchObserved);
     witness.RevokeExact(old); // delayed old-session callback
     CHECK(passes.IsActive(60, next) && correlations.Candidates() == 1);
     CHECK(witness.TrySend(next, 60, Send(nextKey, otherCreature, 60), 9002).Matched());

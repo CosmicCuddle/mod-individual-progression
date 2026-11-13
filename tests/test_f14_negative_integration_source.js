@@ -41,6 +41,19 @@ check(staleMutant !== harness && !staleRevokeKeepsNewer(staleMutant),
 check(harness.includes("pass.BatchWasObserved(token, identity)") &&
       harness.includes("match.incarnation != currentIncarnation"),
       "pass or incarnation guard absent");
+function hasUnbatchedPassFence(source) {
+    const beforeBatch = source.split("CHECK(passes.Begin(60, next)")[1]?.split(
+        "CHECK(passes.ObserveBatch(60, next)")[0];
+    return beforeBatch?.includes("correlations.Nominate(nextKey, otherCreature") &&
+           beforeBatch.includes("CHECK(!witness.TrySend(next, 60, Send(nextKey, otherCreature, 60), 9002).Matched());") &&
+           beforeBatch.includes("PendingRestores() == 2");
+}
+check(hasUnbatchedPassFence(witness), "G2 unbatched nominated send must not match");
+const g2Mutant = witness.replace(
+    "CHECK(!witness.TrySend(next, 60, Send(nextKey, otherCreature, 60), 9002).Matched());",
+    "CHECK(witness.TrySend(next, 60, Send(nextKey, otherCreature, 60), 9002).Matched());");
+check(g2Mutant !== witness && !hasUnbatchedPassFence(g2Mutant),
+      "G2 unbatched-send mutation escaped");
 for (const forbidden of ["ObserveF14SuppressionDecision", "MayAnswerPositiveSuppression",
                          "RecordConfirmedF14Suppression", "CompleteRestoreOnlyWithClientProof",
                          "ClearFrozenAfterGlobalProof", "SetVisible", "SetPhaseMask"])
