@@ -1,0 +1,49 @@
+{
+  "modules": [
+    {
+      "name": "AzerothCore",
+      "path": null,
+      "baseRef": null,
+      "upstreamRef": null,
+      "customPaths": [],
+      "registerPaths": [],
+      "pinFiles": []
+    },
+    {
+      "name": "Individual Progression",
+      "path": "..",
+      "baseRef": "aed05a92f262362608f5d643c8570b504189aae0",
+      "upstreamRef": null,
+      "customPaths": ["src/IndividualProgression*.cpp", "src/IndividualProgression*.h"],
+      "registerPaths": ["docs/CUSTOM_MODIFICATIONS_REGISTER.md"],
+      "pinFiles": []
+    },
+    {
+      "name": "Playerbots",
+      "path": null,
+      "baseRef": null,
+      "upstreamRef": null,
+      "customPaths": [],
+      "registerPaths": [],
+      "pinFiles": []
+    },
+    {
+      "name": "Mod-Naxxramas-Core",
+      "path": null,
+      "baseRef": null,
+      "upstreamRef": null,
+      "customPaths": [],
+      "registerPaths": [],
+      "pinFiles": []
+    },
+    {
+      "name": "Character Services",
+      "path": null,
+      "baseRef": null,
+      "upstreamRef": null,
+      "customPaths": [],
+      "registerPaths": [],
+      "pinFiles": []
+    }
+  ]
+}
