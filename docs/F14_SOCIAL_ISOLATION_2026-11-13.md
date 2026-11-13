@@ -36,6 +36,7 @@ For a restricted pair:
 - **When:** only when the human started the interaction. Addon whispers get no reply.
 - **What:** the bot sends one whisper. Default: *"You are not yet ready for the road I walk. Return when your journey has carried you into a later age."* It's configurable, and empty means no reply.
 - **How it's sent:** built with `ChatHandler::BuildChatPacket(CHAT_MSG_WHISPER, LANG_UNIVERSAL, bot, human, …)` and sent only to the human's own session. It never goes through `Player::Whisper`, so it can't trip the block or bot chat logic, and nothing is written to the bot.
+- **Text safety (CS01 review hardening):** before sending, the configured text is normalized to one line. Every CR, LF, NUL, tab, other C0 control byte and DEL becomes a space, and surrounding spaces are trimmed. It's capped at **512 UTF-8 bytes**, cut without splitting a multi-byte character. That's a module-level safety cap, not a claimed Core protocol limit. The default text is unchanged, and text that is empty or becomes empty means the interaction is declined silently.
 - **Rate limit:** at most one reply per (human, bot) pair per cooldown (default 60 s, clamped 5–3600 s), in a bounded table of 1,024 pairs under a mutex. If every slot is still cooling down, the interaction stays declined but there's no reply. A backwards clock never produces a reply.
 
 **Resumes immediately:** every attempt is decided afresh from the live stage, so the restriction lifts the moment the human earns stage 8. Nothing is cached except reply timestamps.
@@ -73,7 +74,8 @@ None of these is ever restricted. An unknown human stage (out of world) is treat
   - every stage 0–255;
   - per-surface direction and reply rules, and /who;
   - the rate limiter (cooldown, per-pair independence, full table, backwards clock, clamping), plus a 100,000-step spacing run;
-  - the default reply has no technical words.
+  - the default reply has no technical words;
+  - reply normalization: every control byte, CR/LF/NUL, oversized text, 2/3/4-byte characters at every cut offset, and a 20,000-case randomised run (always one line, at most 512 bytes, valid UTF-8, trimmed).
   - /who exclusion equals the social restriction for every equivalent fact set (720 combinations), so /who never lists a bot the human can't reach;
   - no reply loops: 600 s of continuous attempts yield exactly 10 replies at a 60 s cooldown, and bot-initiated attempts never reply.
 - **Source contracts** (`tests/test_f14_social_isolation_source.py`):
