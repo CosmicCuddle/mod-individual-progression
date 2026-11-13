@@ -26,12 +26,22 @@ test("duplicate IDs and missing status, test, dependency, rollback fields are vi
     const repeated = reconcile.sections(oldRow + newRow + newRow);
     assert.deepEqual(reconcile.duplicateIds(repeated), ["IP-F14-NEW"]);
     assert.deepEqual(reconcile.rowGaps({heading: "13 November — unnamed feature", body: "Nothing here."}),
-                     ["missing stable IP feature ID", "missing test evidence/plan",
+                     ["missing stable IP feature ID", "missing owner", "missing owning component",
+                      "missing intended behavior", "missing affected paths",
+                      "missing parent/source reference", "missing test evidence/plan",
                       "missing dependency statement", "missing rollback statement",
                       "missing explicit non-live status"]);
     assert.ok(reconcile.rowGaps({heading: "IP-F14-NEW — DRAFT/OFF",
                                  body: "Tests, dependencies, rollback. NOW DEPLOYED ON server."})
                        .includes("possible positive live/deployed claim needs evidence"));
+});
+
+test("a stale claimed exact HEAD is distinct from a historical source reference", () => {
+    const expected = "a".repeat(40), stale = "b".repeat(40);
+    const row = {id: "IP-F14-NEW", heading: "IP-F14-NEW — DRAFT/OFF",
+                 body: `Owner: CosmicCuddle. Owning component: IP. Intended behavior: preserve rights.\nAffected paths: src/example.h. Child of ${stale}. Tests: pending. Dependencies: Core. Rollback: abandon branch. NOT DEPLOYED.\nCurrent HEAD: ${stale}.`};
+    assert.deepEqual(reconcile.rowGaps(row, expected), ["stale claimed current/exact HEAD"]);
+    assert.deepEqual(reconcile.rowGaps({...row, body: row.body.replace(`Current HEAD: ${stale}.`, "")}, expected), []);
 });
 
 test("pinned local candidates add one row each without altering earlier sections", () => {
@@ -42,7 +52,11 @@ test("pinned local candidates add one row each without altering earlier sections
     for (const c of report.candidates) {
         assert.deepEqual(c.problems, [], c.name);
         assert.equal(c.rows.length, 1, c.name);
-        assert.deepEqual(c.rows[0].gaps, [], c.name);
+        const expectedGaps = {
+            "IP #174 pass lifecycle": ["missing owning component"],
+            "IP #175 group floor": ["missing parent/source reference"]
+        };
+        assert.deepEqual(c.rows[0].gaps, expectedGaps[c.name] || [], c.name);
     }
     assert.deepEqual(report.conflicts, []);
     assert.equal(report.externalRows[0].id, "UNKNOWN");

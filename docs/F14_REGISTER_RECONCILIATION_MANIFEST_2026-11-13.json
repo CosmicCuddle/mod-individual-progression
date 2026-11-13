@@ -29,7 +29,7 @@
     {
       "name": "IP #178 module sync preflight",
       "ref": "feature/codex-module-sync-preflight-20261113",
-      "expectedHead": "e75e2fe7033ccee35fd476fb008f6d231d4f6d5e",
+      "expectedHead": "701c4a41b3034731eb9916965bccc301b6172345",
       "parent": "aed05a92f262362608f5d643c8570b504189aae0"
     }
   ],
@@ -37,7 +37,26 @@
     {
       "name": "Claude parked social source",
       "heading": "13 November 2026 — F14 safer social isolation for verified BE/Draenei RandomBots (default OFF) — CS03-IP",
-      "source": "https://github.com/CosmicCuddle/mod-individual-progression/compare/aed05a92f262362608f5d643c8570b504189aae0...d8a43a77f012d3e5aca1912a91eed2b6cbbffbbf"
+      "head": "146dbdfccedbf1e4096f158502a5a7aff7a65117",
+      "source": "https://github.com/CosmicCuddle/mod-individual-progression/compare/aed05a92f262362608f5d643c8570b504189aae0...146dbdfccedbf1e4096f158502a5a7aff7a65117",
+      "paths": [
+        ".github/workflows/f14-social-isolation.yml",
+        "conf/individualProgression.conf.dist",
+        "docs/CUSTOM_MODIFICATIONS_REGISTER.md",
+        "docs/F14_SOCIAL_ISOLATION_2026-11-13.md",
+        "docs/F14_SOCIAL_ISOLATION_RUNTIME_TEST_PLAN_2026-11-13.md",
+        "src/IndividualProgression.cpp",
+        "src/IndividualProgression.h",
+        "src/IndividualProgressionF14SocialIsolationPolicy.h",
+        "src/IndividualProgressionF14SocialIsolationScript.cpp",
+        "src/IndividualProgressionPlayer.cpp",
+        "tests/f14_social_isolation_policy_test.cpp",
+        "tests/test_f14_social_isolation_source.py"
+      ],
+      "configDefaults": {
+        "IndividualProgression.F14.RandomBotSocialIsolation": "0",
+        "IndividualProgression.F14.RandomBotSocialIsolation.ReplyCooldownSeconds": "60"
+      }
     }
   ]
 }

@@ -51,10 +51,16 @@ function duplicateIds(items) {
     }
     return duplicates;
 }
-function rowGaps(row) {
+function rowGaps(row, expectedHead) {
     const text = `${row.heading}\n${row.body}`;
     const gaps = [];
     if (!row.id) gaps.push("missing stable IP feature ID");
+    if (!/\bOwner\b/i.test(text)) gaps.push("missing owner");
+    if (!/\bOwning component\b/i.test(text)) gaps.push("missing owning component");
+    if (!/\bIntended behavio[u]?r\b/i.test(text)) gaps.push("missing intended behavior");
+    if (!/\bAffected (?:files|paths)\b/i.test(text)) gaps.push("missing affected paths");
+    if (!/\b(?:Child of|Sibling of|parent|source ref)\b/i.test(text))
+        gaps.push("missing parent/source reference");
     if (!/\btest(?:s|ed|ing)?\b/i.test(text)) gaps.push("missing test evidence/plan");
     if (!/\b(?:dependenc\w*|config|SQL|DBC|client)\b/i.test(text))
         gaps.push("missing dependency statement");
@@ -63,6 +69,9 @@ function rowGaps(row) {
         gaps.push("missing explicit non-live status");
     if (/\b(?:IS LIVE|NOW DEPLOYED|DEPLOYED ON)\b/i.test(text))
         gaps.push("possible positive live/deployed claim needs evidence");
+    const claimedHead = text.match(/\b(?:current(?:\s+HEAD)?|exact[- ]head)\s*(?:SHA|at|=|:)?\s*[`'\"]?([0-9a-f]{40})\b/i)?.[1];
+    if (claimedHead && expectedHead && claimedHead.toLowerCase() !== expectedHead.toLowerCase())
+        gaps.push("stale claimed current/exact HEAD");
     return gaps;
 }
 function validRef(ref) {
@@ -114,7 +123,7 @@ function inspect(manifest, manifestDir) {
         if (delta.modified.length) problems.push("candidate modifies existing Register sections");
         if (delta.duplicateIds.length) problems.push("duplicate feature IDs inside candidate Register");
         const rows = delta.added.map(row => ({id: row.id || UNKNOWN, heading: row.heading,
-                                               gaps: rowGaps(row)}));
+                                               gaps: rowGaps(row, c.expectedHead)}));
         for (const row of rows) allAdded.push({candidate: c.name, ...row});
         reports.push({name: c.name, parent, HEAD: head, rows,
                       removed: delta.removed.map(sectionKey),

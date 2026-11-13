@@ -1,0 +1,90 @@
+#!/usr/bin/env node
+// Offline path/pin preflight. Never applies a patch or mutates Git state.
+const fs = require("node:fs");
+const path = require("node:path");
+const cp = require("node:child_process");
+const register = require("./f14_register_reconcile.js");
+
+const registerPath = "docs/CUSTOM_MODIFICATIONS_REGISTER.md";
+function git(repo, ...args) {
+    if (!["diff", "show", "rev-parse"].includes(args[0]))
+        throw new Error("read-only Git inspection only");
+    try {
+        return cp.execFileSync("git", ["-c", "core.fsmonitor=false", "-C", repo, ...args],
+            {encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30000,
+             env: {...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_NO_LAZY_FETCH: "1",
+                   GIT_TERMINAL_PROMPT: "0"}}).trimEnd();
+    } catch { return null; }
+}
+function configDefaults(diff) {
+    if (diff === null) return "UNKNOWN";
+    const entries = [];
+    for (const line of diff.split("\n")) {
+        if (!/^[+-][^+-]/.test(line)) continue;
+        const match = line.slice(1).match(/^\s*([A-Za-z][A-Za-z0-9_.-]*)\s*=\s*(.+?)\s*$/);
+        if (match) entries.push({side: line[0] === "+" ? "added" : "removed",
+                                  key: match[1], value: match[2]});
+    }
+    return entries;
+}
+function overlaps(candidates) {
+    const pairs = [];
+    for (let i = 0; i < candidates.length; ++i)
+        for (let j = i + 1; j < candidates.length; ++j) {
+            const a = candidates[i], b = candidates[j];
+            if (!Array.isArray(a.paths) || !Array.isArray(b.paths)) continue;
+            const common = a.paths.filter(p => b.paths.includes(p));
+            pairs.push({a: a.name, b: b.name, common,
+                        registerOverlap: common.includes(registerPath),
+                        runtimeOverlap: common.filter(p => p.startsWith("src/") || p.startsWith("conf/"))});
+        }
+    return pairs;
+}
+function inspect(manifest, manifestDir) {
+    const registerReport = register.inspect(manifest, manifestDir);
+    const repo = path.resolve(manifestDir, manifest.repository);
+    const candidates = [];
+    for (const spec of manifest.candidates) {
+        const report = registerReport.candidates.find(x => x.name === spec.name);
+        const pathsText = report?.problems.length ? null :
+            git(repo, "diff", "--name-only", spec.parent, spec.expectedHead, "--");
+        const paths = pathsText === null ? "UNKNOWN" : pathsText ? pathsText.split("\n").sort() : [];
+        const config = paths === "UNKNOWN" ? "UNKNOWN" :
+            configDefaults(git(repo, "diff", "--unified=0", spec.parent, spec.expectedHead,
+                               "--", "conf/individualProgression.conf.dist"));
+        const contractPins = [];
+        if (Array.isArray(paths)) for (const p of paths)
+            if (/^tests\/.*source\.(?:js|py)$/.test(p)) {
+                const source = git(repo, "show", `${spec.expectedHead}:${p}`);
+                if (source === null) { contractPins.push({path: p, pins: "UNKNOWN"}); continue; }
+                contractPins.push({path: p, pins: [...new Set(source.match(/\b[0-9a-f]{40}\b/gi) || [])]});
+            }
+        candidates.push({name: spec.name, parent: spec.parent, HEAD: report?.HEAD || "UNKNOWN",
+                         paths, configDefaults: config, sourceContractPins: contractPins,
+                         requiresParentTree: spec.parent !== manifest.candidates[0].parent,
+                         registerProblems: report?.problems || ["UNKNOWN"]});
+    }
+    for (const e of manifest.externalRows)
+        candidates.push({name: e.name, parent: "UNKNOWN", HEAD: e.head || "UNKNOWN",
+                         paths: e.paths || "UNKNOWN",
+                         configDefaults: e.configDefaults || "UNKNOWN",
+                         sourceContractPins: "UNKNOWN", requiresParentTree: "UNKNOWN",
+                         verification: "EXTERNAL SUPPLIED METADATA ONLY; recheck branch before use"});
+    return {mode: "offline read-only composition preflight", candidates,
+            overlaps: overlaps(candidates), duplicateFeatureIds: registerReport.conflicts,
+            externalRegisterRows: registerReport.externalRows};
+}
+if (require.main === module) {
+    if (process.argv.length !== 4 || process.argv[2] !== "--manifest") {
+        process.stderr.write("Usage: node f14_composition_preflight.js --manifest path\n");
+        process.exitCode = 2;
+    } else try {
+        const file = path.resolve(process.argv[3]);
+        const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+        process.stdout.write(JSON.stringify(inspect(manifest, path.dirname(file)), null, 2) + "\n");
+    } catch (error) {
+        process.stderr.write(`ERROR composition preflight: ${error.message}\n`);
+        process.exitCode = 2;
+    }
+}
+module.exports = {configDefaults, overlaps, inspect};
