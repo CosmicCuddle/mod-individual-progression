@@ -59,7 +59,8 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | BG1 | H0 queues Warsong Gulch, then R (solo) tries to queue for the same battleground or the random battleground at the same bracket | R's queue join is quietly refused |
 | BG2 | H0 is inside a battleground; R is invited to that same instance | R's "enter battle" is refused; its invite lapses and it leaves the queue |
 | BG3 | H8 (TBC) queues and enters with R | stock |
-| BG4 | R is already queued or inside, then H0 queues or enters | **can meet** (documented order limit; needs Core option (d)) |
+| BG4 | R is already queued or inside, then H0 queues | **never matched into R's battleground**: H0 is placed in another match, or waits (option (d)) |
+| BG6 | several Vanilla humans, TBC humans and restricted bots queue at once | no single match holds both a still-Vanilla human and a restricted bot; TBC humans and ordinary bots fill normally |
 | BG5 | H0 leaves the queue (or reaches stage 8), then R queues | allowed (stale entry pruned by live re-validation) |
 | U1 | a BE/Dr character whose identity was never verified (logged in before the option was on) interacts with H0 | stock, never classified from race |
 | T1a | R on the **same** map as H0 invites or whispers H0 through Playerbots | declined silently (ownership is proven on the bot's map thread) |

@@ -167,6 +167,25 @@ jobs:
               ("Scripting/ScriptDefines/AllBattlegroundScript.h", 42, "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY,"),
               ("Entities/Player/Player.cpp", 12571, "if (_BgBattlegroundQueueID[i].invitedToInstance == instanceId)"),
               ("../shared/SharedDefines.h", 3894, "ERR_BATTLEGROUND_NONE                   = -1,"),
+              # Option (d): the per-group matcher veto is consulted at every pool insertion (fill and
+              # new match), queue state is public, and queue updates run in BattlegroundMgr::Update on
+              # the world thread after the map phase.
+              ("Scripting/ScriptDefines/AllBattlegroundScript.h", 45, "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL,"),
+              ("Scripting/ScriptDefines/AllBattlegroundScript.h", 163, "virtual bool CanAddGroupToMatchingPool(BattlegroundQueue* /*queue*/, GroupQueueInfo* /*group*/, uint32 /*poolPlayerCount*/, Battleground"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 454, "if (!sScriptMgr->CanAddGroupToMatchingPool(this, (*Ali_itr), m_SelectionPools[TEAM_ALLIANCE].GetPlayerCount(), bg, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 472, "if (!sScriptMgr->CanAddGroupToMatchingPool(this, (*Horde_itr), m_SelectionPools[TEAM_HORDE].GetPlayerCount(), bg, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 587, "if (!sScriptMgr->CanAddGroupToMatchingPool(this, (*ali_group), 0, nullptr, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 669, "if (sScriptMgr->CanAddGroupToMatchingPool(this, *(itr_team[i]), m_SelectionPools[i].GetPlayerCount(), bgTemplate, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 693, "if (!sScriptMgr->CanAddGroupToMatchingPool(this, *(itr_team[j]), m_SelectionPools[j].GetPlayerCount(), bgTemplate, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.h", 69, "public:"),
+              ("Battlegrounds/BattlegroundQueue.h", 112, "GroupsQueueType m_QueuedGroups[MAX_BATTLEGROUND_BRACKETS][BG_QUEUE_MAX];"),
+              ("Battlegrounds/BattlegroundQueue.h", 124, "GroupsQueueType SelectedGroups;"),
+              ("Battlegrounds/BattlegroundQueue.h", 130, "SelectionPool m_SelectionPools[PVP_TEAMS_COUNT];"),
+              ("Battlegrounds/BattlegroundQueue.h", 135, "private:"),
+              ("Battlegrounds/BattlegroundQueue.h", 36, "GuidSet Players;"),
+              ("Battlegrounds/Battleground.h", 418, "BattlegroundPlayerMap const& GetPlayers() const { return m_Players; }"),
+              ("Battlegrounds/BattlegroundMgr.cpp", 146, "m_BattlegroundQueues[bgQueueTypeId].BattlegroundQueueUpdate(diff, bgTypeId, bracket_id, arenaType, arenaMMRating > 0, arenaMMRating);"),
+              ("World/World.cpp", 1270, "sBattlegroundMgr->Update(diff);"),
           ]
           bad = 0
           for name, line, text in anchors:
@@ -176,5 +195,5 @@ jobs:
                   print(f"FAIL {name}:{line}: expected {text!r}, got {got!r}")
           if bad:
               raise SystemExit(f"{bad} Core25 social anchor(s) drifted")
-          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership; Dungeon Finder seam; battleground option (c)")
+          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership; Dungeon Finder seam; battleground options (c)+(d)")
           PY

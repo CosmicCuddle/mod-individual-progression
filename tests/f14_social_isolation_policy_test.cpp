@@ -8,6 +8,7 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <algorithm>
 #include <atomic>
 #include <vector>
 
@@ -889,6 +890,76 @@ namespace
     }
 }
 
+namespace
+{
+    // Option (d): the matcher never combines a still-Vanilla human with a
+    // restricted RandomBot in one match, whatever the arrival order.
+    void TestBattlegroundMatcher()
+    {
+        P::Bot const notABot{};
+        P::Human const notAHuman{};
+        P::MatchKinds const vanilla = P::KindsOf(VanillaHuman(3), notABot);
+        P::MatchKinds const tbc = P::KindsOf(VanillaHuman(8), notABot);
+        P::MatchKinds const bot = P::KindsOf(notAHuman, VerifiedBot(P::BloodElfRace));
+        P::MatchKinds const ordinary = P::KindsOf(notAHuman, VerifiedBot(1));
+        P::Bot altbotFacts = VerifiedBot();
+        altbotFacts.verifiedRandomBotIdentity = false;
+        P::MatchKinds const altbot = P::KindsOf(notAHuman, altbotFacts);
+        P::MatchKinds const unknown{};
+        CHECK(vanilla.stillVanillaHuman && !vanilla.restrictedBot && bot.restrictedBot && !bot.stillVanillaHuman);
+        CHECK(!tbc.Any() && !ordinary.Any() && !altbot.Any() && !unknown.Any());
+
+        // The rule, exhaustively over every candidate/others combination.
+        for (int o = 0; o < 2; ++o)
+            for (int cv = 0; cv < 2; ++cv)
+                for (int cb = 0; cb < 2; ++cb)
+                    for (int ov = 0; ov < 2; ++ov)
+                        for (int ob = 0; ob < 2; ++ob)
+                        {
+                            P::MatchKinds c{cv != 0, cb != 0}, x{ov != 0, ob != 0};
+                            bool const expected = o && ((cb && ov) || (cv && ob));
+                            CHECK(P::MatchPoolRejects(o != 0, c, x) == expected);
+                        }
+
+        // Matcher simulation: groups arrive in every order; each is added
+        // unless the rule refuses it. No final match may hold both kinds,
+        // and harmless kinds are never refused.
+        std::vector<P::MatchKinds> const kinds{vanilla, bot, tbc, ordinary, altbot, unknown, bot, vanilla};
+        std::vector<int> order(kinds.size());
+        for (std::size_t i = 0; i < order.size(); ++i)
+            order[i] = static_cast<int>(i);
+        unsigned permutations = 0;
+        do
+        {
+            P::MatchKinds pool;
+            for (int index : order)
+            {
+                P::MatchKinds const candidate = kinds[static_cast<std::size_t>(index)];
+                bool const refused = P::MatchPoolRejects(true, candidate, pool);
+                if (!candidate.Any())
+                    CHECK(!refused);   // TBC, ordinary bot, Altbot, unknown: always admitted
+                if (!refused)
+                    pool.Add(candidate);
+            }
+            CHECK(!(pool.stillVanillaHuman && pool.restrictedBot));
+            // Whoever is first decides; the other kind waits for another match.
+            P::MatchKinds const first = kinds[static_cast<std::size_t>(
+                *std::find_if(order.begin(), order.end(), [&](int i) { return kinds[static_cast<std::size_t>(i)].Any(); }))];
+            CHECK(pool.stillVanillaHuman == first.stillVanillaHuman && pool.restrictedBot == first.restrictedBot);
+            ++permutations;
+        } while (std::next_permutation(order.begin(), order.end()));
+        CHECK(permutations == 40320);
+
+        // A group carrying both kinds itself (should not exist) is refused
+        // against either kind and admitted into an empty or harmless match.
+        P::MatchKinds both = vanilla;
+        both.Add(bot);
+        CHECK(P::MatchPoolRejects(true, both, vanilla) && P::MatchPoolRejects(true, both, bot));
+        CHECK(!P::MatchPoolRejects(true, both, tbc));
+        CHECK(!P::MatchPoolRejects(false, vanilla, bot));
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -910,6 +981,7 @@ int main()
     TestOwnedMapHelpers();
     TestDungeonFinderQueue();
     TestBattlegrounds();
+    TestBattlegroundMatcher();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -1286,12 +1286,13 @@ Focused native tests require every completeness family independently, exercise t
   - duel (notify-only hook);
   - mail (offline receiver unverifiable);
   - later-era isolation beyond Vanilla/TBC;
-  - battlegrounds are order-dependent: a Vanilla human who queues or enters after a restricted bot can still meet it. A Core per-group hook would close this (needs approval).
+  - battleground matching keeps the two kinds apart at the matcher; a group invited from a different queue type into the same instance is covered by (a) once inside.
 - **Dungeon Finder (owner decision 13 Nov 2026):** a still-Vanilla human who queues is never matched into one group with a restricted RandomBot; TBC/Wrath humans are stock. Facts are recorded at queue join (world thread). The `GlobalScript::CanCreateLfgProposal` veto is value-only: GUIDs plus the recorded facts, no `Player`.
 - **Battlegrounds (owner decision 13 Nov 2026, option (c)):**
   - **(b)** a restricted bot's solo queue join is quietly refused while a still-Vanilla human (re-validated live) waits in a matching queue and bracket;
   - **(a)** its "enter battle" is refused when it's invited to an instance that holds a still-Vanilla human (value-only roster; ownership-proven bot reads only).
   - Leaving a queue is never refused; TBC/Wrath humans are stock.
+- **Battleground matcher (option (d), owner-approved 13 Nov 2026):** `AllBattlegroundScript::CanAddGroupToMatchingPool` (an existing Core25 hook, so **no Core change**) refuses a candidate group that would put a still-Vanilla human and a restricted bot in one match, whichever came first. It is read-only and runs on the world thread.
 - **Tests:**
   - native policy tests (GCC/Clang, C++17/20, with and without NDEBUG);
   - source contracts;

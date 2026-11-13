@@ -33,6 +33,7 @@ For a restricted pair:
 | /who | `OnF14ShouldExcludeWhoEntryForViewer` | the bot is left out of the human's list **and** count. Core calls this only in builds with its `COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT`, and skips the row before counting |
 | Dungeon Finder | `OnPlayerCanJoinLfg` (records facts) + `GlobalScript::CanCreateLfgProposal` (veto) | a candidate group mixing a still-Vanilla human with a restricted bot is refused; Core matches other combinations. TBC/Wrath humans are stock. Owner decision 13 Nov 2026 |
 | Battlegrounds | `OnPlayerCanJoinInBattlegroundQueue` (b), `OnPlayerCanBattleFieldPort` (a), roster from the battleground add/leave/destroy hooks | (b) a restricted bot's solo queue join is quietly refused while a still-Vanilla human waits in a matching queue and level bracket; (a) its "enter battle" is refused when it's invited to an instance holding a still-Vanilla human (either team). TBC/Wrath humans are stock. Owner decision 13 Nov 2026, option (c) |
+| Battleground matching (d) | `AllBattlegroundScript::CanAddGroupToMatchingPool` | the matcher never puts a still-Vanilla human and a restricted bot into the same match, **whichever queued or entered first**: a candidate group is refused if the other kind is already selected for the match (either team), inside the target instance, or invited to it. The refused group waits for another match. Owner-approved option (d) |
 
 **The in-character reply:**
 - **When:** only when the human started the interaction. Addon whispers get no reply.
@@ -154,8 +155,16 @@ This social feature is unaffected: it never restricts Altbots.
       - After the T1 ownership proof, only the bot's own state is read: `IsInvitedForBattlegroundInstance`, checked against a value-only roster of instances that hold a still-Vanilla human.
       - The roster is fed when humans enter (their worldport ack, a world-thread client packet). It's emptied using GUID and instance values when they leave or the instance is destroyed.
       - The check covers either team, because the owner asked for bots to be "kept out of the queue".
-    - **Known limits:**
-      - The order matters: a Vanilla human who queues or enters **after** a restricted bot is already in the queue or battle can still meet it. Closing that needs a Core per-group hook, option (d), which needs approval.
+    - **(d) Matcher (owner-approved, 13 Nov 2026).** This closes the order gap.
+      - **No Core change was needed.** Core25 already calls `AllBattlegroundScript::CanAddGroupToMatchingPool` at **every** pool insertion: fill into an existing battleground, premade, normal match and skirmish.
+      - Its queue state (`m_SelectionPools[].SelectedGroups`, `m_QueuedGroups`) is public.
+      - All queue updates run in `BattlegroundMgr::Update` on the world thread, after the map phase (World.cpp:1270, after :1255).
+      - The hook reads the candidate group's players, the groups already selected (both teams), and for an existing instance its players plus the groups already invited to it. All reads are live, through `ReadHuman`/`ReadBot`.
+      - It refuses the candidate if it would meet the other kind. It never mutates the queue, the pools or the battleground.
+      - **Whoever is matched first decides; the other kind waits for another match.**
+    - **Remaining notes:**
+      - (a) and (b) stay as extra layers.
+      - A group invited to the same instance from a *different* queue type (for example the random battleground) is covered by (a) and the instance's player list once inside, not by the invited-groups scan.
       - A refused port lets the bot's invite lapse and Core removes it from the queue. With Core's `Battleground.TrackDeserters` on, Core itself logs a "didn't press enter" row for that bot.
       - Arena is unaffected (team-based).
 - **T1 residual (owner-approved fail-open; bots rarely start cross-map interactions, players normally do):** a restricted bot on a **different map** can still invite, whisper or trade with a Vanilla human, because the human's stage can't be read safely there. Fail-closed would block that, but would also block bots with every non-Vanilla human on other maps; that's an owner choice.
@@ -183,14 +192,15 @@ This social feature is unaffected: it never restricts Altbots.
   - exact one-line login OR change, additive-only edits, existing hooks unchanged, every other file byte-identical;
   - the two identity sources: restriction uses only the verified cache, and the existing group-sync write population is every non-normal account.
 - **Local Core25 header syntax check** (`-fsyntax-only`) of the new script and both modified IP sources. Not a link.
-- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 72 lines:
+- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 88 lines:
   - the four hook declarations and enums, plus `BuildChatPacket`;
   - Core's wrong-faction checks before the whisper (ChatHandler.cpp:428 → :448) and trade (TradeHandler.cpp:830 → :842) hooks;
   - the /who exclusion (MiscHandler.cpp:401) before `matchCount++` (:407), so the visible list and count stay consistent;
   - for the group-accept member scan: the accept hook call, `Group::GetMemberSlots` and `MemberSlot::guid`, `ObjectAccessor::FindPlayer` returning in-world players only, and the four social opcodes being `PROCESS_THREADUNSAFE` (with `MapSessionFilter` refusing them), so they run on the world thread;
   - for T1: `WORLDHOOK_ON_UPDATE` and `OnWorldUpdate` after `sMapMgr->Update`, the before/after player-update hooks at the start and end of `Player::Update`, `Map::Update` calling `player->Update`, `Map::GetPlayers`, and `MapMgr` scheduling every map before `m_updater.wait()`;
   - for the Dungeon Finder: `CMSG_LFG_JOIN` world-thread processing, the join and proposal hooks, `Lfg5Guids` GUIDs and roles, and the LFG update scheduled beside the maps;
-  - for battlegrounds: the join, port and worldport-ack opcodes as world-thread, both hook calls, the add/leave/destroy roster hooks, `IsInvitedForBattlegroundInstance`, and `ERR_BATTLEGROUND_NONE`.
+  - for battlegrounds: the join, port and worldport-ack opcodes as world-thread, both hook calls, the add/leave/destroy roster hooks, `IsInvitedForBattlegroundInstance`, and `ERR_BATTLEGROUND_NONE`;
+  - for the matcher (d): the matching-pool hook enum and declaration, five of its call sites, the public queue state, `GetPlayers`, and the world-thread `BattlegroundMgr::Update` after the map phase.
 
 ## Evidence levels and rollback
 Source and model proof, plus a local header syntax check. No Worldserver link, gameplay or client test has been done.

@@ -22,6 +22,7 @@
 #include "AllBattlegroundScript.h"
 #include "Battleground.h"
 #include "BattlegroundMgr.h"
+#include "BattlegroundQueue.h"
 #include "Chat.h"
 #include "DBCStores.h"
 #include "GameTime.h"
@@ -531,6 +532,24 @@ namespace
         }
     };
 
+    // World thread only: what kind of player a GUID is right now. Offline
+    // or unknown players carry no facts and never restrict anyone.
+    Policy::MatchKinds KindsOfGuid(ObjectGuid const& guid)
+    {
+        Player const* player = ObjectAccessor::FindPlayer(guid);
+        if (!player)
+            return {};
+        return Policy::KindsOf(ReadHuman(player), ReadBot(player));
+    }
+
+    Policy::MatchKinds KindsOfGroup(GroupQueueInfo const& group)
+    {
+        Policy::MatchKinds kinds;
+        for (ObjectGuid const& guid : group.Players)
+            kinds.Add(KindsOfGuid(guid));
+        return kinds;
+    }
+
     // Battleground roster (a): which instances hold a still-Vanilla human.
     // Humans enter on their worldport ack, a world-thread client packet, so
     // they are read only there; anything else records nothing. Leaving and
@@ -540,7 +559,41 @@ namespace
     public:
         F14SocialIsolationBattlegroundScript() : AllBattlegroundScript("IndividualProgression_F14SocialIsolationBg",
             {ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_ADD_PLAYER, ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_REMOVE_PLAYER_AT_LEAVE,
-             ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY}) { }
+             ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY, ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL}) { }
+
+        // Option (d): the matcher never puts a still-Vanilla human and a
+        // restricted RandomBot into one match, whichever came first. Every
+        // queue update runs in BattlegroundMgr::Update on the world thread,
+        // after the map phase, so players may be read here; anywhere else
+        // nothing is read and nothing is refused.
+        bool CanAddGroupToMatchingPool(BattlegroundQueue* queue, GroupQueueInfo* group, uint32 /*poolPlayerCount*/,
+                                       Battleground* bg, BattlegroundBracketId bracketId) override
+        {
+            if (!OptionOn() || !queue || !group || !WorldThread().IsCurrent())
+                return true;
+            Policy::MatchKinds const candidate = KindsOfGroup(*group);
+            if (!candidate.Any())
+                return true;
+
+            Policy::MatchKinds others;
+            // Groups already selected for this match, both teams.
+            for (auto const& pool : queue->m_SelectionPools)
+                for (GroupQueueInfo const* selected : pool.SelectedGroups)
+                    if (selected && selected != group)
+                        others.Add(KindsOfGroup(*selected));
+            // An existing instance: players inside and groups already invited.
+            if (bg && bg->GetInstanceID())
+            {
+                for (auto const& [guid, inside] : bg->GetPlayers())
+                    others.Add(KindsOfGuid(guid));
+                if (bracketId < MAX_BATTLEGROUND_BRACKETS)
+                    for (auto const& waiting : queue->m_QueuedGroups[bracketId])
+                        for (GroupQueueInfo const* invited : waiting)
+                            if (invited && invited != group && invited->IsInvitedToBGInstanceGUID == bg->GetInstanceID())
+                                others.Add(KindsOfGroup(*invited));
+            }
+            return !Policy::MatchPoolRejects(true, candidate, others);
+        }
 
         void OnBattlegroundAddPlayer(Battleground* bg, Player* player) override
         {

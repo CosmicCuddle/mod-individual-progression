@@ -279,6 +279,37 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         return optionEnabled && restrictedBot && enteringBattle && invitedToInstanceWithVanillaHuman;
     }
 
+    // Option (d) (owner-approved): the battleground matcher itself never puts
+    // a still-Vanilla human and a restricted RandomBot into the same match,
+    // whichever queued or entered first. A candidate group is refused when
+    // it would meet the other kind among the groups already selected for
+    // this match (either team) or the players already in / invited to the
+    // target instance.
+    struct MatchKinds
+    {
+        bool stillVanillaHuman = false;
+        bool restrictedBot = false;
+
+        void Add(MatchKinds other)
+        {
+            stillVanillaHuman = stillVanillaHuman || other.stillVanillaHuman;
+            restrictedBot = restrictedBot || other.restrictedBot;
+        }
+        constexpr bool Any() const { return stillVanillaHuman || restrictedBot; }
+    };
+
+    constexpr MatchKinds KindsOf(Human const& asHuman, Bot const& asBot)
+    {
+        return MatchKinds{HumanStillVanilla(asHuman), BotIsRestrictedRandomBot(asBot)};
+    }
+
+    constexpr bool MatchPoolRejects(bool optionEnabled, MatchKinds candidate, MatchKinds others)
+    {
+        return optionEnabled &&
+            ((candidate.restrictedBot && others.stillVanillaHuman) ||
+             (candidate.stillVanillaHuman && others.restrictedBot));
+    }
+
     // Instance id -> still-Vanilla humans inside (recorded on the world
     // thread as they enter; removed as they leave). Values only.
     class BgVanillaRoster

@@ -92,7 +92,7 @@ class HooksAndAuthority(unittest.TestCase):
             "PLAYERHOOK_CAN_JOIN_LFG", "PLAYERHOOK_ON_LOGOUT", "GLOBALHOOK_CAN_CREATE_LFG_PROPOSAL",
             "PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE", "PLAYERHOOK_CAN_BATTLEFIELD_PORT",
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_ADD_PLAYER", "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_REMOVE_PLAYER_AT_LEAVE",
-            "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY"]))
+            "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY", "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
@@ -100,7 +100,8 @@ class HooksAndAuthority(unittest.TestCase):
             "OnPlayerCanJoinLfg", "OnPlayerLogout", "OnPlayerCanJoinInBattlegroundQueue",
             "OnPlayerCanBattleFieldPort", "OnBattlegroundAddPlayer", "OnBattlegroundRemovePlayerAtLeave",
             "OnBattlegroundDestroy"]))
-        self.assertEqual(re.findall(r"\b(Can\w+)\([^;{]*\)\s*override", self.src), ["CanCreateLfgProposal"])
+        self.assertEqual(sorted(re.findall(r"\b(Can\w+)\([^;{]*\)\s*override", self.src)),
+                         ["CanAddGroupToMatchingPool", "CanCreateLfgProposal"])
 
     def test_battlegrounds_option_c(self):
         # (b) Queue join: world thread only; quiet refusal; only a solo
@@ -142,6 +143,30 @@ class HooksAndAuthority(unittest.TestCase):
         policy = strip_comments(read(POLICY))
         self.assertIn("return optionEnabled && restrictedBot && soloJoin && matchingVanillaHumanQueued;", policy)
         self.assertIn("return optionEnabled && restrictedBot && enteringBattle && invitedToInstanceWithVanillaHuman;", policy)
+
+    def test_battleground_matcher_option_d(self):
+        # The matcher hook: world thread only, read-only (never mutates the
+        # queue, pools or battleground), and refuses only by the pure rule.
+        m = self.body("bool CanAddGroupToMatchingPool(BattlegroundQueue* queue, GroupQueueInfo* group", "\n        }\n")
+        self.assertRegex(m, r"if \(!OptionOn\(\) \|\| !queue \|\| !group \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return true;")
+        self.assertLess(m.index("IsCurrent()"), m.index("KindsOfGroup("))
+        for token in ("push_back", "erase", "Remove", "KickGroup", "InviteGroupToBG", "AddGroup(", "clear(",
+                      "SetBattleground", "Teleport"):
+            self.assertNotIn(token, m, token)
+        self.assertIn("queue->m_SelectionPools", m)
+        self.assertIn("bg->GetPlayers()", m)
+        self.assertIn("invited->IsInvitedToBGInstanceGUID == bg->GetInstanceID()", m)
+        self.assertRegex(m, r"if \(!candidate\.Any\(\)\)\s*return true;")
+        self.assertIn("return !Policy::MatchPoolRejects(true, candidate, others);", m)
+        self.assertEqual(len(re.findall(r"\breturn\b[^;]*;", m)), 3)
+        # Facts come from the live verified predicates, never race alone.
+        kinds = self.body("Policy::MatchKinds KindsOfGuid(ObjectGuid const& guid)")
+        self.assertIn("return Policy::KindsOf(ReadHuman(player), ReadBot(player));", kinds)
+        self.assertRegex(kinds, r"if \(!player\)\s*return \{\};")
+        policy = strip_comments(read(POLICY))
+        self.assertIn("((candidate.restrictedBot && others.stillVanillaHuman) ||", policy)
+        self.assertIn("(candidate.stillVanillaHuman && others.restrictedBot));", policy)
+        self.assertIn("return MatchKinds{HumanStillVanilla(asHuman), BotIsRestrictedRandomBot(asBot)};", policy)
 
     def test_dungeon_finder_value_only(self):
         # The matcher hook runs on the LFG worker thread beside the maps: it
