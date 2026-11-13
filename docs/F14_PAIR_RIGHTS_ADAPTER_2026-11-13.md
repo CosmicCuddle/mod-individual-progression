@@ -28,14 +28,26 @@ The query is reached synchronously:
 2. The batched `Player::UpdateVisibilityOf` asks `IsF14CreatureSuppressedFromClientViewForInitialOut` (`PlayerUpdates.cpp:1745`, called at :1872). It does this only for a creature the viewer has at client and that is ordinarily visible, and only after Core's own candidate filter has excluded GMs, owned/charmed creatures, pets, summons, guardians and totems.
 3. ScriptMgr calls the observer, which calls the adapter.
 
-At that point Core is itself reading the same viewer and creature in the same frame. The adapter reads **only** their own state:
+At that point both objects are live on the viewer's map, and the adapter reads **only** their own state:
 - through const accessors;
 - the two units' own applied-aura containers (caster GUIDs only);
 - the static quest template and loot stores.
 
 It never dereferences a controlled unit, summon, vehicle base or passenger, and never looks up an aura caster. There is no `ObjectAccessor`, Auth/character DB, Playerbots, group-member iteration or `const_cast`. No pointer outlives the call.
 
-**Not proven:** Core25 has no owning-map-frame API (`Map::IsWithinF14MapUpdateInvocation` existed only in a disposable prototype). The active notifier token is **not** thread-ownership proof. The adapter's safety rests on reading only what Core reads in the same frame, which is why secondary objects are excluded entirely.
+**Thread-safety basis (corrected after CS02 review L1):**
+- **Not "what Core reads in the same frame":** `Player::UpdateVisibilityOf` does **not** itself read several things the adapter reads, so that earlier wording overstated the argument. Those are the viewer's quest log and quest-status map, either unit's applied-aura map, the creature's threat manager, the viewer's group pointer and the session vendor entry.
+- **The actual basis is AzerothCore's usual invariants:**
+  - one map is updated by one thread at a time;
+  - session and world handlers run before `MapMgr::Update` in `World::Update`, not alongside it.
+
+  So the viewer's and creature's own containers aren't written concurrently while this frame runs. No concurrent writer has been found, but this is an argument from Core's design, not a proof.
+
+**Still not proven:** Core25 has no owning-map-frame API (`Map::IsWithinF14MapUpdateInvocation` existed only in a disposable prototype), and the active notifier token is **not** thread-ownership proof. That's why secondary objects (controlled units, vehicles, aura casters) are excluded entirely.
+
+**Known limits (CS02 review, recorded and not fixed in this diagnostic):**
+- **L2, diagnostic hot-path cost:** with the macro on, `Collect` runs on every token query that passes the gates. That's up to 25 quest slots × 4 objectives, two aura scans of up to 64 each, and three `HaveQuestLootForPlayer` calls that walk whole loot templates, once per visibility pass for each viewer and each RandomBot-attacked creature. It never runs in default builds. A future child could skip the loot-store calls once an earlier veto has fired, or rate-limit `RecordPairRightsDiagnostic` per pair.
+- **I1, counters not observable:** `_pairRightsResults` is incremented but never read or logged periodically. A run shows only the first-occurrence line per result, not frequencies. A bounded periodic summary would need a later child.
 
 ## Evidence completeness
 
