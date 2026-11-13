@@ -36,4 +36,21 @@ for (const required of [
 ])
     requireContract(tests.includes(required), "missing focused test scenario: " + required);
 
+function departureKeepsEarnedEvidence(source) {
+    const start = source.indexOf("constexpr DepartureEvidence AfterLeaving(");
+    if (start < 0) return false;
+    const body = source.slice(start);
+    return body.includes("return {Status::EarnedFloorMissing, earned};") &&
+           body.includes("return {Status::Available, earned};") &&
+           !body.includes("Era::BurningCrusade");
+}
+requireContract(departureKeepsEarnedEvidence(model),
+                "departure must expose earned evidence, never apply a healthy TBC floor");
+const oldM1Behavior = model.replace(
+    "return {Status::EarnedFloorMissing, earned};",
+    "return {Status::Available, Era::BurningCrusade};"
+);
+requireContract(oldM1Behavior !== model && !departureKeepsEarnedEvidence(oldM1Behavior),
+                "source guard must reject the old TBC-on-leave semantic bug");
+
 console.log("PASS F14 group-era source: explicit bot eligibility, 0/8/13 boundaries, no progression write authority");

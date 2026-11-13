@@ -30,7 +30,7 @@ Claude CS03-IP owns the safer social-interaction slice; no Claude adapter/runtim
 
 ## Tests and evidence
 
-The standalone C++ test uses static assertions and an exhaustive 10-supported-race × 19-earned-stage × 19-group-stage matrix, plus explicit TBC/Wrath up/down, exact earned-era departure and missing-floor diagnosis, unverified identity and invalid race/stage inputs. The source-contract test checks the 0/8/13 boundaries, explicit identity input and absence of runtime/progression writes.
+The standalone C++ test uses static assertions and an exhaustive 10-supported-race × 19-earned-stage × 19-group-stage matrix, plus explicit TBC/Wrath up/down, exact earned-era departure and missing-floor diagnosis, unverified identity and invalid race/stage inputs. The source-contract test checks the 0/8/13 boundaries, explicit identity input and absence of runtime/progression writes. It also applies an in-memory mutation restoring the old TBC-on-leave bug and requires the guard to reject it.
 
 ```sh
 node tests/test_f14_group_sync_era_floor_source.js
