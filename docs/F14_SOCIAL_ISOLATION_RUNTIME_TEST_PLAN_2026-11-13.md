@@ -52,7 +52,17 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | G2 | the same group, but R is offline when H0 accepts | H0 joins (an offline member is never classified). Once R is back online, whispering, trading and inviting R are still declined |
 | G3 | H8 leads a group with N, A or S only; H0 accepts | H0 joins (stock) |
 | PB1 | ask R, through Playerbots commands or its AI, to invite or trade with H0, on the same map and on a different map | On Playerbots `0d754d19`, the source shows these call Core's handlers, so they are expected to be declined silently. Confirm on the installed version. Cross-map is the T1 thread case: watch for crashes |
+| LFG1 | H0 and R queue the Dungeon Finder for the same dungeon | record whether they're matched into one group (expected **possible**: direct `AddMember`, no hook). Evidence only for the owner's policy decision |
+| BG1 | H0 and R join the same battleground | record whether R joins H0's battle raid (expected **possible**) |
+| U1 | a BE/Dr character whose identity was never verified (logged in before the option was on) interacts with H0 | stock, never classified from race |
+| T1a | R on the **same** map as H0 invites or whispers H0 through Playerbots | declined silently (ownership is proven on the bot's map thread) |
+| T1b | R on a **different** map invites H0 through Playerbots (for example via LFG chat) | allowed (stock; owner fail-open), with no crash under load |
 | OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |
+
+## Future cases (only once a #176 runtime producer exists; not testable today)
+- **Group-floor population:** a BE/Dr RandomBot in an H0-led group never shows a Vanilla era. An ordinary-race RandomBot does. An Altbot (normal account) is never synced at all. An account added to `ExcludedAccountsRegex` (if configured) gets the floor.
+- **Map A→B→A, group A→B→A and leader A→B→A** while grouped: the temporary era is never read from a stale context (needs the eager map, membership and leader generation issuers).
+- **Unknown classification:** a member with no account match and no verified identity stays outside every population.
 
 ## Pass criteria and evidence
 - **Pass criteria:**

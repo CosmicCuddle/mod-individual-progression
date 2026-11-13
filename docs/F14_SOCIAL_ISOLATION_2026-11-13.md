@@ -57,6 +57,18 @@ Two identity notions are in use, and they are **deliberately different**. A sour
 | **Restriction** (this feature) | verified RandomBots only | IP's login-thread verified cache, plus headless and not GM | it *limits* what a character can do. A false positive would cut off a real human, Altbot or SelfBot, so it needs positive proof |
 | **Group sync writes** (existing IP `SyncBotsProgressionToLeader`) | every non-normal account: bot-account **or** excluded-account match | `!isNormalAccount(member)` | historical IP behaviour; unchanged |
 
+**Wider identity map (v2 item 5).** These predicates may differ, but the provenance marked *shared* must be the same source:
+
+| Consumer | Predicate | Provenance (must be shared?) | May differ because |
+|---|---|---|---|
+| Social restriction | verified RandomBot + headless + not GM + race 10/11 | the login-thread verified cache (**shared**) | it limits interaction, so it needs positive proof |
+| /who exclusion | the verified cache **by GUID** + cached race | the same verified cache (**shared**); race comes from Core's /who cache | /who has only a GUID; its equivalence with the social rule is tested (720 sets) |
+| Group sync population | `!isNormalAccount` (account-name regex) | IP account match | historical sync behaviour; it protects, never restricts |
+| #176 `eligibleBot` (future producer) | must be **exactly the sync population** for that member | the same IP account match as the sync (**shared with sync**, not with social) | a floor that skipped part of the sync population would let a BE/Draenei character be synced down |
+| Auction snapshots (#53, not started) | UNKNOWN | if it isolates RandomBots it must use the verified cache; if it follows sync, the account match | no auction design exists yet; an Information reply is pending |
+
+**Never allowed anywhere:** race alone; Playerbots manager queries off the login thread; promoting an unknown classification.
+
 **Consequence for the BE/Draenei minimum-TBC group floor (Codex #175/#176):**
 - That floor *protects* (it prevents a downgrade), so its `eligibleBot` input should cover **at least the whole sync write population**. Otherwise a Blood Elf/Draenei Altbot or excluded account could still be synced down to a Vanilla leader with `EnforceGroupRules = 0`.
 - Feeding it from the verified RandomBot cache alone would leave that hole.
@@ -109,7 +121,25 @@ This social feature is unaffected: it never restricts Altbots.
 - **/who:** inert in Core builds without `COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT`.
 - **Stage range:** only the Vanilla-vs-TBC restriction for now. Later-era isolation (TBC human vs Wrath bot) is not in scope.
 - **Group accept and offline members:** an offline or unresolved member has no live facts, so it is skipped and never guessed from race. A group whose only restricted bot is offline can still be joined. That bot is again checked on every later interaction once it is online.
-- **Direct group adds:** on the historical Playerbots pin `e88cc409`, earlier audits found group creation calling `Group::AddMember` directly. On the locally inspected `0d754d19`, ordinary invite and accept go through Core's handlers, so the hooks fire. The only direct `AddMember` left is arena-team group formation in `BattleGroundJoinAction`. Its members come from the bot's own arena team, so this needs no change here. Which Playerbots version is installed is **UNKNOWN**.
+- **Group membership that bypasses invite/accept (v2 item 4; source only):** Core25 calls `Group::AddMember` directly, with no pre-add veto hook, in these places:
+
+  | Path | Where | Can a restricted RandomBot and a Vanilla human end up grouped? |
+  |---|---|---|
+  | Dungeon Finder | `LFGMgr.cpp:1807` | **Yes.** RandomBots queue through Playerbots `LfgActions` (a queued join packet, `0d754d19`) |
+  | Battleground raid | `Battleground.cpp:1274` | **Yes**, as a temporary battle group |
+  | Arena | `Arena.cpp:136`; Playerbots `BattleGroundJoinAction` | only through arena-team membership |
+  | Wintergrasp | `Battlefield.cpp:631` | Wrath content; not reachable on a Vanilla-era server |
+  | GM `.group join` | `cs_group.cpp:160` | a deliberate GM action |
+
+  - **On `0d754d19`:** ordinary Playerbots invites and accepts go through Core's handlers, so the hooks fire. The older direct `GroupInviteOperation` add recorded for `e88cc409` is gone.
+  - **Which Playerbots version is installed is UNKNOWN.**
+  - **Enforcement seams that remain:**
+    - `GroupScript::OnAddMember` runs **after** the add, so it can't veto. Undoing the add there would be a group mutation.
+    - `OnPlayerCanJoinLfg` and `OnPlayerCanJoinInBattlegroundQueue` are **per-player**, not per-pair: they can't know which humans a bot will meet.
+  - **Each option is a gameplay-policy choice for the owner and is not implemented:**
+    - keep restricted RandomBots out of Dungeon Finder or battleground queues entirely;
+    - remove them after the add;
+    - accept the bypass.
 - **T1 residual (owner-approved fail-open; bots rarely start cross-map interactions, players normally do):** a restricted bot on a **different map** can still invite, whisper or trade with a Vanilla human, because the human's stage can't be read safely there. Fail-closed would block that, but would also block bots with every non-Vanilla human on other maps; that's an owner choice.
 - **Identity timing:** the verified cache is filled only for bots that log in while an F14 option is on. Bots already online when the option is enabled by `.reload` stay unrestricted until they relog (this fails toward stock behaviour).
 
