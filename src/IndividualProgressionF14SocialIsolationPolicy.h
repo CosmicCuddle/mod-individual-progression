@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 namespace IndividualProgressionF14SocialIsolationPolicy
 {
@@ -194,6 +195,62 @@ namespace IndividualProgressionF14SocialIsolationPolicy
     {
         return onWorldThread || (ownedScopeValid && firstInOwnedMap && secondInOwnedMap);
     }
+
+    // Dungeon Finder (owner decision 13 Nov 2026): a still-Vanilla human
+    // who queues is never matched into one group with a restricted
+    // RandomBot. TBC/Wrath humans keep stock matching. The facts are taken
+    // when each player joins the queue (world thread) and looked up by GUID
+    // only, because the matcher runs on a worker thread beside the maps.
+    struct QueueFacts
+    {
+        bool restrictedBot = false;      // BotIsRestrictedRandomBot at join
+        bool stillVanillaHuman = false;  // HumanStillVanilla at join
+    };
+
+    constexpr QueueFacts MakeQueueFacts(Human const& asHuman, Bot const& asBot)
+    {
+        return QueueFacts{BotIsRestrictedRandomBot(asBot), HumanStillVanilla(asHuman)};
+    }
+
+    constexpr bool QueueGroupRejected(bool optionEnabled, bool anyStillVanillaHuman, bool anyRestrictedBot)
+    {
+        return optionEnabled && anyStillVanillaHuman && anyRestrictedBot;
+    }
+
+    // GUID -> facts captured at queue join. Not thread-safe by itself; the
+    // script guards it with a mutex. Unknown GUIDs carry no facts and so
+    // never restrict anyone.
+    class QueueFactsTable
+    {
+    public:
+        void Record(std::uint64_t guid, QueueFacts facts)
+        {
+            if (guid)
+                _facts[guid] = facts;
+        }
+        void Erase(std::uint64_t guid) { _facts.erase(guid); }
+        std::size_t Size() const { return _facts.size(); }
+
+        // True when this candidate group must not be formed.
+        template<typename GuidRange>
+        bool Rejects(bool optionEnabled, GuidRange const& guids) const
+        {
+            bool vanillaHuman = false;
+            bool restrictedBot = false;
+            for (std::uint64_t guid : guids)
+            {
+                auto const found = _facts.find(guid);
+                if (found == _facts.end())
+                    continue; // unknown: no facts, never restricts
+                vanillaHuman = vanillaHuman || found->second.stillVanillaHuman;
+                restrictedBot = restrictedBot || found->second.restrictedBot;
+            }
+            return QueueGroupRejected(optionEnabled, vanillaHuman, restrictedBot);
+        }
+
+    private:
+        std::unordered_map<std::uint64_t, QueueFacts> _facts;
+    };
 
     // T1 owned-map list helpers. Generic so the exact code also runs in the
     // native tests with fake types. `players` is the owned map's own player

@@ -52,7 +52,10 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | G2 | the same group, but R is offline when H0 accepts | H0 joins (an offline member is never classified). Once R is back online, whispering, trading and inviting R are still declined |
 | G3 | H8 leads a group with N, A or S only; H0 accepts | H0 joins (stock) |
 | PB1 | ask R, through Playerbots commands or its AI, to invite or trade with H0, on the same map and on a different map | On Playerbots `0d754d19`, the source shows these call Core's handlers, so they are expected to be declined silently. Confirm on the installed version. Cross-map is the T1 thread case: watch for crashes |
-| LFG1 | H0 and R queue the Dungeon Finder for the same dungeon | record whether they're matched into one group (expected **possible**: direct `AddMember`, no hook). Evidence only for the owner's policy decision |
+| LFG1 | H0 (stage ≤7) and R queue the Dungeon Finder for the same dungeon | **never matched into one group**; both still get groups with others |
+| LFG2 | H8 (stage ≥8) and R queue for the same dungeon | may be matched (stock) |
+| LFG3 | H0 queues, then `.ip set H0 8` while still queued | stays kept apart from R until H0 re-queues (conservative) |
+| LFG4 | H0 queues with N, A or S | stock matching |
 | BG1 | H0 and R join the same battleground | record whether R joins H0's battle raid (expected **possible**) |
 | U1 | a BE/Dr character whose identity was never verified (logged in before the option was on) interacts with H0 | stock, never classified from race |
 | T1a | R on the **same** map as H0 invites or whispers H0 through Playerbots | declined silently (ownership is proven on the bot's map thread) |

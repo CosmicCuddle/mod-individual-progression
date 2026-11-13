@@ -31,6 +31,7 @@ For a restricted pair:
 | Group invite | `OnPlayerCanGroupInvite` | declined both ways |
 | Group accept | `OnPlayerCanGroupAccept` | the leader is checked both ways (pair rule). A Vanilla human is also refused if **any other current member** is a restricted bot; that member sends the reply. Offline or unresolved members are skipped |
 | /who | `OnF14ShouldExcludeWhoEntryForViewer` | the bot is left out of the human's list **and** count. Core calls this only in builds with its `COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT`, and skips the row before counting |
+| Dungeon Finder | `OnPlayerCanJoinLfg` (records facts) + `GlobalScript::CanCreateLfgProposal` (veto) | a candidate group mixing a still-Vanilla human with a restricted bot is refused; Core matches other combinations. TBC/Wrath humans are stock. Owner decision 13 Nov 2026 |
 
 **The in-character reply:**
 - **When:** only when the human started the interaction. Addon whispers get no reply.
@@ -136,10 +137,13 @@ This social feature is unaffected: it never restricts Altbots.
   - **Enforcement seams that remain:**
     - `GroupScript::OnAddMember` runs **after** the add, so it can't veto. Undoing the add there would be a group mutation.
     - `OnPlayerCanJoinLfg` and `OnPlayerCanJoinInBattlegroundQueue` are **per-player**, not per-pair: they can't know which humans a bot will meet.
-  - **Each option is a gameplay-policy choice for the owner and is not implemented:**
-    - keep restricted RandomBots out of Dungeon Finder or battleground queues entirely;
-    - remove them after the add;
-    - accept the bypass.
+  - **Owner decision (13 Nov 2026):** "If the player queues & they are in vanilla the blood elfs and draenei should be kept out of the queue, if they are in tbc or wotlk then they can join the queue."
+  - **Dungeon Finder: implemented.**
+    - **Recording facts:** at queue join (`OnPlayerCanJoinLfg`, world thread: `CMSG_LFG_JOIN` is `PROCESS_THREADUNSAFE`, and Playerbots queues that same packet), the joiner and every group member get a GUID-keyed `{restrictedBot, stillVanillaHuman}` record, under a mutex. It's erased at logout.
+    - **The veto:** `CanCreateLfgProposal` runs on the LFG worker thread beside the map updates, so it reads **no Player**: only the proposal's player GUIDs (its `roles` map) and those records. If they mix a still-Vanilla human with a restricted bot, that one combination is refused (`LFG_INCOMPATIBLES_REJECTED_BY_SCRIPT`), and Core keeps matching others.
+    - **Joining is never blocked.** Unknown GUIDs never restrict.
+    - **Stale record:** a human who reaches TBC while still queued keeps the Vanilla record until they re-queue. That's conservative (keeps bots out), never an admission.
+  - **Battlegrounds: not implemented yet.** Core25 has no per-group BG seam, and Playerbots ports bots from bot AI (a map thread). Design options (a) port veto, (b) queue-join veto, (c) both, (d) a Core hook are with CS01 (Coordination #13, 6861757445).
 - **T1 residual (owner-approved fail-open; bots rarely start cross-map interactions, players normally do):** a restricted bot on a **different map** can still invite, whisper or trade with a Vanilla human, because the human's stage can't be read safely there. Fail-closed would block that, but would also block bots with every non-Vanilla human on other maps; that's an owner choice.
 - **Identity timing:** the verified cache is filled only for bots that log in while an F14 option is on. Bots already online when the option is enabled by `.reload` stay unrestricted until they relog (this fails toward stock behaviour).
 
@@ -165,12 +169,13 @@ This social feature is unaffected: it never restricts Altbots.
   - exact one-line login OR change, additive-only edits, existing hooks unchanged, every other file byte-identical;
   - the two identity sources: restriction uses only the verified cache, and the existing group-sync write population is every non-normal account.
 - **Local Core25 header syntax check** (`-fsyntax-only`) of the new script and both modified IP sources. Not a link.
-- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 45 lines:
+- **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 56 lines:
   - the four hook declarations and enums, plus `BuildChatPacket`;
   - Core's wrong-faction checks before the whisper (ChatHandler.cpp:428 → :448) and trade (TradeHandler.cpp:830 → :842) hooks;
   - the /who exclusion (MiscHandler.cpp:401) before `matchCount++` (:407), so the visible list and count stay consistent;
   - for the group-accept member scan: the accept hook call, `Group::GetMemberSlots` and `MemberSlot::guid`, `ObjectAccessor::FindPlayer` returning in-world players only, and the four social opcodes being `PROCESS_THREADUNSAFE` (with `MapSessionFilter` refusing them), so they run on the world thread;
-  - for T1: `WORLDHOOK_ON_UPDATE` and `OnWorldUpdate` after `sMapMgr->Update`, the before/after player-update hooks at the start and end of `Player::Update`, `Map::Update` calling `player->Update`, `Map::GetPlayers`, and `MapMgr` scheduling every map before `m_updater.wait()`.
+  - for T1: `WORLDHOOK_ON_UPDATE` and `OnWorldUpdate` after `sMapMgr->Update`, the before/after player-update hooks at the start and end of `Player::Update`, `Map::Update` calling `player->Update`, `Map::GetPlayers`, and `MapMgr` scheduling every map before `m_updater.wait()`;
+  - for the Dungeon Finder: `CMSG_LFG_JOIN` world-thread processing, the join and proposal hooks, `Lfg5Guids` GUIDs and roles, and the LFG update scheduled beside the maps.
 
 ## Evidence levels and rollback
 Source and model proof, plus a local header syntax check. No Worldserver link, gameplay or client test has been done.

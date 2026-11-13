@@ -84,15 +84,42 @@ class HooksAndAuthority(unittest.TestCase):
         self.src = strip_comments(read(SCRIPT))
 
     def test_only_social_hooks_and_who(self):
-        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+)\b", self.src)))
+        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+)\b", self.src)))
         self.assertEqual(hooks, sorted([
             "PLAYERHOOK_CAN_GROUP_ACCEPT", "PLAYERHOOK_CAN_GROUP_INVITE", "PLAYERHOOK_CAN_INIT_TRADE",
             "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT", "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY",
-            "WORLDHOOK_ON_UPDATE", "PLAYERHOOK_ON_BEFORE_UPDATE"]))
+            "WORLDHOOK_ON_UPDATE", "PLAYERHOOK_ON_BEFORE_UPDATE",
+            "PLAYERHOOK_CAN_JOIN_LFG", "PLAYERHOOK_ON_LOGOUT", "GLOBALHOOK_CAN_CREATE_LFG_PROPOSAL"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
-            "OnPlayerCanInitTrade", "OnPlayerCanUseChat", "OnUpdate", "OnPlayerBeforeUpdate"]))
+            "OnPlayerCanInitTrade", "OnPlayerCanUseChat", "OnUpdate", "OnPlayerBeforeUpdate",
+            "OnPlayerCanJoinLfg", "OnPlayerLogout"]))
+        self.assertEqual(re.findall(r"\b(Can\w+)\([^;{]*\)\s*override", self.src), ["CanCreateLfgProposal"])
+
+    def test_dungeon_finder_value_only(self):
+        # The matcher hook runs on the LFG worker thread beside the maps: it
+        # reads only GUIDs and the facts table, never a Player.
+        veto = self.body("bool CanCreateLfgProposal(lfg::Lfg5Guids const& proposal) override", "\n        }\n")
+        self.assertRegex(veto, r"if \(!OptionOn\(\)\)\s*return true;")
+        for token in ("Player*", "Player const", "->", "ObjectAccessor", "ReadHuman", "ReadBot", "GetSession", "FindMap",
+                      "sIndividualProgression->Has"):
+            self.assertNotIn(token, veto, token)
+        self.assertIn("guids.push_back(guid.GetRawValue());", veto)
+        self.assertIn("std::lock_guard<std::mutex> lock(QueueFactsLock());", veto)
+        self.assertIn("return !QueueFacts().Rejects(true, guids);", veto)
+        # Facts are recorded only on the world thread, and joining is never blocked.
+        join = self.body("bool OnPlayerCanJoinLfg(Player* player", "\n        }\n")
+        self.assertRegex(join, r"if \(!OptionOn\(\) \|\| !player \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return true;")
+        self.assertLess(join.index("WorldThread().IsCurrent()"), join.index("ReadHuman("))
+        self.assertEqual(set(re.findall(r"\breturn\b[^;]*;", join)), {"return true;"})  # never blocks a queue
+        self.assertIn("Policy::MakeQueueFacts(ReadHuman(player), ReadBot(player))", join)
+        self.assertIn("group->GetFirstMember()", join)
+        logout = self.body("void OnPlayerLogout(Player* player) override", "\n        }\n")
+        self.assertIn("QueueFacts().Erase(player->GetGUID().GetRawValue());", logout)
+        policy = strip_comments(read(POLICY))
+        self.assertIn("return optionEnabled && anyStillVanillaHuman && anyRestrictedBot;", policy)
+        self.assertIn("return QueueFacts{BotIsRestrictedRandomBot(asBot), HumanStillVanilla(asHuman)};", policy)
 
     def body(self, signature, end="\n    }\n"):
         return self.src.split(signature, 1)[1].split(end, 1)[0]

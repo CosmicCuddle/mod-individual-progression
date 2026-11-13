@@ -1286,7 +1286,8 @@ Focused native tests require every completeness family independently, exercise t
   - duel (notify-only hook);
   - mail (offline receiver unverifiable);
   - later-era isolation beyond Vanilla/TBC;
-  - Dungeon Finder and battleground groups use Core's direct `Group::AddMember` and bypass invite/accept; the response is an owner policy decision.
+  - battleground groups use Core's direct `Group::AddMember` and bypass invite/accept. The design is with CS01.
+- **Dungeon Finder (owner decision 13 Nov 2026):** a still-Vanilla human who queues is never matched into one group with a restricted RandomBot; TBC/Wrath humans are stock. Facts are recorded at queue join (world thread). The `GlobalScript::CanCreateLfgProposal` veto is value-only: GUIDs plus the recorded facts, no `Player`.
 - **Tests:**
   - native policy tests (GCC/Clang, C++17/20, with and without NDEBUG);
   - source contracts;

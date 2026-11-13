@@ -713,6 +713,93 @@ namespace
     }
 }
 
+namespace
+{
+    // Dungeon Finder (owner decision): a still-Vanilla human is never
+    // matched into one group with a restricted RandomBot; TBC/Wrath humans
+    // keep stock matching; unknown GUIDs never restrict.
+    void TestDungeonFinderQueue()
+    {
+        P::Bot const notABot{};
+        P::Human const notAHuman{};
+        P::QueueFacts const vanilla = P::MakeQueueFacts(VanillaHuman(3), notABot);
+        P::QueueFacts const tbc = P::MakeQueueFacts(VanillaHuman(8), notABot);
+        P::QueueFacts const wrath = P::MakeQueueFacts(VanillaHuman(13), notABot);
+        P::QueueFacts const restricted = P::MakeQueueFacts(notAHuman, VerifiedBot(P::BloodElfRace));
+        P::QueueFacts const draenei = P::MakeQueueFacts(notAHuman, VerifiedBot(P::DraeneiRace));
+        P::QueueFacts const ordinaryBot = P::MakeQueueFacts(notAHuman, VerifiedBot(1));
+        P::Bot altbot = VerifiedBot();
+        altbot.verifiedRandomBotIdentity = false;
+        P::QueueFacts const altbotFacts = P::MakeQueueFacts(notAHuman, altbot);
+        P::Bot selfBot = VerifiedBot();
+        selfBot.headlessSession = false;
+        P::QueueFacts const selfBotFacts = P::MakeQueueFacts(notAHuman, selfBot);
+
+        CHECK(vanilla.stillVanillaHuman && !vanilla.restrictedBot);
+        CHECK(!tbc.stillVanillaHuman && !wrath.stillVanillaHuman);
+        CHECK(restricted.restrictedBot && draenei.restrictedBot && !restricted.stillVanillaHuman);
+        CHECK(!ordinaryBot.restrictedBot && !altbotFacts.restrictedBot && !selfBotFacts.restrictedBot);
+
+        // The pure rule.
+        for (int opt = 0; opt < 2; ++opt)
+            for (int v = 0; v < 2; ++v)
+                for (int r = 0; r < 2; ++r)
+                    CHECK(P::QueueGroupRejected(opt != 0, v != 0, r != 0) == (opt && v && r));
+
+        P::QueueFactsTable table;
+        table.Record(1, vanilla);
+        table.Record(2, tbc);
+        table.Record(3, wrath);
+        table.Record(10, restricted);
+        table.Record(11, draenei);
+        table.Record(20, ordinaryBot);
+        table.Record(21, altbotFacts);
+        table.Record(22, selfBotFacts);
+        table.Record(0, restricted); // a zero GUID is never recorded
+        CHECK(table.Size() == 8);
+
+        using G = std::vector<std::uint64_t>;
+        CHECK(table.Rejects(true, G{1, 10}));                 // Vanilla human + BE bot
+        CHECK(table.Rejects(true, G{20, 21, 1, 22, 11}));     // restricted bot anywhere
+        CHECK(!table.Rejects(true, G{2, 10, 11}));            // TBC human: stock
+        CHECK(!table.Rejects(true, G{3, 10}));                // Wrath human: stock
+        CHECK(!table.Rejects(true, G{1, 20, 21, 22}));        // Vanilla + never-restricted kinds
+        CHECK(!table.Rejects(true, G{1, 99}));                // unknown GUID never restricts
+        CHECK(!table.Rejects(true, G{99, 98, 10}));
+        CHECK(!table.Rejects(false, G{1, 10}));               // option OFF
+        CHECK(!table.Rejects(true, G{}));
+        CHECK(table.Rejects(true, G{2, 1, 10}));              // mixed humans: one Vanilla is enough
+
+        // Re-queue refreshes facts (reaching TBC lifts it); logout erases.
+        table.Record(1, tbc);
+        CHECK(!table.Rejects(true, G{1, 10}));
+        table.Record(1, vanilla);
+        CHECK(table.Rejects(true, G{1, 10}));
+        table.Erase(1);
+        CHECK(!table.Rejects(true, G{1, 10}));
+        table.Erase(12345); // erasing an unknown GUID is harmless
+        CHECK(table.Size() == 7);
+
+        // Exhaustive: groups of up to 5 drawn from 8 kinds, every subset.
+        std::uint64_t const ids[] = {1, 2, 3, 10, 11, 20, 21, 22};
+        table.Record(1, vanilla);
+        for (unsigned mask = 0; mask < 256; ++mask)
+        {
+            G group;
+            bool vanillaIn = false, botIn = false;
+            for (unsigned i = 0; i < 8; ++i)
+                if (mask & (1u << i))
+                {
+                    group.push_back(ids[i]);
+                    vanillaIn = vanillaIn || ids[i] == 1;
+                    botIn = botIn || ids[i] == 10 || ids[i] == 11;
+                }
+            CHECK(table.Rejects(true, group) == (vanillaIn && botIn));
+            CHECK(!table.Rejects(false, group));
+        }
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -732,6 +819,7 @@ int main()
     TestGroupAcceptMemberScan();
     TestThreadSafeReads();
     TestOwnedMapHelpers();
+    TestDungeonFinderQueue();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

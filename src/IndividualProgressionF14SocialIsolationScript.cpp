@@ -21,7 +21,9 @@
 #include "AccountMgr.h"
 #include "Chat.h"
 #include "GameTime.h"
+#include "GlobalScript.h"
 #include "Group.h"
+#include "LFG.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
 #include "PlayerScript.h"
@@ -132,6 +134,19 @@ namespace
         human->SendDirectMessage(&data);
     }
 
+    // Dungeon Finder facts captured at queue join, by GUID (see policy).
+    std::mutex& QueueFactsLock()
+    {
+        static std::mutex lock;
+        return lock;
+    }
+
+    Policy::QueueFactsTable& QueueFacts()
+    {
+        static Policy::QueueFactsTable table;
+        return table;
+    }
+
     Policy::WorldThreadMarker& WorldThread()
     {
         static Policy::WorldThreadMarker marker;
@@ -234,7 +249,39 @@ namespace
         F14SocialIsolationPlayerScript() : PlayerScript("IndividualProgression_F14SocialIsolation",
             {PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT, PLAYERHOOK_CAN_INIT_TRADE,
              PLAYERHOOK_CAN_GROUP_INVITE, PLAYERHOOK_CAN_GROUP_ACCEPT,
-             PLAYERHOOK_ON_BEFORE_UPDATE}) { }
+             PLAYERHOOK_ON_BEFORE_UPDATE, PLAYERHOOK_CAN_JOIN_LFG, PLAYERHOOK_ON_LOGOUT}) { }
+
+        // Dungeon Finder: record the joiner's (and its group's) facts. A
+        // client or bot CMSG_LFG_JOIN is PROCESS_THREADUNSAFE, so this runs on
+        // the world thread where any player may be read; anywhere else
+        // nothing is recorded (unknown: never restricts). Never blocks.
+        bool OnPlayerCanJoinLfg(Player* player, uint8 /*roles*/, std::set<uint32>& /*dungeons*/,
+                                std::string const& /*comment*/) override
+        {
+            if (!OptionOn() || !player || !WorldThread().IsCurrent())
+                return true;
+            std::vector<std::pair<uint64, Policy::QueueFacts>> facts;
+            facts.emplace_back(player->GetGUID().GetRawValue(),
+                               Policy::MakeQueueFacts(ReadHuman(player), ReadBot(player)));
+            if (Group const* group = player->GetGroup())
+                for (GroupReference const* itr = group->GetFirstMember(); itr; itr = itr->next())
+                    if (Player const* member = itr->GetSource())
+                        if (member != player)
+                            facts.emplace_back(member->GetGUID().GetRawValue(),
+                                               Policy::MakeQueueFacts(ReadHuman(member), ReadBot(member)));
+            std::lock_guard<std::mutex> lock(QueueFactsLock());
+            for (auto const& [guid, value] : facts)
+                QueueFacts().Record(guid, value);
+            return true;
+        }
+
+        void OnPlayerLogout(Player* player) override
+        {
+            if (!player)
+                return;
+            std::lock_guard<std::mutex> lock(QueueFactsLock());
+            QueueFacts().Erase(player->GetGUID().GetRawValue());
+        }
 
         // T1 only: this thread is about to update `player`, so it owns that
         // player's map for the rest of this world tick. Records, reads no
@@ -325,6 +372,34 @@ namespace
         }
     };
 
+    // Dungeon Finder: refuse a candidate group that would put a still-Vanilla
+    // human together with a restricted RandomBot. Core then tries other
+    // combinations; TBC/Wrath humans are unaffected. This runs on the LFG
+    // worker thread beside the map updates, so it reads NO Player at all:
+    // only GUIDs from the proposal and the facts recorded at queue join.
+    class F14SocialIsolationLfgScript final : public GlobalScript
+    {
+    public:
+        F14SocialIsolationLfgScript() : GlobalScript("IndividualProgression_F14SocialIsolationLfg",
+            {GLOBALHOOK_CAN_CREATE_LFG_PROPOSAL}) { }
+
+        bool CanCreateLfgProposal(lfg::Lfg5Guids const& proposal) override
+        {
+            if (!OptionOn())
+                return true;
+            std::vector<uint64> guids;
+            if (proposal.roles)
+                for (auto const& [guid, role] : *proposal.roles)
+                    guids.push_back(guid.GetRawValue());
+            else
+                for (ObjectGuid const& guid : proposal.guids)
+                    if (guid && guid.IsPlayer())
+                        guids.push_back(guid.GetRawValue());
+            std::lock_guard<std::mutex> lock(QueueFactsLock());
+            return !QueueFacts().Rejects(true, guids);
+        }
+    };
+
     // T1 only: remembers the world thread and counts world ticks. Reads nothing.
     class F14SocialIsolationWorldThreadScript final : public WorldScript
     {
@@ -363,4 +438,5 @@ void AddSC_mod_individual_progression_f14_social_isolation()
     new F14SocialIsolationPlayerScript();
     new F14SocialIsolationWhoScript();
     new F14SocialIsolationWorldThreadScript();
+    new F14SocialIsolationLfgScript();
 }

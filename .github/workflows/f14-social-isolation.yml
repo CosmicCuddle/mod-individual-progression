@@ -135,6 +135,19 @@ jobs:
               ("Maps/Map.h", 335, "PlayerList const& GetPlayers() const { return m_mapRefMgr; }"),
               ("Maps/MapMgr.cpp", 274, "m_updater.schedule_update(*iter->second"),
               ("Maps/MapMgr.cpp", 280, "m_updater.wait();"),
+              # Dungeon Finder (owner decision): join is world-thread, the proposal veto runs on the
+              # LFG worker thread beside the maps (value-only), and sees every player GUID via roles.
+              ("Server/Protocol/Opcodes.cpp", 991, "PROCESS_THREADUNSAFE,   &WorldSession::HandleLfgJoinOpcode"),
+              ("Handlers/LFGHandler.cpp", 74, "sLFGMgr->JoinLfg(GetPlayer(), uint8(packet.Roles), newDungeons, packet.Comment);"),
+              ("DungeonFinding/LFGMgr.cpp", 614, "if (!sScriptMgr->OnPlayerCanJoinLfg(player, roles, dungeons, comment))"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 198, "PLAYERHOOK_CAN_JOIN_LFG,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 80, "PLAYERHOOK_ON_LOGOUT,"),
+              ("Scripting/ScriptDefines/GlobalScript.h", 51, "GLOBALHOOK_CAN_CREATE_LFG_PROPOSAL,"),
+              ("Scripting/ScriptDefines/GlobalScript.h", 118, "virtual bool CanCreateLfgProposal(lfg::Lfg5Guids const& /*guids*/) { return true; }"),
+              ("DungeonFinding/LFGQueue.cpp", 415, "if (!sScriptMgr->CanCreateLfgProposal(proposal.queues))"),
+              ("DungeonFinding/LFG.h", 125, "std::array<ObjectGuid, 5> guids = { };"),
+              ("DungeonFinding/LFG.h", 126, "LfgRolesMap* roles;"),
+              ("Maps/MapMgr.cpp", 261, "m_updater.schedule_lfg_update(diff);"),
           ]
           bad = 0
           for name, line, text in anchors:
@@ -144,5 +157,5 @@ jobs:
                   print(f"FAIL {name}:{line}: expected {text!r}, got {got!r}")
           if bad:
               raise SystemExit(f"{bad} Core25 social anchor(s) drifted")
-          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership")
+          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership; Dungeon Finder seam")
           PY
