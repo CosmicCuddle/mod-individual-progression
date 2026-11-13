@@ -49,6 +49,20 @@ For a restricted pair:
 
 None of these is ever restricted. An unknown human stage (out of world) is treated as "not Vanilla", so the historical behaviour applies. The /who path uses the cached GUID's verified identity plus the cached race; race alone never excludes anyone.
 
+## Identity sources across F14 lines (shared-identity contract)
+Two identity notions are in use, and they are **deliberately different**. A source test (`IdentitySources`) pins both, so a change to either shows up.
+
+| Purpose | Population | Source | Why |
+|---|---|---|---|
+| **Restriction** (this feature) | verified RandomBots only | IP's login-thread verified cache, plus headless and not GM | it *limits* what a character can do. A false positive would cut off a real human, Altbot or SelfBot, so it needs positive proof |
+| **Group sync writes** (existing IP `SyncBotsProgressionToLeader`) | every non-normal account: bot-account **or** excluded-account match | `!isNormalAccount(member)` | historical IP behaviour; unchanged |
+
+**Consequence for the BE/Draenei minimum-TBC group floor (Codex #175/#176):**
+- That floor *protects* (it prevents a downgrade), so its `eligibleBot` input should cover **at least the whole sync write population**. Otherwise a Blood Elf/Draenei Altbot or excluded account could still be synced down to a Vanilla leader with `EnforceGroupRules = 0`.
+- Feeding it from the verified RandomBot cache alone would leave that hole.
+- Feeding the social restriction from `!isNormalAccount` would be wrong in the opposite direction, because Altbots and excluded humans would be restricted.
+- Whether the owner's "BE/Draenei bots" rule includes Altbots and excluded accounts is **UNKNOWN**. It's recorded for CS01/the owner; this branch doesn't decide it.
+
 ## What is left unchanged
 - These are new, separate scripts. Core ANDs boolean hooks across scripts, so every existing IP hook (including the `EnforceGroupRules` invite/accept checks) is byte-identical and still runs.
 - No world-visibility query is subscribed. Visual disappearance is paused.
@@ -89,7 +103,8 @@ None of these is ever restricted. An unknown human stage (out of world) is treat
   - verified identity, never race alone;
   - the reply is a direct packet, never `Whisper(`;
   - the stage mirror matches IP's reader;
-  - exact one-line login OR change, additive-only edits, existing hooks unchanged, every other file byte-identical.
+  - exact one-line login OR change, additive-only edits, existing hooks unchanged, every other file byte-identical;
+  - the two identity sources: restriction uses only the verified cache, and the existing group-sync write population is every non-normal account.
 - **Local Core25 header syntax check** (`-fsyntax-only`) of the new script and both modified IP sources. Not a link.
 - **Workflow:** `workflow_dispatch` only (milestone). It includes a **Core25 anchor job** pinning 22 lines:
   - the four hook declarations and enums, plus `BuildChatPacket`;

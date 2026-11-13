@@ -166,6 +166,32 @@ class HooksAndAuthority(unittest.TestCase):
             self.assertNotRegex(text.lower(), r"\b" + word + r"\b", word)
 
 
+class IdentitySources(unittest.TestCase):
+    """Two different, deliberate identity notions (see the doc's identity-source section).
+
+    Restriction (this feature) must use only the positive verified cache: a
+    false positive would cut a real human or Altbot off. Group sync writes to
+    every non-normal account; a protective era floor for that sync must cover
+    that whole write population, or a Blood Elf/Draenei Altbot could still be
+    synced down to Vanilla. If either side changes, this test makes it visible.
+    """
+
+    def test_restriction_uses_only_the_verified_cache(self):
+        src = strip_comments(read(SCRIPT))
+        self.assertEqual(src.count("HasF14VerifiedRandomBotIdentity("), 2)  # ReadHuman, ReadBot
+        for token in ("isNormalAccount", "isBotAccount", "isExcludedAccount", "IsRandomBot"):
+            self.assertNotIn(token, src, token)
+
+    def test_group_sync_write_population_is_every_non_normal_account(self):
+        core = strip_comments(read("src/IndividualProgression.cpp"))
+        sync = core.split("void IndividualProgression::SyncBotsProgressionToLeader(Group* group)", 1)[1]
+        sync = sync.split("\nvoid IndividualProgression::", 1)[0]
+        self.assertRegex(sync, r"if \(!member \|\| isNormalAccount\(member\)\)\s*continue;")
+        self.assertIn("ForceUpdateProgressionState(member, static_cast<ProgressionState>(permittedState));", sync)
+        normal = core.split("bool IndividualProgression::isNormalAccount(Player* player)", 1)[1][:300]
+        self.assertIn("isExcludedAccount(player) || sIndividualProgression->isBotAccount(player)", normal)
+
+
 class ExactInsertions(unittest.TestCase):
     def test_player_cpp_one_or_reason(self):
         plus, minus = added_lines("src/IndividualProgressionPlayer.cpp")
