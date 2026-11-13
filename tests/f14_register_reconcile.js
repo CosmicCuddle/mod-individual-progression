@@ -61,7 +61,13 @@ function rowGaps(row) {
     if (!/\brollback\b/i.test(text)) gaps.push("missing rollback statement");
     if (!/\b(?:NOT DEPLOYED|NOT MERGED|DRAFT|TEST ONLY|OFF)\b/i.test(text))
         gaps.push("missing explicit non-live status");
+    if (/\b(?:IS LIVE|NOW DEPLOYED|DEPLOYED ON)\b/i.test(text))
+        gaps.push("possible positive live/deployed claim needs evidence");
     return gaps;
+}
+function validRef(ref) {
+    return typeof ref === "string" && /^[A-Za-z0-9_./-]+$/.test(ref) &&
+           !ref.startsWith("-") && !ref.includes("..") && !ref.endsWith("/");
 }
 function validateManifest(manifest) {
     if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) ||
@@ -69,7 +75,7 @@ function validateManifest(manifest) {
         !Array.isArray(manifest.candidates) || !Array.isArray(manifest.externalRows))
         throw new TypeError("manifest needs repository, registerPath, candidates and externalRows");
     for (const c of manifest.candidates)
-        if (!c || typeof c.name !== "string" || typeof c.ref !== "string" ||
+        if (!c || typeof c.name !== "string" || !validRef(c.ref) ||
             typeof c.expectedHead !== "string" || !/^[0-9a-f]{40}$/i.test(c.expectedHead) ||
             typeof c.parent !== "string" || !/^[0-9a-f]{40}$/i.test(c.parent))
             throw new TypeError("candidate needs name, local ref, exact expectedHead and parent SHA");

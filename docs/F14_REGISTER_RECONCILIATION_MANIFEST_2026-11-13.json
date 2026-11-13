@@ -29,7 +29,7 @@
     {
       "name": "IP #178 module sync preflight",
       "ref": "feature/codex-module-sync-preflight-20261113",
-      "expectedHead": "21b3e73ad337486c94bb838937e70edf6e2ae391",
+      "expectedHead": "e75e2fe7033ccee35fd476fb008f6d231d4f6d5e",
       "parent": "aed05a92f262362608f5d643c8570b504189aae0"
     }
   ],

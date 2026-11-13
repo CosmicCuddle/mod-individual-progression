@@ -29,6 +29,9 @@ test("duplicate IDs and missing status, test, dependency, rollback fields are vi
                      ["missing stable IP feature ID", "missing test evidence/plan",
                       "missing dependency statement", "missing rollback statement",
                       "missing explicit non-live status"]);
+    assert.ok(reconcile.rowGaps({heading: "IP-F14-NEW — DRAFT/OFF",
+                                 body: "Tests, dependencies, rollback. NOW DEPLOYED ON server."})
+                       .includes("possible positive live/deployed claim needs evidence"));
 });
 
 test("pinned local candidates add one row each without altering earlier sections", () => {
@@ -42,5 +45,5 @@ test("pinned local candidates add one row each without altering earlier sections
         assert.deepEqual(c.rows[0].gaps, [], c.name);
     }
     assert.deepEqual(report.conflicts, []);
-    assert.equal(report.externalRows[0].id, reconcile.UNKNOWN || "UNKNOWN");
+    assert.equal(report.externalRows[0].id, "UNKNOWN");
 });
