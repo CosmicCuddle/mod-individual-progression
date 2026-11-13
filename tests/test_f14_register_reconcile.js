@@ -61,3 +61,23 @@ test("pinned local candidates add one row each without altering earlier sections
     assert.deepEqual(report.conflicts, []);
     assert.equal(report.externalRows[0].id, "UNKNOWN");
 });
+
+test("exact external social Register blob is inspected when its parent and head are local", () => {
+    const file = path.resolve(__dirname, "../docs/F14_REGISTER_RECONCILIATION_MANIFEST_V5_2026-11-13.json");
+    const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+    const report = reconcile.inspect(manifest, path.dirname(file));
+    const social = report.externalRows[0];
+    if (social.verification === "UNKNOWN; exact external Git objects unavailable") {
+        assert.deepEqual(social.problems, ["external head, parent ancestry or Register blob unavailable"]);
+        return; // A fresh partial clone need not contain Claude's pinned blob.
+    }
+    assert.equal(social.verification, "local exact external Register blob; moving branch not checked");
+    assert.deepEqual(social.removed, []);
+    assert.deepEqual(social.modified, []);
+    assert.deepEqual(social.problems, []);
+    assert.deepEqual(social.gaps, ["missing stable IP feature ID", "missing affected paths"]);
+    const unavailable = structuredClone(manifest);
+    unavailable.externalRows[0].head = "f".repeat(40);
+    assert.equal(reconcile.inspect(unavailable, path.dirname(file)).externalRows[0].verification,
+                 "UNKNOWN; exact external Git objects unavailable");
+});

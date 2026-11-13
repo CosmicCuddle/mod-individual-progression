@@ -39,3 +39,24 @@ test("pinned local candidates have only Register overlap; external social data s
                  "EXTERNAL SUPPLIED METADATA ONLY; recheck branch before use");
     assert.equal(report.candidates[5].configDefaults["IndividualProgression.F14.RandomBotSocialIsolation"], "0");
 });
+
+test("exact external Git diff verifies paths and all three config defaults", () => {
+    const file = path.resolve(__dirname, "../docs/F14_REGISTER_RECONCILIATION_MANIFEST_V5_2026-11-13.json");
+    const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+    const report = preflight.inspect(manifest, path.dirname(file));
+    const social = report.candidates[5];
+    if (social.verification === "UNKNOWN") {
+        assert.equal(social.paths, "UNKNOWN");
+        assert.equal(social.configDefaults, "UNKNOWN");
+        return; // Do not silently trust supplied metadata in an incomplete clone.
+    }
+    assert.equal(social.verification, "LOCAL EXACT GIT OBJECTS; moving branch not checked");
+    assert.equal(social.HEAD, manifest.externalRows[0].head);
+    assert.deepEqual(social.problems, []);
+    assert.equal(social.paths.length, 12);
+    assert.equal(Object.keys(social.configDefaults).length, 3);
+    const bad = structuredClone(manifest);
+    bad.externalRows[0].configDefaults["IndividualProgression.F14.RandomBotSocialIsolation"] = "1";
+    assert.ok(preflight.inspect(bad, path.dirname(file)).candidates[5].problems
+              .includes("supplied external config defaults differ from exact local Git diff"));
+});

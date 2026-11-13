@@ -64,12 +64,37 @@ function inspect(manifest, manifestDir) {
                          requiresParentTree: spec.parent !== manifest.candidates[0].parent,
                          registerProblems: report?.problems || ["UNKNOWN"]});
     }
-    for (const e of manifest.externalRows)
-        candidates.push({name: e.name, parent: "UNKNOWN", HEAD: e.head || "UNKNOWN",
-                         paths: e.paths || "UNKNOWN",
-                         configDefaults: e.configDefaults || "UNKNOWN",
-                         sourceContractPins: "UNKNOWN", requiresParentTree: "UNKNOWN",
-                         verification: "EXTERNAL SUPPLIED METADATA ONLY; recheck branch before use"});
+    for (const e of manifest.externalRows) {
+        if (!e.parent) {
+            candidates.push({name: e.name, parent: "UNKNOWN", HEAD: e.head || "UNKNOWN",
+                             paths: e.paths || "UNKNOWN", configDefaults: e.configDefaults || "UNKNOWN",
+                             sourceContractPins: "UNKNOWN", requiresParentTree: "UNKNOWN",
+                             verification: "EXTERNAL SUPPLIED METADATA ONLY; recheck branch before use"});
+            continue;
+        }
+        const row = registerReport.externalRows.find(x => x.candidate === e.name);
+        const verified = row?.verification === "local exact external Register blob; moving branch not checked";
+        const names = verified ? git(repo, "diff", "--name-only", e.parent, e.head, "--") : null;
+        const paths = names === null ? "UNKNOWN" : names ? names.split("\n").sort() : [];
+        const config = paths === "UNKNOWN" ? "UNKNOWN" :
+            configDefaults(git(repo, "diff", "--unified=0", e.parent, e.head,
+                               "--", "conf/individualProgression.conf.dist"));
+        const defaults = Array.isArray(config) ? Object.fromEntries(config.filter(x => x.side === "added")
+            .map(x => [x.key, x.value])) : "UNKNOWN";
+        const problems = [...(row?.problems || [])];
+        if (Array.isArray(paths) && Array.isArray(e.paths) &&
+            JSON.stringify(paths) !== JSON.stringify([...e.paths].sort()))
+            problems.push("supplied external path list differs from exact local Git diff");
+        if (defaults !== "UNKNOWN" && e.configDefaults &&
+            JSON.stringify(Object.entries(defaults).sort()) !==
+            JSON.stringify(Object.entries(e.configDefaults).sort()))
+            problems.push("supplied external config defaults differ from exact local Git diff");
+        candidates.push({name: e.name, parent: e.parent, HEAD: verified ? e.head : "UNKNOWN",
+                         paths, configDefaults: defaults, sourceContractPins: "UNKNOWN",
+                         requiresParentTree: e.parent !== manifest.candidates[0].parent,
+                         verification: verified ? "LOCAL EXACT GIT OBJECTS; moving branch not checked" : "UNKNOWN",
+                         problems});
+    }
     return {mode: "offline read-only composition preflight", candidates,
             overlaps: overlaps(candidates), duplicateFeatureIds: registerReport.conflicts,
             externalRegisterRows: registerReport.externalRows};

@@ -90,7 +90,9 @@ function validateManifest(manifest) {
             throw new TypeError("candidate needs name, local ref, exact expectedHead and parent SHA");
     for (const e of manifest.externalRows)
         if (!e || typeof e.name !== "string" || typeof e.heading !== "string" ||
-            typeof e.source !== "string")
+            typeof e.source !== "string" ||
+            (e.parent !== undefined && (!/^[0-9a-f]{40}$/i.test(e.parent) ||
+                                        !/^[0-9a-f]{40}$/i.test(e.head))))
             throw new TypeError("external row needs name, heading and source link");
 }
 function inspect(manifest, manifestDir) {
@@ -131,9 +133,32 @@ function inspect(manifest, manifestDir) {
     }
     for (const e of manifest.externalRows) {
         const id = e.heading.match(/^(IP-[A-Z0-9-]+)\b/)?.[1] || UNKNOWN;
-        allAdded.push({candidate: e.name, id, heading: e.heading,
-                       gaps: id === UNKNOWN ? ["missing stable IP feature ID"] : [],
-                       source: e.source, verification: "external heading supplied; blob not locally inspected"});
+        const supplied = {candidate: e.name, id, heading: e.heading,
+                          gaps: id === UNKNOWN ? ["missing stable IP feature ID"] : [],
+                          source: e.source, verification: "external heading supplied; blob not locally inspected"};
+        if (!e.parent) { allAdded.push(supplied); continue; }
+        const head = git(repo, "rev-parse", "--verify", `${e.head}^{commit}`);
+        const parent = git(repo, "rev-parse", "--verify", `${e.parent}^{commit}`);
+        const base = head && parent ? git(repo, "merge-base", parent, head) : null;
+        const before = parent ? git(repo, "show", `${parent}:${manifest.registerPath}`) : null;
+        const after = head ? git(repo, "show", `${head}:${manifest.registerPath}`) : null;
+        if (!head || !parent || base !== parent || before === null || after === null) {
+            allAdded.push({...supplied, verification: "UNKNOWN; exact external Git objects unavailable",
+                           problems: ["external head, parent ancestry or Register blob unavailable"]});
+            continue;
+        }
+        const delta = sectionDiff(before, after);
+        const row = delta.added.find(x => x.heading === e.heading);
+        const problems = [];
+        if (delta.removed.length) problems.push("external candidate removes Register sections");
+        if (delta.modified.length) problems.push("external candidate modifies existing Register sections");
+        if (delta.duplicateIds.length) problems.push("duplicate feature IDs inside external Register");
+        if (!row || delta.added.length !== 1) problems.push("external Register row heading/count differs from manifest");
+        allAdded.push({...supplied, id: row?.id || UNKNOWN,
+                       gaps: row ? rowGaps(row, e.head) : supplied.gaps,
+                       verification: "local exact external Register blob; moving branch not checked",
+                       removed: delta.removed.map(sectionKey), modified: delta.modified.map(sectionKey),
+                       problems});
     }
     const owners = new Map();
     for (const row of allAdded) if (row.id !== UNKNOWN) {
