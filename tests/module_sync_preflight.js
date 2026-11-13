@@ -7,7 +7,7 @@ const cp = require("node:child_process");
 const UNKNOWN = "UNKNOWN";
 const defaultNames = ["AzerothCore", "Individual Progression", "Playerbots",
                       "Mod-Naxxramas-Core", "Character Services"];
-const allowedGit = new Set(["rev-parse", "symbolic-ref", "status", "rev-list", "diff"]);
+const allowedGit = new Set(["rev-parse", "symbolic-ref", "status", "rev-list", "diff", "remote", "ls-files"]);
 function git(repo, ...args) {
     if (!allowedGit.has(args[0])) throw new Error("inspection commands only");
     try {
@@ -20,6 +20,44 @@ function git(repo, ...args) {
 function validRef(ref) {
     return typeof ref === "string" && /^[A-Za-z0-9_./-]+$/.test(ref) &&
            !ref.startsWith("-") && !ref.includes("..") && !ref.endsWith("/");
+}
+function parseManifest(text) {
+    // JSON.parse silently accepts duplicate keys. Reject them before any
+    // repository inspection so a second modules/expectedHead cannot override
+    // the first piece of supplied evidence.
+    const stack = [];
+    let quoted = false, escaped = false, start = 0;
+    for (let i = 0; i < text.length; ++i) {
+        const ch = text[i];
+        if (quoted) {
+            if (escaped) { escaped = false; continue; }
+            if (ch === "\\") { escaped = true; continue; }
+            if (ch !== '"') continue;
+            quoted = false;
+            const frame = stack[stack.length - 1];
+            let next = i + 1;
+            while (/\s/.test(text[next] || "")) ++next;
+            if (frame?.keys && text[next] === ":") {
+                const key = JSON.parse(text.slice(start, i + 1));
+                if (frame.keys.has(key)) throw new TypeError(`duplicate JSON key: ${key}`);
+                frame.keys.add(key);
+            }
+        } else if (ch === '"') { quoted = true; start = i; }
+        else if (ch === "{") stack.push({keys: new Set()});
+        else if (ch === "[") stack.push({keys: null});
+        else if (ch === "}" || ch === "]") stack.pop();
+    }
+    return JSON.parse(text);
+}
+function caseCollisions(paths) {
+    const seen = new Map(), pairs = [];
+    for (const p of paths) {
+        const key = p.toLowerCase();
+        const first = seen.get(key);
+        if (first && first !== p) pairs.push([first, p]);
+        else seen.set(key, p);
+    }
+    return pairs;
 }
 function validateManifest(manifest, dir) {
     if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) ||
@@ -34,8 +72,9 @@ function validateManifest(manifest, dir) {
         if (!item || typeof item !== "object" || Array.isArray(item) ||
             typeof item.name !== "string" || !item.name.trim())
             throw new TypeError(`modules[${index}] needs a nonempty name`);
-        if (names.has(item.name)) throw new TypeError(`duplicate module name: ${item.name}`);
-        names.add(item.name);
+        const normalizedName = item.name.toLowerCase();
+        if (names.has(normalizedName)) throw new TypeError(`duplicate module name: ${item.name}`);
+        names.add(normalizedName);
         for (const key of Object.keys(item))
             if (!moduleFields.has(key)) throw new TypeError(`unknown modules[${index}] field: ${key}`);
         if (item.path == null && ["baseRef", "upstreamRef", "expectedHead", "expectedBranch"].some(
@@ -45,8 +84,9 @@ function validateManifest(manifest, dir) {
             if (typeof item.path !== "string" || !item.path.trim() || item.path.includes("\0"))
                 throw new TypeError(`modules[${index}].path must be a nonempty local path`);
             const resolved = path.resolve(dir, item.path);
-            if (paths.has(resolved)) throw new TypeError(`duplicate repository path in modules[${index}]`);
-            paths.add(resolved);
+            const normalizedPath = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+            if (paths.has(normalizedPath)) throw new TypeError(`duplicate repository path in modules[${index}]`);
+            paths.add(normalizedPath);
         }
         for (const key of ["baseRef", "upstreamRef", "expectedBranch"])
             if (item[key] != null && !validRef(item[key]))
@@ -169,6 +209,26 @@ function risksAndGates(r) {
                                        : `Verify installed ${kind} version and compatibility offline.`);
         }
     if (r.path === UNKNOWN) risks.push("Repository path was not supplied or is unavailable.");
+    if (r.shallow === true) {
+        risks.push("Shallow history may omit the merge base or upstream ancestry.");
+        gates.push("Use a separately verified complete local history before an update decision.");
+    }
+    if (r.caseCollisions !== UNKNOWN && r.caseCollisions.length) {
+        risks.push("Tracked path names collide on case-insensitive filesystems.");
+        gates.push("Resolve source-path ambiguity before composing a Windows checkout.");
+    }
+    if (r.submodules !== UNKNOWN && r.submodules.length) {
+        risks.push("Declared submodule contents were not supplied or inspected.");
+        gates.push("Supply and pin each required submodule checkout separately.");
+    }
+    if (r.pins === UNKNOWN && r.path !== UNKNOWN) {
+        risks.push("Pin/workflow files are absent, unreadable, unsupplied or outside the checkout.");
+        gates.push("Verify every supplied pin file and local workflow before comparing source contracts.");
+    }
+    if (r.registerHits === UNKNOWN && r.path !== UNKNOWN) {
+        risks.push("Register evidence is absent, unreadable, unsupplied or outside the checkout.");
+        gates.push("Locate the Custom Modifications Register before reconciling changes.");
+    }
     if (r.contradictions.length)
         risks.push("Supplied repository identity metadata contradicts the local checkout.");
     if (r.base === UNKNOWN || r.upstream === UNKNOWN)
@@ -183,7 +243,9 @@ function inspectModule(spec, manifestDir) {
                upstreamChangedPaths: UNKNOWN, likelyConflictPaths: UNKNOWN,
                publicChanges: UNKNOWN, upstreamPublicChanges: UNKNOWN,
                customOverlap: UNKNOWN, dependencies: UNKNOWN, upstreamDependencies: UNKNOWN,
-               registerHits: UNKNOWN, pins: UNKNOWN,
+               registerHits: UNKNOWN, pins: UNKNOWN, checkoutKind: UNKNOWN,
+               shallow: UNKNOWN, remotes: UNKNOWN, caseCollisions: UNKNOWN,
+               submodules: UNKNOWN,
                expectedHead: spec.expectedHead || UNKNOWN,
                expectedBranch: spec.expectedBranch || UNKNOWN, contradictions: []};
     const repo = localPath(manifestDir, spec.path);
@@ -197,6 +259,23 @@ function inspectModule(spec, manifestDir) {
     }
     r.branch = git(repo, "symbolic-ref", "--short", "-q", "HEAD") || "DETACHED";
     r.HEAD = git(repo, "rev-parse", "HEAD") || UNKNOWN;
+    const gitDir = git(repo, "rev-parse", "--absolute-git-dir");
+    const commonDir = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir");
+    if (gitDir && commonDir)
+        r.checkoutKind = path.resolve(gitDir).toLowerCase() === path.resolve(commonDir).toLowerCase()
+            ? "main" : "linked worktree";
+    const shallow = git(repo, "rev-parse", "--is-shallow-repository");
+    if (shallow === "true" || shallow === "false") r.shallow = shallow === "true";
+    const remotes = git(repo, "remote");
+    if (remotes !== null) r.remotes = remotes ? remotes.split("\n").sort() : [];
+    const tracked = git(repo, "ls-files", "-z");
+    if (tracked !== null) r.caseCollisions = caseCollisions(tracked.split("\0").filter(Boolean));
+    const submoduleFile = within(repo, ".gitmodules");
+    if (submoduleFile && fs.existsSync(submoduleFile) && fs.statSync(submoduleFile).isFile()) {
+        const contents = fs.readFileSync(submoduleFile, "utf8");
+        const declared = [...contents.matchAll(/^\s*path\s*=\s*(.+?)\s*$/gm)].map(x => x[1]);
+        r.submodules = declared.map(p => ({path: p, supplied: false, state: UNKNOWN}));
+    } else if (submoduleFile && !fs.existsSync(submoduleFile)) r.submodules = [];
     if (r.expectedHead !== UNKNOWN && r.HEAD !== UNKNOWN &&
         r.expectedHead.toLowerCase() !== r.HEAD.toLowerCase())
         r.contradictions.push("Expected HEAD differs from local HEAD.");
@@ -241,14 +320,14 @@ function inspectModule(spec, manifestDir) {
     return {...r, ...risksAndGates(r)};
 }
 function preflight(manifestFile) {
-    const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+    const manifest = parseManifest(fs.readFileSync(manifestFile, "utf8"));
     const dir = path.dirname(path.resolve(manifestFile));
     validateManifest(manifest, dir);
     const supplied = manifest.modules;
-    const names = new Set(supplied.map(x => x.name));
+    const names = new Set(supplied.map(x => x.name.toLowerCase()));
     return {mode: "read-only local", modules: [
         ...supplied.map(x => inspectModule(x, dir)),
-        ...defaultNames.filter(x => !names.has(x)).map(name => inspectModule({name}, dir))]};
+        ...defaultNames.filter(x => !names.has(x.toLowerCase())).map(name => inspectModule({name}, dir))]};
 }
 function markdown(report) {
     const lines = ["# Module synchronization preflight", "",
@@ -262,7 +341,8 @@ function markdown(report) {
         for (const key of ["dirtyPaths", "untrackedPaths", "changedPaths", "upstreamChangedPaths",
                            "likelyConflictPaths", "publicChanges", "upstreamPublicChanges",
                            "customOverlap", "dependencies", "upstreamDependencies",
-                           "registerHits", "pins", "risks", "testGates"])
+                           "registerHits", "pins", "checkoutKind", "shallow", "remotes",
+                           "caseCollisions", "submodules", "risks", "testGates"])
             lines.push(`- ${key}: ${JSON.stringify(m[key])}`);
         lines.push("");
     }
@@ -288,4 +368,5 @@ if (require.main === module) {
         }
     }
 }
-module.exports = {UNKNOWN, git, inspectModule, preflight, validateManifest};
+module.exports = {UNKNOWN, git, inspectModule, preflight, validateManifest,
+                  parseManifest, caseCollisions};

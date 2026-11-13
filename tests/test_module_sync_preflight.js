@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const cp = require("node:child_process");
+const {pathToFileURL} = require("node:url");
 const preflight = require("./module_sync_preflight.js");
 
 function command(repo, ...args) {
@@ -165,4 +166,83 @@ test("contradictory identity and subdirectory paths never imply a verified check
     assert.deepEqual(nested.contradictions, ["Supplied path is not the repository root."]);
     assert.equal(nested.changedPaths, preflight.UNKNOWN);
     assert.equal(nested.HEAD, preflight.UNKNOWN);
+}));
+
+test("main, linked worktree, detached HEAD, shallow metadata and multiple local remotes", () => fixture(root => {
+    const repo = path.join(root, "core");
+    init(repo);
+    put(repo, "README.md", "first\n");
+    commit(repo, "first");
+    put(repo, "README.md", "second\n");
+    commit(repo, "second");
+    command(repo, "remote", "add", "origin", pathToFileURL(repo).href);
+    command(repo, "remote", "add", "mirror", pathToFileURL(repo).href);
+    const main = preflight.inspectModule({name: "AzerothCore", path: "core"}, root);
+    assert.equal(main.checkoutKind, "main");
+    assert.equal(main.shallow, false);
+    assert.deepEqual(main.remotes, ["mirror", "origin"]);
+
+    const linked = path.join(root, "linked");
+    command(repo, "worktree", "add", "--detach", linked, "HEAD");
+    const secondary = preflight.inspectModule({name: "AzerothCore", path: "linked",
+        expectedHead: main.HEAD, expectedBranch: "main"}, root);
+    assert.equal(secondary.checkoutKind, "linked worktree");
+    assert.equal(secondary.branch, "DETACHED");
+    assert.deepEqual(secondary.contradictions, ["Expected branch differs from local branch."]);
+
+    const shallow = path.join(root, "shallow");
+    init(shallow);
+    put(shallow, "README.md", "shallow fixture\n");
+    commit(shallow, "shallow tip");
+    fs.writeFileSync(path.join(shallow, ".git", "shallow"), command(shallow, "rev-parse", "HEAD") + "\n");
+    const short = preflight.inspectModule({name: "AzerothCore", path: "shallow",
+        baseRef: "missing-upstream"}, root);
+    assert.equal(short.shallow, true);
+    assert.equal(short.base, preflight.UNKNOWN);
+    assert.ok(short.risks.some(x => x.includes("Shallow history")));
+}));
+
+test("duplicate JSON evidence, case collisions and unsupplied submodules", () => fixture(root => {
+    assert.throws(() => preflight.parseManifest('{"modules":[],"modules":[]}'), /duplicate JSON key/);
+    assert.throws(() => preflight.parseManifest(
+        '{"modules":[{"name":"AzerothCore","path":"a","path":"b"}]}'), /duplicate JSON key/);
+    assert.deepEqual(preflight.caseCollisions(["src/A.h", "src/a.h", "src/B.h"]),
+                     [["src/A.h", "src/a.h"]]);
+    const repo = path.join(root, "ip");
+    init(repo);
+    put(repo, "README.md", "fixture\n");
+    put(repo, ".gitmodules", '[submodule "optional"]\n\tpath = optional/missing\n\turl = ../missing\n');
+    commit(repo, "declared only");
+    const item = preflight.inspectModule({name: "Individual Progression", path: "ip"}, root);
+    assert.deepEqual(item.submodules, [{path: "optional/missing", supplied: false,
+                                         state: preflight.UNKNOWN}]);
+    assert.ok(item.risks.some(x => x.includes("submodule contents")));
+    const manifest = path.join(root, "manifest.json");
+    fs.writeFileSync(manifest, JSON.stringify({modules: [{name: "Individual Progression", path: "ip"}]}));
+    const report = preflight.preflight(manifest);
+    assert.equal(report.modules.length, 5);
+    assert.equal(report.modules.find(x => x.name === "Playerbots").HEAD, preflight.UNKNOWN);
+}));
+
+test("symlink outside checkout and unreadable or missing evidence never becomes a pin", () => fixture(root => {
+    const repo = path.join(root, "core");
+    const outside = path.join(root, "outside");
+    init(repo);
+    fs.mkdirSync(outside);
+    put(repo, "README.md", "fixture\n");
+    put(outside, "pin.yml", `# ${"c".repeat(40)}\n`);
+    commit(repo, "baseline");
+    const link = path.join(repo, "linked-outside");
+    try { fs.symlinkSync(outside, link, process.platform === "win32" ? "junction" : "dir"); }
+    catch (error) {
+        if (["EPERM", "EACCES", "ENOTSUP"].includes(error.code)) return;
+        throw error;
+    }
+    const item = preflight.inspectModule({name: "AzerothCore", path: "core",
+        baseRef: "HEAD", pinFiles: ["linked-outside/pin.yml"],
+        registerPaths: ["linked-outside/pin.yml"]}, root);
+    assert.equal(item.pins, preflight.UNKNOWN);
+    assert.equal(item.registerHits, preflight.UNKNOWN);
+    assert.ok(item.risks.some(x => x.includes("Pin/workflow")));
+    assert.ok(item.risks.some(x => x.includes("Register evidence")));
 }));
