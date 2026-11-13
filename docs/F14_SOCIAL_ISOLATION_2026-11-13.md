@@ -61,8 +61,24 @@ Two identity notions are in use, and they are **deliberately different**. A sour
 - That floor *protects* (it prevents a downgrade), so its `eligibleBot` input should cover **at least the whole sync write population**. Otherwise a Blood Elf/Draenei Altbot or excluded account could still be synced down to a Vanilla leader with `EnforceGroupRules = 0`.
 - Feeding it from the verified RandomBot cache alone would leave that hole.
 - Feeding the social restriction from `!isNormalAccount` would be wrong in the opposite direction, because Altbots and excluded humans would be restricted.
-- **Owner decision (13 Nov 2026, relayed in Coordination #13):** Altbots are included in the BE/Draenei TBC group floor, and Altbots get the same treatment as normal players. This branch already never socially restricts Altbots, so nothing changes here. The floor itself is Codex's line (#175/#176).
-- Excluded (non-bot) accounts were not addressed by that decision, so they remain **UNKNOWN**.
+**Group-floor population contract** (CS01 6858469463, plus the owner's answer):
+1. **Population first.** The BE/Draenei TBC floor applies only to characters **already** in the existing group-sync write population, i.e. those `SyncBotsProgressionToLeader` writes to (`!isNormalAccount`).
+2. **Then the race floor.** Only inside that population does race 10/11 raise the minimum to TBC.
+3. **No expansion by race.** Race never adds anyone to the population. Ordinary human accounts stay outside, and nothing is classified as a bot from race.
+4. **The population is account-name based**, not Playerbots-identity based:
+   - `isBotAccount` matches `IndividualProgression.BotAccountsRegex` (default `"^RNDBOT.*"`);
+   - `isExcludedAccount` matches `IndividualProgression.ExcludedAccountsRegex` (default empty).
+
+**What this means with the shipped defaults:**
+- RandomBot accounts are in the population.
+- **Altbots are not:** they're characters on a player's own (normal) account, so IP never syncs them. That matches the owner's answer (13 Nov 2026): "Altbots should get the same treatment as normal players". They keep their own earned era and are never synced down, so the floor never needs to act on them.
+- An earlier relay of mine, which said Altbots are written to by the sync, was wrong for the default configuration. This corrects it.
+
+**UNKNOWN:**
+- The running server's regex values. If an operator widened either regex, those accounts are in the population and get the floor.
+- Excluded accounts are empty by default; if configured, they are in the population (CS01 rule).
+
+This social feature is unaffected: it never restricts Altbots.
 
 ## What is left unchanged
 - These are new, separate scripts. Core ANDs boolean hooks across scripts, so every existing IP hook (including the `EnforceGroupRules` invite/accept checks) is byte-identical and still runs.

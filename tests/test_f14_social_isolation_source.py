@@ -248,6 +248,47 @@ class IdentitySources(unittest.TestCase):
         self.assertIn("isExcludedAccount(player) || sIndividualProgression->isBotAccount(player)", normal)
 
 
+class GroupFloorPopulation(unittest.TestCase):
+    """CS01 6858469463: existing sync population first, race floor second.
+
+    Pins that the sync population is decided by account match before any
+    race is read, that race never widens it, and the shipped account
+    regexes (the running server's values are UNKNOWN).
+    """
+
+    def sync_loop(self):
+        core = strip_comments(read("src/IndividualProgression.cpp"))
+        sync = core.split("void IndividualProgression::SyncBotsProgressionToLeader(Group* group)", 1)[1]
+        sync = sync.split("\nvoid IndividualProgression::", 1)[0]
+        return sync.split("for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())", 1)[1]
+
+    def test_population_gate_precedes_any_race_read(self):
+        loop = self.sync_loop()
+        gate = loop.index("if (!member || isNormalAccount(member))")
+        self.assertEqual(len(re.findall(r"isNormalAccount\(member\)", loop)), 1)
+        for race in re.finditer(r"getRace\(\)", loop):
+            self.assertGreater(race.start(), gate)
+        # Race is used only for the enforcement-ON group-era check, never to
+        # add a member to the population.
+        self.assertNotRegex(loop, r"(RACE_BLOODELF|RACE_DRAENEI|IsExpansionRace)[^;]*isNormalAccount")
+        self.assertNotIn("HasF14VerifiedRandomBot", loop[:gate])
+
+    def test_population_is_account_name_based(self):
+        core = strip_comments(read("src/IndividualProgression.cpp"))
+        normal = core.split("bool IndividualProgression::isNormalAccount(Player* player)", 1)[1][:300]
+        self.assertIn("isExcludedAccount(player) || sIndividualProgression->isBotAccount(player)", normal)
+        for fn in ("bool IndividualProgression::isBotAccount(uint32 accountId)",
+                   "bool IndividualProgression::isExcludedAccount(uint32 accountId)"):
+            body = core.split(fn, 1)[1][:200]
+            self.assertIn("GetAccountMatch(accountId).", body, fn)
+            self.assertNotIn("getRace", body, fn)
+
+    def test_shipped_account_regex_defaults(self):
+        conf = read("conf/individualProgression.conf.dist")
+        self.assertRegex(conf, r'(?m)^IndividualProgression\.BotAccountsRegex\s*=\s*"\^RNDBOT\.\*"\s*$')
+        self.assertRegex(conf, r'(?m)^IndividualProgression\.ExcludedAccountsRegex\s*=\s*""\s*$')
+
+
 class ExactInsertions(unittest.TestCase):
     def test_player_cpp_one_or_reason(self):
         plus, minus = added_lines("src/IndividualProgressionPlayer.cpp")
