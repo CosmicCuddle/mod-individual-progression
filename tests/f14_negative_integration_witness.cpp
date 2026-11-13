@@ -182,7 +182,19 @@ int main()
           Corr::Result::RecycledIncarnation);
     CHECK(passes.IsActive(70, other));
 
-    // Capacity/quarantine never completes debt or unfreezes global recovery.
+    // E1 candidate capacity poisons only correlation; no ledger obligation
+    // becomes complete or globally cleared when ephemeral capacity fails.
+    Corr::Table<1, 2> tinyCorrelation;
+    CHECK(tinyCorrelation.Nominate(nextKey, otherCreature, 9002, Corr::Direction::Create,
+                                   80, Nomination(protocol, nextKey, otherCreature, 9002)) ==
+          Corr::Result::Nominated);
+    CHECK(tinyCorrelation.Nominate(otherKey, creature, 9003, Corr::Direction::Create,
+                                   81, Nomination(protocol, otherKey, creature, 9003)) ==
+          Corr::Result::Capacity);
+    CHECK(tinyCorrelation.IsPoisoned());
+    CHECK(protocol.LedgerView().PendingRestores() == 3);
+
+    // Pass capacity/quarantine never completes debt or unfreezes recovery.
     protocol.ObserveConfigDisabled();
     CHECK(protocol.GlobalRestoreRequired());
     CHECK(protocol.LedgerView().PendingRestores() == 3);

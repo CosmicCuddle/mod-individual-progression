@@ -28,6 +28,7 @@ for (const forbidden of ["ObserveF14SuppressionDecision", "MayAnswerPositiveSupp
 check(witness.includes("PendingRestores() == 3") &&
       witness.includes("protocol.GlobalRestoreRequired()") &&
       witness.includes("Pass::Result::Mismatch") &&
+      witness.includes("Corr::Result::Capacity") &&
       witness.includes("Corr::Result::RecycledIncarnation"),
       "missing negative debt/ambiguity/incarnation witness");
 console.log("PASS F14 negative integration source: exact ephemeral evidence, raw-GUID debt, no completion");
