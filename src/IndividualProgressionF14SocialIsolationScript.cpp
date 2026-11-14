@@ -30,6 +30,9 @@
 #include "GlobalScript.h"
 #include "Group.h"
 #include "GroupScript.h"
+#include "Guild.h"
+#include "GuildMgr.h"
+#include "GuildScript.h"
 #include "LFG.h"
 #include "LFGMgr.h"
 #include "ObjectAccessor.h"
@@ -193,6 +196,35 @@ namespace
     }
 
     // Dungeon Finder facts captured at queue join, by GUID (see policy).
+#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1
+    // Guild remediation work (values only) for the world update.
+    std::mutex& GuildRemediationLock()
+    {
+        static std::mutex lock;
+        return lock;
+    }
+
+    Policy::PendingGuildRemediation& GuildRemediation()
+    {
+        static Policy::PendingGuildRemediation work;
+        return work;
+    }
+
+    // World thread only: a still-Vanilla human in a guild (join or login)
+    // asks the next world update to remove the restricted bots.
+    void MarkGuildRemediation(Player* player)
+    {
+        if (!OptionOn() || !player || !WorldThread().IsCurrent())
+            return;
+        uint32 const guildId = player->GetGuildId();
+        bool const human = Policy::HumanStillVanilla(ReadHuman(player));
+        if (!Policy::GuildRemediationTriggered(true, true, guildId != 0, human))
+            return;
+        std::lock_guard<std::mutex> lock(GuildRemediationLock());
+        GuildRemediation().Mark(guildId, player->GetGUID().GetRawValue());
+    }
+#endif
+
     std::mutex& QueueFactsLock()
     {
         static std::mutex lock;
@@ -386,8 +418,15 @@ namespace
         {
             if (!player)
                 return;
-            std::lock_guard<std::mutex> lock(ConfirmedLock());
-            Confirmed().Forget(player->GetGUID().GetRawValue());
+            {
+                std::lock_guard<std::mutex> lock(ConfirmedLock());
+                Confirmed().Forget(player->GetGUID().GetRawValue());
+            }
+#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1
+            // Owner decision (14 Nov 2026): a still-Vanilla human's login to
+            // a guild removes its restricted bots (next world update).
+            MarkGuildRemediation(player);
+#endif
         }
 
         // F-3: a created or deleted character never keeps an offline-mail
@@ -927,6 +966,139 @@ namespace
     };
 #endif
 
+#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1
+    // Live scan of the members other than `except` (world thread): is a
+    // still-Vanilla human online, and which members are restricted bots
+    // (online by live facts, offline only if confirmed at their last logout).
+    void ScanGuild(Guild const& guild, ObjectGuid except, bool& anyOnlineHuman, std::vector<ObjectGuid>* restricted)
+    {
+        anyOnlineHuman = false;
+        std::vector<ObjectGuid> offline;
+        for (auto const& [low, member] : guild.GetUnorderedMembers())
+        {
+            ObjectGuid const guid = member.GetGUID();
+            if (guid == except)
+                continue;
+            Player const* online = ObjectAccessor::FindPlayer(guid);
+            if (!online)
+            {
+                offline.push_back(guid);
+                continue;
+            }
+            anyOnlineHuman = anyOnlineHuman || Policy::HumanStillVanilla(ReadHuman(online));
+            if (restricted && Policy::GuildMemberRestricted(true, Policy::BotIsRestrictedRandomBot(ReadBot(online)), false))
+                restricted->push_back(guid);
+        }
+        if (!restricted)
+            return;
+        std::lock_guard<std::mutex> lock(ConfirmedLock());
+        for (ObjectGuid const& guid : offline)
+            if (Policy::GuildMemberRestricted(false, false, Confirmed().Contains(guid.GetRawValue())))
+                restricted->push_back(guid);
+    }
+
+    // Removal: Core's own Guild::DeleteMember with the stock kick flags (as
+    // Guild::HandleRemoveMember), canDeleteGuild false; GuildRemovalSafe is
+    // re-proven immediately before every call. World thread only.
+    void RemoveRestrictedIfSafe(uint32 guildId, ObjectGuid target, ObjectGuid human)
+    {
+        Guild* guild = sGuildMgr->GetGuildById(guildId);
+        bool const member = guild && guild->GetMember(target);
+        bool const reason = guild && guild->GetMember(human);
+        if (!Policy::GuildRemovalSafe(guild != nullptr, member, guild ? guild->GetMemberSize() : 0, reason))
+            return;
+        guild->DeleteMember(target, false, true, false);
+    }
+
+    void RemediateGuild(uint32 guildId, ObjectGuid human)
+    {
+        Guild* guild = sGuildMgr->GetGuildById(guildId);
+        if (!guild || !guild->GetMember(human))
+            return; // the human already left: nothing to separate
+        bool anyHuman = false;
+        std::vector<ObjectGuid> restricted;
+        ScanGuild(*guild, human, anyHuman, &restricted);
+        for (ObjectGuid const& guid : restricted)
+            RemoveRestrictedIfSafe(guildId, guid, human);
+    }
+
+    void RemediatePendingGuilds()
+    {
+        std::vector<std::pair<uint32, uint64>> work;
+        {
+            std::lock_guard<std::mutex> lock(GuildRemediationLock());
+            GuildRemediation().Drain([&work](std::uint32_t guildId, std::uint64_t human)
+            {
+                work.emplace_back(guildId, human);
+            });
+        }
+        if (!OptionOn())
+            return;
+        for (auto const& [guildId, human] : work)
+            RemediateGuild(guildId, ObjectGuid(human));
+    }
+
+    // Core #28 seams (COSMIC_F14_GUILD_POLICY_HOOK_VERSION).
+    class F14SocialIsolationGuildPolicyScript final : public GuildScript
+    {
+    public:
+        F14SocialIsolationGuildPolicyScript() : GuildScript("IndividualProgression_F14SocialIsolationGuildPolicy",
+            {GUILDHOOK_CAN_ADD_MEMBER, GUILDHOOK_CAN_SEND_CHAT_TO_MEMBER, GUILDHOOK_ON_EVENT}) { }
+
+        // Before any petition, membership, DB or broadcast mutation. Only on
+        // the world thread (guild and members may be read); anywhere else
+        // fail open. Only a positively restricted bot is ever refused.
+        bool CanAddMember(Guild const* guild, ObjectGuid guid) override
+        {
+            if (!OptionOn() || !guild || !guid || !WorldThread().IsCurrent())
+                return true;
+            bool joinerBot = false;
+            if (Player const* joiner = ObjectAccessor::FindPlayer(guid))
+                joinerBot = Policy::BotIsRestrictedRandomBot(ReadBot(joiner));
+            else
+            {
+                std::lock_guard<std::mutex> lock(ConfirmedLock());
+                joinerBot = Confirmed().Contains(guid.GetRawValue());
+            }
+            if (!joinerBot)
+                return true;
+            bool anyHuman = false;
+            ScanGuild(*guild, guid, anyHuman, nullptr);
+            return !Policy::GuildAdmissionRefused(true, true, anyHuman);
+        }
+
+        // Per recipient, guild and officer chat, both directions. Addon
+        // traffic is always delivered. Off the world thread both players
+        // must be proven in the owned map, else fail open (T1). No reply.
+        bool CanSendChatToMember(Guild const* /*guild*/, Player* sender, Player* receiver, bool /*officerOnly*/,
+                                 uint32 language, std::string_view /*msg*/) override
+        {
+            if (!OptionOn() || !sender || !receiver || sender == receiver || language == LANG_ADDON)
+                return true;
+            ReadScope const scope = CurrentReadScope();
+            if (!MayReadPair(scope, sender, receiver))
+                return true;
+            bool const restricted =
+                Policy::IsRestrictedPair(true, ReadHuman(sender), ReadBot(receiver)) ||
+                Policy::IsRestrictedPair(true, ReadHuman(receiver), ReadBot(sender));
+            return !restricted;
+        }
+
+        // A still-Vanilla human JOINED (client accept: world thread). Its
+        // restricted bots leave at the next world update (owner decision).
+        void OnEvent(Guild* guild, uint8 eventType, ObjectGuid::LowType playerGuid1,
+                     ObjectGuid::LowType /*playerGuid2*/, uint8 /*newRank*/) override
+        {
+            if (!OptionOn() || !guild || eventType != GUILD_EVENT_LOG_JOIN_GUILD || !playerGuid1 ||
+                !WorldThread().IsCurrent())
+                return;
+            if (Player* joiner = ObjectAccessor::FindPlayer(ObjectGuid::Create<HighGuid::Player>(playerGuid1)))
+                if (joiner->GetGuildId() == guild->GetId())
+                    MarkGuildRemediation(joiner);
+        }
+    };
+#endif
+
     // T1 only: remembers the world thread and counts world ticks. Reads nothing.
     class F14SocialIsolationWorldThreadScript final : public WorldScript
     {
@@ -938,6 +1110,9 @@ namespace
         {
             WorldThread().Mark();
             SendPendingReplies();
+#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1
+            RemediatePendingGuilds();
+#endif
         }
     };
 
@@ -972,5 +1147,8 @@ void AddSC_mod_individual_progression_f14_social_isolation()
     new F14SocialIsolationSpellScript();
 #if defined(COSMIC_F14_GUILD_INVITE_HOOK_VERSION) && COSMIC_F14_GUILD_INVITE_HOOK_VERSION >= 1
     new F14SocialIsolationGuildScript();
+#endif
+#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1
+    new F14SocialIsolationGuildPolicyScript();
 #endif
 }

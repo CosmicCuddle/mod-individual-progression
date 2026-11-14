@@ -84,7 +84,7 @@ class HooksAndAuthority(unittest.TestCase):
         self.src = strip_comments(read(SCRIPT))
 
     def test_only_social_hooks_and_who(self):
-        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z0-9_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+|ALLBATTLEGROUNDHOOK_[A-Z0-9_]+|ALLSPELLHOOK_[A-Z0-9_]+|GROUPHOOK_[A-Z0-9_]+)\b", self.src)))
+        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z0-9_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+|ALLBATTLEGROUNDHOOK_[A-Z0-9_]+|ALLSPELLHOOK_[A-Z0-9_]+|GROUPHOOK_[A-Z0-9_]+|GUILDHOOK_[A-Z0-9_]+)\b", self.src)))
         self.assertEqual(hooks, sorted([
             "PLAYERHOOK_CAN_GROUP_ACCEPT", "PLAYERHOOK_CAN_GROUP_INVITE", "PLAYERHOOK_CAN_INIT_TRADE",
             "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT", "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY",
@@ -95,7 +95,8 @@ class HooksAndAuthority(unittest.TestCase):
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY", "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL",
             "PLAYERHOOK_CAN_SEND_MAIL", "ALLSPELLHOOK_ON_SPELL_CHECK_CAST", "PLAYERHOOK_ON_F14_CAN_GUILD_INVITE",
             "PLAYERHOOK_ON_LOGIN", "PLAYERHOOK_ON_CREATE", "PLAYERHOOK_ON_DELETE",
-            "GROUPHOOK_ON_ADD_MEMBER", "GROUPHOOK_ON_DISBAND"]))
+            "GROUPHOOK_ON_ADD_MEMBER", "GROUPHOOK_ON_DISBAND",
+            "GUILDHOOK_CAN_ADD_MEMBER", "GUILDHOOK_CAN_SEND_CHAT_TO_MEMBER", "GUILDHOOK_ON_EVENT"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
@@ -103,12 +104,12 @@ class HooksAndAuthority(unittest.TestCase):
             "OnPlayerCanJoinLfg", "OnPlayerLogout", "OnPlayerCanJoinInBattlegroundQueue",
             "OnPlayerCanBattleFieldPort", "OnBattlegroundAddPlayer", "OnBattlegroundRemovePlayerAtLeave",
             "OnBattlegroundDestroy", "OnPlayerCanSendMail", "OnSpellCheckCast", "OnPlayerCanGuildInvite", "OnPlayerLogin",
-            "OnPlayerCreate", "OnPlayerDelete", "OnAddMember", "OnDisband"]))
+            "OnPlayerCreate", "OnPlayerDelete", "OnAddMember", "OnDisband", "OnEvent"]))
         # The guild hook is overridden only inside the patched-Core guard.
         self.assertEqual(re.findall(r"\bbool (OnPlayerCanGuildInvite)\(Player\* inviter, Player\* invitee\) override", self.src),
                          ["OnPlayerCanGuildInvite"])
         self.assertEqual(sorted(re.findall(r"\b(Can\w+)\([^;{]*\)\s*override", self.src)),
-                         ["CanAddGroupToMatchingPool", "CanCreateLfgProposal"])
+                         ["CanAddGroupToMatchingPool", "CanAddMember", "CanCreateLfgProposal", "CanSendChatToMember"])
 
     def test_battlegrounds_option_c(self):
         # (b) Queue join: world thread only; quiet refusal; only a solo
@@ -302,6 +303,68 @@ class HooksAndAuthority(unittest.TestCase):
         veto = self.body("bool CanCreateLfgProposal(lfg::Lfg5Guids const& proposal) override", "\n        }\n")
         self.assertNotIn("sLFGMgr", veto)
 
+    def test_guild_policy_core28_consumer(self):
+        guard = "#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1"
+        raw = read(SCRIPT)
+        # Every guild-policy piece is compiled only against Core #28.
+        self.assertEqual(raw.count(guard), 5)  # accessors, login mark, scripts, update call, registration
+        self.assertNotRegex(raw, r"#\s*define\s+COSMIC_F14_GUILD_POLICY_HOOK_VERSION")
+        for name in ("CanAddMember(", "CanSendChatToMember(", "RemediatePendingGuilds();", "MarkGuildRemediation(player);",
+                     "new F14SocialIsolationGuildPolicyScript();", "DeleteMember("):
+            pos = raw.index(name)
+            before = raw[:pos]
+            self.assertGreater(before.rfind(guard), before.rfind("#endif"), name)
+        # Admission: before persistence, world thread only, fail open
+        # elsewhere; only a positively restricted bot is refused.
+        add = self.body("bool CanAddMember(Guild const* guild, ObjectGuid guid) override", "\n        }\n")
+        self.assertRegex(add, r"if \(!OptionOn\(\) \|\| !guild \|\| !guid \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return true;")
+        self.assertLess(add.index("WorldThread().IsCurrent()"), add.index("ObjectAccessor::FindPlayer(guid)"))
+        self.assertRegex(add, r"if \(!joinerBot\)\s*return true;")
+        self.assertLess(add.index("if (!joinerBot)"), add.index("ScanGuild("))
+        self.assertIn("return !Policy::GuildAdmissionRefused(true, true, anyHuman);", add)
+        for token in ("DeleteMember", "HumanStillVanilla(ReadHuman(joiner", "getRace"):
+            self.assertNotIn(token, add, token)
+        # Chat: per recipient, addon always, T1 scope, both directions, no reply.
+        chat = self.body("uint32 language, std::string_view ) override", "\n        }\n")
+        self.assertRegex(chat, r"if \(!OptionOn\(\) \|\| !sender \|\| !receiver \|\| sender == receiver \|\| language == LANG_ADDON\)\s*return true;")
+        self.assertLess(chat.index("if (!MayReadPair(scope, sender, receiver))\n                return true;"), chat.index("ReadHuman("))
+        self.assertIn("Policy::IsRestrictedPair(true, ReadHuman(sender), ReadBot(receiver))", chat)
+        self.assertIn("Policy::IsRestrictedPair(true, ReadHuman(receiver), ReadBot(sender))", chat)
+        self.assertNotIn("SendInCharacterReply", chat)
+        # Join remediation only for a world-thread joiner who is still in that guild.
+        ev = self.body("ObjectGuid::LowType , uint8 ) override", "\n        }\n")
+        self.assertRegex(ev, r"eventType != GUILD_EVENT_LOG_JOIN_GUILD \|\| !playerGuid1 \|\|\s*!WorldThread\(\)\.IsCurrent\(\)\)\s*return;")
+        self.assertIn("if (joiner->GetGuildId() == guild->GetId())", ev)
+        self.assertIn("MarkGuildRemediation(joiner);", ev)
+        self.assertNotIn("DeleteMember", ev)
+        mark = self.body("void MarkGuildRemediation(Player* player)", "\n    }\n")
+        self.assertRegex(mark, r"if \(!OptionOn\(\) \|\| !player \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return;")
+        self.assertIn("Policy::GuildRemediationTriggered(true, true, guildId != 0, human)", mark)
+        self.assertNotIn("ReadBot", mark)
+        login = self.body("void OnPlayerLogin(Player* player) override", "\n        }\n")
+        self.assertLess(login.index("Confirmed().Forget(player->GetGUID().GetRawValue());"), login.index("MarkGuildRemediation(player);"))
+        # Drain: OFF clears; removal only after the human re-check and the
+        # survivor proof; stock kick flags, never canDeleteGuild; one call.
+        drain = self.body("void RemediatePendingGuilds()", "\n    }\n")
+        self.assertLess(drain.index("GuildRemediation().Drain("), drain.index("if (!OptionOn())\n            return;"))
+        rem = self.body("void RemediateGuild(uint32 guildId, ObjectGuid human)", "\n    }\n")
+        self.assertIn("if (!guild || !guild->GetMember(human))\n            return;", rem)
+        safe = self.body("void RemoveRestrictedIfSafe(uint32 guildId, ObjectGuid target, ObjectGuid human)", "\n    }\n")
+        self.assertIn("bool const reason = guild && guild->GetMember(human);", safe)
+        self.assertLess(safe.index("Policy::GuildRemovalSafe("), safe.index("guild->DeleteMember(target, false, true, false);"))
+        self.assertEqual(self.src.count("DeleteMember("), 1)
+        self.assertNotIn("sCalendarMgr", self.src)
+        self.assertNotIn("PendingGuildJoins", self.src)  # the rejected fallback queue is not here
+        scan = self.body("void ScanGuild(Guild const& guild, ObjectGuid except, bool& anyOnlineHuman, std::vector<ObjectGuid>* restricted)\n    {", "\n    }\n")
+        locked = scan.split("std::lock_guard<std::mutex> lock(ConfirmedLock());", 1)[1]
+        for token in ("ReadHuman", "ReadBot", "FindPlayer"):
+            self.assertNotIn(token, locked, token)
+        policy = strip_comments(read(POLICY))
+        self.assertIn("return optionEnabled && joinerRestrictedBot && anyOnlineStillVanillaHumanMember;", policy)
+        self.assertIn("return guildExists && targetIsMember && memberCount >= 2 && reasonStillHolds;", policy)
+        self.assertIn("return optionEnabled && worldThread && inGuild && stillVanillaHuman;", policy)
+        self.assertIn("return online ? onlineRestrictedBot : offlineConfirmed;", policy)
+
     def test_f3_create_delete_forget_offline_mail(self):
         create = self.body("void OnPlayerCreate(Player* player) override", "\n        }\n")
         delete = self.body("void OnPlayerDelete(ObjectGuid guid, uint32 ) override", "\n        }\n")
@@ -323,7 +386,9 @@ class HooksAndAuthority(unittest.TestCase):
         upd = re.search(r"void OnUpdate\(uint32\s*\)\s*override\s*\{([^}]*)\}", self.src)
         self.assertIsNotNone(upd)
         self.assertEqual([l.strip() for l in upd.group(1).strip().splitlines()],
-                         ["WorldThread().Mark();", "SendPendingReplies();"])
+                         ["WorldThread().Mark();", "SendPendingReplies();",
+                          "#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1",
+                          "RemediatePendingGuilds();", "#endif"])
         # The per-update record touches only the player this thread updates.
         rec = self.body("void OnPlayerBeforeUpdate(Player* player, uint32 ) override", "\n        }\n")
         self.assertIn("ThisThreadOwnedMap() = {player->FindMap(), WorldThread().Tick(), true};", rec)

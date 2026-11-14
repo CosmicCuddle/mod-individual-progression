@@ -24,7 +24,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <string>
+#include <utility>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -395,6 +397,70 @@ namespace IndividualProgressionF14SocialIsolationPolicy
     {
         return optionEnabled && worldThread && tracked && inRoleCheck;
     }
+
+    // ---- Guild policy (owner Option B, 14 Nov 2026; Core #28 seams) ----
+    // A still-Vanilla human (real client) and a verified restricted
+    // RandomBot do not share guild membership or guild chat.
+
+    // Admission, before Core persists anything: a restricted RandomBot is
+    // refused by a guild that has an ONLINE still-Vanilla human member.
+    // (A human joining is never refused; the restricted bots leave instead.)
+    constexpr bool GuildAdmissionRefused(bool optionEnabled, bool joinerRestrictedBot,
+                                         bool anyOnlineStillVanillaHumanMember)
+    {
+        return optionEnabled && joinerRestrictedBot && anyOnlineStillVanillaHumanMember;
+    }
+
+    // A member is restricted when online live facts say so, or, while
+    // offline, when it was confirmed at its last logout this run.
+    constexpr bool GuildMemberRestricted(bool online, bool onlineRestrictedBot, bool offlineConfirmed)
+    {
+        return online ? onlineRestrictedBot : offlineConfirmed;
+    }
+
+    // Remediation is started only by a still-Vanilla human (real client) in
+    // a guild, on the world thread: at that human's join or login (owner
+    // decisions). Era regression adds nothing: the next login does it.
+    constexpr bool GuildRemediationTriggered(bool optionEnabled, bool worldThread, bool inGuild,
+                                             bool stillVanillaHuman)
+    {
+        return optionEnabled && worldThread && inGuild && stillVanillaHuman;
+    }
+
+    // Re-proven immediately before EVERY removal: the guild exists, the
+    // target is still a member, another member survives (so Core's
+    // DeleteMember can never disband the guild, whatever its flags), and
+    // the reason holds (the triggering human is still a member).
+    constexpr bool GuildRemovalSafe(bool guildExists, bool targetIsMember, std::size_t memberCount,
+                                    bool reasonStillHolds)
+    {
+        return guildExists && targetIsMember && memberCount >= 2 && reasonStillHolds;
+    }
+
+    // Remediation work for the world update. Never drops: (guild, human)
+    // keys coalesce, so it holds at most one entry per triggering
+    // join/login between two world updates, and every update empties it.
+    class PendingGuildRemediation
+    {
+    public:
+        void Mark(std::uint32_t guildId, std::uint64_t human)
+        {
+            if (guildId && human)
+                _work.insert({guildId, human});
+        }
+        template<typename Fn>
+        void Drain(Fn fn)
+        {
+            std::set<std::pair<std::uint32_t, std::uint64_t>> work;
+            work.swap(_work);
+            for (auto const& [guildId, human] : work)
+                fn(guildId, human);
+        }
+        std::size_t Size() const { return _work.size(); }
+
+    private:
+        std::set<std::pair<std::uint32_t, std::uint64_t>> _work;
+    };
 
     constexpr bool OfflineMailRefused(bool optionEnabled, bool senderStillVanillaHuman,
                                       bool receiverConfirmedRestrictedBot)

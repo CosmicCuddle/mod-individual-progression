@@ -1232,6 +1232,173 @@ namespace
     }
 }
 
+namespace
+{
+    // Owner Option B through the Core #28 seams: admission veto, per-
+    // recipient chat, and human-triggered remediation (join/login).
+    struct GMember { bool online; P::Human h; P::Bot b; bool confirmed; };
+
+    // The script's remediation, step for step, over a model guild.
+    // Returns the members left. `human` is index 0's GUID role.
+    std::vector<int> ModelRemediate(std::vector<GMember> const& members, int human, bool optionOnAtDrain,
+                                    bool humanStillMember)
+    {
+        std::vector<int> left;
+        for (int i = 0; i < static_cast<int>(members.size()); ++i)
+            left.push_back(i);
+        if (!optionOnAtDrain || !humanStillMember)
+            return left;
+        std::vector<int> restricted;
+        for (int i = 0; i < static_cast<int>(members.size()); ++i)
+        {
+            if (i == human)
+                continue;
+            GMember const& m = members[i];
+            if (P::GuildMemberRestricted(m.online, m.online && P::BotIsRestrictedRandomBot(m.b), !m.online && m.confirmed))
+                restricted.push_back(i);
+        }
+        for (int target : restricted)
+        {
+            bool const isMember = std::find(left.begin(), left.end(), target) != left.end();
+            bool const reason = std::find(left.begin(), left.end(), human) != left.end();
+            if (P::GuildRemovalSafe(true, isMember, left.size(), reason))
+                left.erase(std::find(left.begin(), left.end(), target));
+        }
+        return left;
+    }
+
+    void TestGuildPolicyCore28()
+    {
+        // Admission: only a positively restricted bot, only beside an
+        // online still-Vanilla human, only ON. A human is never refused.
+        for (int o = 0; o < 2; ++o)
+            for (int b = 0; b < 2; ++b)
+                for (int h = 0; h < 2; ++h)
+                    CHECK(P::GuildAdmissionRefused(o, b, h) == (o && b && h));
+        CHECK(!P::GuildAdmissionRefused(true, P::BotIsRestrictedRandomBot(P::Bot{}), true)); // unknown / ordinary bot
+        for (int on = 0; on < 2; ++on)
+            for (int r = 0; r < 2; ++r)
+                for (int c = 0; c < 2; ++c)
+                    CHECK(P::GuildMemberRestricted(on, r, c) == (on ? r != 0 : c != 0));
+        // Remediation triggers: still-Vanilla real-client human in a guild,
+        // world thread, ON. Altbots, TBC humans and bots never.
+        for (int o = 0; o < 2; ++o)
+            for (int w = 0; w < 2; ++w)
+                for (int g = 0; g < 2; ++g)
+                    for (int h = 0; h < 2; ++h)
+                        CHECK(P::GuildRemediationTriggered(o, w, g, h) == (o && w && g && h));
+        P::Human altbot = VanillaHuman(3);
+        altbot.nonHeadlessSession = false;
+        P::Human selfbot = VanillaHuman(3);
+        selfbot.nonHeadlessSession = false;
+        CHECK(!P::GuildRemediationTriggered(true, true, true, P::HumanStillVanilla(altbot)));
+        CHECK(!P::GuildRemediationTriggered(true, true, true, P::HumanStillVanilla(selfbot)));
+        CHECK(!P::GuildRemediationTriggered(true, true, true, P::HumanStillVanilla(VanillaHuman(8))));
+        CHECK(!P::GuildRemediationTriggered(true, true, true, P::HumanStillVanilla(P::Human{})));
+        // Removal safety.
+        for (int g = 0; g < 2; ++g)
+            for (int m = 0; m < 2; ++m)
+                for (std::size_t n = 0; n < 4; ++n)
+                    for (int r = 0; r < 2; ++r)
+                        CHECK(P::GuildRemovalSafe(g, m, n, r) == (g && m && n >= 2 && r));
+
+        GMember const H{true, VanillaHuman(3), P::Bot{}, false};
+        GMember const T{true, VanillaHuman(8), P::Bot{}, false};
+        GMember const Ron{true, P::Human{}, VerifiedBot(), false};
+        GMember const Roff{false, P::Human{}, P::Bot{}, true};     // offline, confirmed at logout
+        GMember const Unknown{false, P::Human{}, P::Bot{}, false}; // offline, never confirmed
+        GMember const Alt{true, altbot, P::Bot{}, false};
+        GMember const Ord{true, P::Human{}, P::Bot{}, false};       // ordinary bot
+        // Login with a restricted bot leader (index 1 = Guild Master) and
+        // several bots: every restricted bot leaves, the human survives.
+        {
+            std::vector<GMember> g{H, Ron, Roff, Ron, T, Alt, Ord, Unknown};
+            std::vector<int> left = ModelRemediate(g, 0, true, true);
+            CHECK((left == std::vector<int>{0, 4, 5, 6, 7})); // unknown kept; humans/Altbot/ordinary kept
+        }
+        // Only the human and the bot leader: the bot goes, no disband.
+        {
+            std::vector<int> left = ModelRemediate({H, Ron}, 0, true, true);
+            CHECK((left == std::vector<int>{0}));
+        }
+        // Human left before the drain; option turned OFF before the drain.
+        CHECK((ModelRemediate({H, Ron, Ron}, 0, true, false) == std::vector<int>{0, 1, 2}));
+        CHECK((ModelRemediate({H, Ron, Ron}, 0, false, true) == std::vector<int>{0, 1, 2}));
+        // Exhaustive guilds of up to 8 members of the kinds above: the human
+        // always survives, no unknown/human/Altbot/ordinary member is ever
+        // removed, every restricted member is, the guild never empties.
+        GMember const kinds[] = {T, Ron, Roff, Unknown, Alt, Ord, H};
+        for (unsigned mask = 0; mask < (1u << 7); ++mask)
+        {
+            std::vector<GMember> g{H};
+            for (int k = 0; k < 7; ++k)
+                if (mask & (1u << k))
+                    g.push_back(kinds[k]);
+            std::vector<int> left = ModelRemediate(g, 0, true, true);
+            CHECK(!left.empty() && left.front() == 0);
+            for (int i = 1; i < static_cast<int>(g.size()); ++i)
+            {
+                bool const kept = std::find(left.begin(), left.end(), i) != left.end();
+                bool const restricted = (g[i].online && P::BotIsRestrictedRandomBot(g[i].b)) ||
+                                        (!g[i].online && g[i].confirmed);
+                CHECK(kept == !restricted);
+            }
+        }
+        // Era regression: the stage drop itself triggers nothing (no hook);
+        // the next login does, once the human is still Vanilla.
+        CHECK(P::GuildRemediationTriggered(true, true, true, P::HumanStillVanilla(VanillaHuman(5))));
+
+        // Per-recipient chat (GUILD and OFFICER alike; both directions).
+        P::Human const tbcH = VanillaHuman(8);
+        P::Human const vanH = VanillaHuman(3);
+        auto deliver = [](bool option, bool addon, bool mayRead, P::Human const& sH, P::Bot const& sB,
+                          P::Human const& rH, P::Bot const& rB)
+        {
+            if (!option || addon || !mayRead)
+                return true;
+            return !(P::IsRestrictedPair(true, sH, rB) || P::IsRestrictedPair(true, rH, sB));
+        };
+        P::Human const none{};
+        CHECK(!deliver(true, false, true, vanH, P::Bot{}, none, VerifiedBot()));   // human -> R: suppressed
+        CHECK(!deliver(true, false, true, none, VerifiedBot(), vanH, P::Bot{}));   // R -> human: suppressed
+        CHECK(deliver(true, false, true, tbcH, P::Bot{}, none, VerifiedBot()));    // eligible human
+        CHECK(deliver(true, false, true, altbot, P::Bot{}, none, VerifiedBot()));  // Altbot sender
+        CHECK(deliver(true, false, true, vanH, P::Bot{}, none, P::Bot{}));         // unknown/ordinary bot
+        CHECK(deliver(true, true, true, vanH, P::Bot{}, none, VerifiedBot()));     // addon always
+        CHECK(deliver(false, false, true, vanH, P::Bot{}, none, VerifiedBot()));   // OFF
+        CHECK(deliver(true, false, false, vanH, P::Bot{}, none, VerifiedBot()));   // unproven scope: fail open
+        // Mixed recipient set: only the restricted recipients are skipped.
+        {
+            std::vector<std::pair<P::Human, P::Bot>> recipients{
+                {vanH, P::Bot{}}, {none, VerifiedBot()}, {tbcH, P::Bot{}}, {none, P::Bot{}}, {altbot, P::Bot{}}};
+            int delivered = 0;
+            for (auto const& [rh, rb] : recipients)
+                delivered += deliver(true, false, true, vanH, P::Bot{}, rh, rb) ? 1 : 0;
+            CHECK(delivered == 4);
+            delivered = 0;
+            for (auto const& [rh, rb] : recipients)
+                delivered += deliver(true, false, true, none, VerifiedBot(), rh, rb) ? 1 : 0;
+            CHECK(delivered == 4); // only the Vanilla human misses the bot's line
+        }
+
+        // Pending remediation: coalescing, never drops, emptied by a drain.
+        P::PendingGuildRemediation work;
+        work.Mark(0, 1);
+        work.Mark(1, 0);
+        CHECK(work.Size() == 0);
+        for (std::uint64_t i = 1; i <= 5000; ++i)
+        {
+            work.Mark(3, i);
+            work.Mark(3, i); // the same human twice (join then login): one entry
+        }
+        work.Mark(4, 1);
+        CHECK(work.Size() == 5001);
+        std::size_t drained = 0;
+        work.Drain([&](std::uint32_t, std::uint64_t) { ++drained; });
+        CHECK(drained == 5001 && work.Size() == 0);
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -1259,6 +1426,7 @@ int main()
     TestPendingReplies();
     TestRoleCheckMemberRefresh();
     TestCharacterCreateDeleteCleanup();
+    TestGuildPolicyCore28();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

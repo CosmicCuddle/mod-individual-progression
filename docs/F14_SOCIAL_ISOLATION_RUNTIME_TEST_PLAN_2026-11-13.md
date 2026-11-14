@@ -74,6 +74,11 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | M3 | H0 mails a BE/Dr RandomBot that hasn't logged in since the restart | delivered (unknown) |
 | M4 | R logs out (remembered), then R is deleted; H0 mails to that name/GUID | not refused by F14 (F-3; the deleted name itself is Core's normal "not found") |
 | M5 | a new character is created (any race); H0 mails it before its first login | delivered (F-3: create forgets the GUID) |
+| GP1 (Core #28 build) | `.guild invite`/Playerbots adds a restricted RandomBot (online or offline) to H0's guild while H0 is online | refused; no join broadcast, no DB row |
+| GP2 | H0 accepts an invite into a guild holding restricted bots (including a bot Guild Master) | H0 joins; the bots leave at the next world update; the guild survives with H0 promoted if needed |
+| GP3 | a restricted bot was added while H0 was offline; H0 logs in | the bot leaves at the next world update |
+| GP4 | H0 and R exchange guild and officer chat (both directions); a TBC member and an Altbot also listen | H0↔R lines are not delivered to each other; everyone else gets them; addon messages always delivered |
+| GP5 | GP1–GP4 with the option OFF, and on a Core without #28 | stock |
 | GI1 | (patched Core only) H0's guild officer invites R; R's guild invites H0 | no invitation is sent; H0 gets one reply when H0 started it |
 | GI2 | (patched Core only) H8 invites R | stock |
 | OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |
