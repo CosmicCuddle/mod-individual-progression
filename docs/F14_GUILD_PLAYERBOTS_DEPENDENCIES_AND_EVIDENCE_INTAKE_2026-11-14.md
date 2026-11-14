@@ -8,7 +8,7 @@
 
 **Pins:**
 - **Playerbots:** PR #21 `1cf279183a35721b997033d73270e2d69becad75` (no changes since the last review);
-- **Core:** #28 `137d5a27`;
+- **Core:** #28 v2 `2b356ff9` (hook version 2);
 - **IP:** the Core #28 consumer branch `feature/cs03-ip-f14-guild-core28-consumer-20261114`.
 
 ## P-2: bot guild chat through the world thread
