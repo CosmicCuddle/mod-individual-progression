@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Offline, read-only audit of Individual Progression paid expansion receipts.
 
-Input: the TSV produced by ip_paid_receipt_audit.sql (run against a backup or
-replica). No database connection is made and nothing is written except the
+Input: the TSVs produced by ip_paid_receipt_audit.sql (main),
+ip_paid_receipt_anomalies.sql and ip_paid_receipt_schema.sql (run against the
+same backup or replica). No database connection is made and nothing is written except the
 optional --json report. The classifier is an exact port of
 IndividualProgressionReceiptPolicy::DecodeRaw (src/IndividualProgressionReceiptPolicy.h);
 tests/test_ip_paid_receipt_audit_tool.py checks it against the real C++.
@@ -13,6 +14,12 @@ Categories (what the server would do at login with PaidExpansion ON):
   malformed / wrong_slot_count / unknown_version / inconsistent
                 refused (fail closed); never commissioned or overwritten:
                 needs staff repair before that character can buy
+  duplicate     more than one matching row for the character (never commissioned)
+  source_variant  the row matched only through the collation (case/space)
+
+--release: requires the anomaly and schema reports and FAILS (exit 2) on any
+duplicate, orphan or source-variant row, or a primary key other than
+(guid, source). Raw reports stay local; nothing is uploaded.
 """
 import argparse
 import json
@@ -28,6 +35,9 @@ TBC_FLAG, WRATH_FLAG, GF_EVALUATED, VERSION, TBC_COPPER, TBC_EPOCH, WRATH_COPPER
 
 VALID, MISSING, MALFORMED, WRONG_SLOT_COUNT, UNKNOWN_VERSION, INCONSISTENT = range(6)
 STATUS_NAMES = ["valid", "absent", "malformed", "wrong_slot_count", "unknown_version", "inconsistent"]
+CATEGORIES = STATUS_NAMES + ["duplicate", "source_variant"]
+CANONICAL_SOURCE_HEX = b"ip_paid_expansion".hex().upper()
+EXPECTED_PRIMARY_KEY = "guid,source"
 
 
 def _decimal_u32(token):
@@ -94,11 +104,15 @@ def decode_raw(data, row_present):
     return VALID, fields
 
 
-def classify_row(guid, account, row_present, data_hex, max_marker):
+def classify_row(guid, account, row_present, source_hex, data_hex, max_marker):
     data = bytes.fromhex(data_hex) if data_hex else b""
     status, fields = decode_raw(data, row_present == 1)
     stage = max_marker - 66000 if 66001 <= max_marker <= 66018 else 0
     item = {"guid": guid, "account": account, "category": STATUS_NAMES[status], "stage": stage}
+    if row_present == 1 and source_hex.upper() != CANONICAL_SOURCE_HEX:
+        item["category"] = "source_variant"
+        item["source_hex"] = source_hex.upper()
+        return item
     if fields is not None:
         item["tbc"] = ["none", "paid", "grandfathered"][fields[TBC_FLAG]]
         item["wrath"] = ["none", "paid", "grandfathered"][fields[WRATH_FLAG]]
@@ -109,6 +123,14 @@ def classify_row(guid, account, row_present, data_hex, max_marker):
     return item
 
 
+def _hex(value, number, name):
+    if value.upper() == "NULL":
+        value = ""
+    if len(value) % 2 or any(c not in "0123456789abcdefABCDEF" for c in value):
+        raise ValueError(f"line {number}: {name} is not hexadecimal")
+    return value
+
+
 def parse_tsv(lines):
     rows = []
     for number, line in enumerate(lines, 1):
@@ -116,34 +138,93 @@ def parse_tsv(lines):
         if not line:
             continue
         parts = line.split("\t")
-        if len(parts) != 5:
-            raise ValueError(f"line {number}: expected 5 tab-separated columns, got {len(parts)}")
-        guid, account, present, data_hex, marker = parts
+        if len(parts) != 6:
+            raise ValueError(f"line {number}: expected 6 tab-separated columns, got {len(parts)}")
+        guid, account, present, source_hex, data_hex, marker = parts
         if present not in ("0", "1"):
             raise ValueError(f"line {number}: row_present must be 0 or 1")
-        if data_hex.upper() == "NULL":
-            data_hex = ""
-        if len(data_hex) % 2 or any(c not in "0123456789abcdefABCDEF" for c in data_hex):
-            raise ValueError(f"line {number}: data_hex is not hexadecimal")
-        rows.append((int(guid), int(account), int(present), data_hex, int(marker)))
+        source_hex = _hex(source_hex, number, "source_hex")
+        data_hex = _hex(data_hex, number, "data_hex")
+        if present == "0" and (source_hex or data_hex):
+            raise ValueError(f"line {number}: row_present 0 with row data")
+        if present == "1" and not source_hex:
+            raise ValueError(f"line {number}: row_present 1 without a source")
+        rows.append((int(guid), int(account), int(present), source_hex, data_hex, int(marker)))
     return rows
 
 
-def audit(rows):
+def parse_anomalies(lines):
+    found = []
+    for number, line in enumerate(lines, 1):
+        line = line.rstrip("\n").rstrip("\r")
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) != 4 or parts[0] not in ("duplicate", "orphan", "source_variant"):
+            raise ValueError(f"anomalies line {number}: unexpected row")
+        found.append({"kind": parts[0], "guid": int(parts[1]), "rows": int(parts[2]), "source_hex": parts[3]})
+    return found
+
+
+def parse_schema(lines):
+    schema = {"primary_key": None, "collation": {}}
+    for number, line in enumerate(lines, 1):
+        line = line.rstrip("\n").rstrip("\r")
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) != 3 or parts[0] not in ("primary_key", "collation"):
+            raise ValueError(f"schema line {number}: unexpected row")
+        if parts[0] == "primary_key":
+            schema["primary_key"] = parts[2]
+        else:
+            schema["collation"][parts[1]] = parts[2]
+    return schema
+
+
+def audit(rows, anomalies=None, schema=None):
     items = [classify_row(*r) for r in rows]
+    # A character with more than one main row (duplicate or collation
+    # variants that the backup still holds) is never valid or commissionable.
+    per_guid = Counter(i["guid"] for i in items)
+    for i in items:
+        if per_guid[i["guid"]] > 1:
+            i["category"] = "duplicate"
+    seen = set()
+    unique = []
+    for i in items:
+        if i["guid"] not in seen:
+            seen.add(i["guid"])
+            unique.append(i)
+    items = unique
     counts = Counter(i["category"] for i in items)
     paid = Counter()
     for i in items:
         if i["category"] == "valid":
             paid["tbc_" + i["tbc"]] += 1
             paid["wrath_" + i["wrath"]] += 1
+    failures = []
+    if anomalies:
+        for a in anomalies:
+            failures.append(f"{a['kind']} receipt row(s) for guid {a['guid']} ({a['rows']})")
+    for guid, count in sorted(per_guid.items()):
+        if count > 1:
+            failures.append(f"duplicate main rows for guid {guid} ({count})")
+    for i in items:
+        if i["category"] == "source_variant":
+            failures.append(f"source_variant for guid {i['guid']}")
+    if schema is not None and schema.get("primary_key") != EXPECTED_PRIMARY_KEY:
+        failures.append(f"character_settings primary key is {schema.get('primary_key')!r}, expected {EXPECTED_PRIMARY_KEY!r}")
     return {
         "characters": len(items),
-        "categories": {name: counts.get(name, 0) for name in STATUS_NAMES},
+        "categories": {name: counts.get(name, 0) for name in CATEGORIES},
         "valid_receipts": dict(sorted(paid.items())),
         "needs_staff_repair": [i["guid"] for i in items
                                if i["category"] not in ("valid", "absent")],
         "commission_candidates": [i["guid"] for i in items if i["category"] == "absent"],
+        "anomalies": anomalies or [],
+        "schema": schema,
+        "release_failures": failures,
         "items": items,
     }
 
@@ -151,10 +232,25 @@ def audit(rows):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Offline read-only IP paid receipt audit")
     ap.add_argument("tsv", help="output of ip_paid_receipt_audit.sql (mysql -B --skip-column-names)")
-    ap.add_argument("--json", help="also write the full report to this file")
+    ap.add_argument("--anomalies", help="output of ip_paid_receipt_anomalies.sql")
+    ap.add_argument("--schema", help="output of ip_paid_receipt_schema.sql")
+    ap.add_argument("--release", action="store_true",
+                    help="release audit: require --anomalies and --schema; exit 2 on any anomaly")
+    ap.add_argument("--json", help="also write the full report to this local file")
     args = ap.parse_args(argv)
+    if args.release and (not args.anomalies or not args.schema):
+        print("RELEASE AUDIT: FAIL (--release requires --anomalies and --schema)")
+        return 2
     with open(args.tsv, encoding="ascii") as handle:
-        report = audit(parse_tsv(handle))
+        rows = parse_tsv(handle)
+    anomalies = schema = None
+    if args.anomalies:
+        with open(args.anomalies, encoding="ascii") as handle:
+            anomalies = parse_anomalies(handle)
+    if args.schema:
+        with open(args.schema, encoding="ascii") as handle:
+            schema = parse_schema(handle)
+    report = audit(rows, anomalies, schema)
     print(f"characters: {report['characters']}")
     for name, count in report["categories"].items():
         print(f"  {name:17s} {count}")
@@ -163,9 +259,16 @@ def main(argv=None):
     print(f"needs staff repair (never commissioned): {len(report['needs_staff_repair'])}")
     for guid in report["needs_staff_repair"]:
         print(f"  guid {guid}")
+    if schema is not None:
+        print(f"character_settings primary key: {schema.get('primary_key')}; collation: {schema.get('collation')}")
+    for failure in report["release_failures"]:
+        print(f"ANOMALY: {failure}")
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:
             json.dump(report, handle, indent=2)
+    if args.release:
+        print("RELEASE AUDIT: " + ("FAIL" if report["release_failures"] else "PASS"))
+        return 2 if report["release_failures"] else 0
     return 0
 
 

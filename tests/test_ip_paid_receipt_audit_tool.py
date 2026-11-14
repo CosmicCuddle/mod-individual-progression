@@ -69,77 +69,191 @@ class DifferentialParity(unittest.TestCase):
         self.assertEqual(set(native), set(range(6)))
 
 
-class Fixtures(unittest.TestCase):
-    def tsv(self, rows):
-        return [f"{g}\t{a}\t{p}\t{h}\t{m}\n" for g, a, p, h, m in rows]
+SRC = audit.CANONICAL_SOURCE_HEX
+EMPTY = audit.serialize([0, 0, 0, 1, 0, 0, 0, 0]).hex()
+PAID = audit.serialize([1, 0, 1, 1, 400, 1800000000, 0, 0]).hex()
+GF = audit.serialize([0, 2, 1, 1, 0, 0, 0, 0]).hex()
 
+
+def tsv(rows):
+    return [f"{g}\t{a}\t{p}\t{src}\t{h}\t{m}\n" for g, a, p, src, h, m in rows]
+
+
+class Fixtures(unittest.TestCase):
     def test_categories_and_report(self):
-        empty = audit.serialize([0, 0, 0, 1, 0, 0, 0, 0]).hex()
-        paid = audit.serialize([1, 0, 1, 1, 400, 1800000000, 0, 0]).hex()
-        gf = audit.serialize([0, 2, 1, 1, 0, 0, 0, 0]).hex()
-        rows = audit.parse_tsv(self.tsv([
-            (1, 10, 0, "", 66007),                    # absent
-            (2, 10, 1, empty, 66007),                 # valid empty
-            (3, 11, 1, paid, 66008),                  # valid paid TBC
-            (4, 11, 1, gf, 66013),                    # grandfathered Wrath
-            (5, 12, 1, b"1 0 0 ".hex(), 66007),        # legacy 3-slot
-            (6, 12, 1, "", 0),                        # present but empty/NULL
-            (7, 12, 1, b"1 0 0 1 0 0 0 0 ".hex(), 7 + 66000),  # inconsistent
-            (8, 13, 1, b"0 0 0 2 0 0 0 0 ".hex(), 0),  # unknown version
-            (9, 13, 1, paid, 66003),                  # paid but below stage 7
-            (10, 13, 1, "NULL", 0),                   # mysql NULL text
-            (11, 14, 1, b"0 0 0 1 0 0 0 0".hex(), 66007),  # non-canonical: malformed
+        rows = audit.parse_tsv(tsv([
+            (1, 10, 0, "", "", 66007),                    # absent
+            (2, 10, 1, SRC, EMPTY, 66007),                # valid empty
+            (3, 11, 1, SRC, PAID, 66008),                 # valid paid TBC
+            (4, 11, 1, SRC, GF, 66013),                   # grandfathered Wrath
+            (5, 12, 1, SRC, b"1 0 0 ".hex(), 66007),       # legacy 3-slot
+            (6, 12, 1, SRC, "", 0),                       # present but empty/NULL
+            (7, 12, 1, SRC, b"1 0 0 1 0 0 0 0 ".hex(), 66007),  # inconsistent
+            (8, 13, 1, SRC, b"0 0 0 2 0 0 0 0 ".hex(), 0),  # unknown version
+            (9, 13, 1, SRC, PAID, 66003),                 # paid but below stage 7
+            (10, 13, 1, SRC, "NULL", 0),                  # mysql NULL text
+            (11, 14, 1, SRC, b"0 0 0 1 0 0 0 0".hex(), 66007),  # non-canonical: malformed
         ]))
         r = audit.audit(rows)
         self.assertEqual(r["characters"], 11)
         self.assertEqual(r["categories"], {"valid": 4, "absent": 1, "malformed": 1, "wrong_slot_count": 3,
-                                           "unknown_version": 1, "inconsistent": 1})
+                                           "unknown_version": 1, "inconsistent": 1, "duplicate": 0,
+                                           "source_variant": 0})
         self.assertEqual(r["commission_candidates"], [1])
         self.assertEqual(r["needs_staff_repair"], [5, 6, 7, 8, 10, 11])
+        self.assertEqual(r["release_failures"], [])
         items = {i["guid"]: i for i in r["items"]}
         self.assertEqual((items[3]["tbc"], items[3]["wrath"], items[3]["stage"]), ("paid", "none", 8))
         self.assertEqual(items[4]["wrath"], "grandfathered")
         self.assertEqual(items[9]["note"], "receipt flags ignored below stage 7")
         self.assertEqual(r["valid_receipts"]["tbc_paid"], 2)
 
+    def test_duplicates_never_collapse_or_commission(self):
+        variant = b"IP_PAID_EXPANSION".hex().upper()
+        rows = audit.parse_tsv(tsv([
+            (20, 1, 1, SRC, EMPTY, 66007),
+            (20, 1, 1, SRC, EMPTY, 66007),        # identical duplicate: must not collapse
+            (21, 1, 1, SRC, PAID, 66008),
+            (21, 1, 1, variant, EMPTY, 66008),    # canonical + collation variant
+            (22, 1, 1, variant, PAID, 66008),     # variant only
+            (23, 1, 0, "", "", 0),
+        ]))
+        r = audit.audit(rows)
+        items = {i["guid"]: i for i in r["items"]}
+        self.assertEqual(r["characters"], 4)
+        self.assertEqual(items[20]["category"], "duplicate")
+        self.assertEqual(items[21]["category"], "duplicate")
+        self.assertEqual(items[22]["category"], "source_variant")
+        self.assertEqual(r["commission_candidates"], [23])
+        self.assertEqual(r["needs_staff_repair"], [20, 21, 22])
+        self.assertNotIn("valid", {items[g]["category"] for g in (20, 21, 22)})
+        self.assertEqual(len(r["release_failures"]), 3)
+
+    def test_anomaly_and_schema_reports(self):
+        anomalies = audit.parse_anomalies([
+            "duplicate\t30\t2\t" + SRC + "|" + SRC + "\n",
+            "orphan\t31\t1\t" + SRC + "\n",
+            "source_variant\t32\t1\t" + b"ip_paid_expansion ".hex().upper() + "\n",
+        ])
+        good = audit.parse_schema(["primary_key\tcharacter_settings\tguid,source\n",
+                                   "collation\tdata\tutf8mb4_unicode_ci\n",
+                                   "collation\tsource\tutf8mb4_unicode_ci\n"])
+        rows = audit.parse_tsv(tsv([(1, 1, 1, SRC, EMPTY, 66007)]))
+        self.assertEqual(audit.audit(rows, [], good)["release_failures"], [])
+        failures = audit.audit(rows, anomalies, good)["release_failures"]
+        self.assertEqual([f.split(" ")[0] for f in failures], ["duplicate", "orphan", "source_variant"])
+        for pk in ("", "guid", "source,guid", "guid,source,data"):
+            bad = audit.parse_schema([f"primary_key\tcharacter_settings\t{pk}\n"])
+            self.assertTrue(audit.audit(rows, [], bad)["release_failures"], pk)
+        # Orphans are not characters: never commission candidates.
+        self.assertEqual(audit.audit(rows, anomalies, good)["commission_candidates"], [])
+
     def test_bad_input_rejected(self):
-        for line in ("1\t2\t1\tzz\t0\n", "1\t2\t3\t\t0\n", "1\t2\t1\n", "1\t2\t1\tabc\t0\n"):
+        for line in ("1\t2\t1\t" + SRC + "\tzz\t0\n", "1\t2\t3\t\t\t0\n", "1\t2\t1\n",
+                     "1\t2\t1\t" + SRC + "\tabc\t0\n", "1\t2\t0\t" + SRC + "\t\t0\n",
+                     "1\t2\t1\t\t" + EMPTY + "\t0\n", "1\t2\t0\t" + SRC + "\t" + EMPTY + "\t66007\n"):
             with self.assertRaises(ValueError):
                 audit.parse_tsv([line])
+        for line in ("weird\t1\t1\tAA\n", "orphan\t1\t1\n"):
+            with self.assertRaises(ValueError):
+                audit.parse_anomalies([line])
+        with self.assertRaises(ValueError):
+            audit.parse_schema(["pk\tx\ty\n"])
 
-    def test_cli_runs_offline(self):
+    def run_cli(self, tmp, main, anomalies=None, schema=None, release=False):
+        args = [sys.executable, str(ROOT / "tools/ip_paid_receipt_audit.py"), str(main)]
+        if anomalies is not None:
+            args += ["--anomalies", str(anomalies)]
+        if schema is not None:
+            args += ["--schema", str(schema)]
+        if release:
+            args.append("--release")
+        return subprocess.run(args, capture_output=True, text=True)
+
+    def test_cli_release_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
-            src = Path(tmp) / "r.tsv"
-            src.write_text("1\t10\t0\t\t66007\n2\t10\t1\t" + b"1 0 0 ".hex() + "\t66007\n", encoding="ascii")
-            out = subprocess.run([sys.executable, str(ROOT / "tools/ip_paid_receipt_audit.py"), str(src),
-                                  "--json", str(Path(tmp) / "r.json")], capture_output=True, text=True, check=True)
-            self.assertIn("absent", out.stdout)
-            self.assertIn("needs staff repair (never commissioned): 1", out.stdout)
-            self.assertTrue((Path(tmp) / "r.json").exists())
+            t = Path(tmp)
+            main = t / "r.tsv"
+            main.write_text("".join(tsv([(1, 10, 0, "", "", 66007),
+                                         (2, 10, 1, SRC, b"1 0 0 ".hex(), 66007)])), encoding="ascii")
+            empty = t / "a.tsv"
+            empty.write_text("", encoding="ascii")
+            orphan = t / "o.tsv"
+            orphan.write_text("orphan\t99\t1\t" + SRC + "\n", encoding="ascii")
+            schema = t / "s.tsv"
+            schema.write_text("primary_key\tcharacter_settings\tguid,source\n", encoding="ascii")
+            badschema = t / "b.tsv"
+            badschema.write_text("primary_key\tcharacter_settings\t\n", encoding="ascii")
+            ok = self.run_cli(t, main, empty, schema, release=True)
+            self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+            self.assertIn("RELEASE AUDIT: PASS", ok.stdout)
+            self.assertIn("needs staff repair (never commissioned): 1", ok.stdout)
+            for anomalies, sch in ((orphan, schema), (empty, badschema)):
+                bad = self.run_cli(t, main, anomalies, sch, release=True)
+                self.assertEqual(bad.returncode, 2)
+                self.assertIn("RELEASE AUDIT: FAIL", bad.stdout)
+            missing = self.run_cli(t, main, None, schema, release=True)
+            self.assertEqual(missing.returncode, 2)
+            plain = self.run_cli(t, main)
+            self.assertEqual(plain.returncode, 0)
+            dup = t / "d.tsv"
+            dup.write_text("".join(tsv([(5, 1, 1, SRC, EMPTY, 66007)] * 2)), encoding="ascii")
+            self.assertEqual(self.run_cli(t, dup, empty, schema, release=True).returncode, 2)
+
+
+def statements(path):
+    body = re.sub(r"--[^\n]*", "", (ROOT / "tools" / path).read_text(encoding="utf-8"))
+    return [s.strip() for s in body.split(";") if s.strip()]
 
 
 class ReadOnlyContract(unittest.TestCase):
-    def test_sql_is_one_select(self):
-        body = re.sub(r"--[^\n]*", "", SQL)
-        statements = [s.strip() for s in body.split(";") if s.strip()]
-        self.assertEqual(len(statements), 1)
-        self.assertTrue(statements[0].upper().startswith("SELECT"))
-        for verb in ("INSERT", "UPDATE", "DELETE", "REPLACE", "DROP", "ALTER", "CREATE", "TRUNCATE",
-                     "GRANT", "SET ", "CALL", "LOCK", "HANDLER", "LOAD", "INTO OUTFILE", "INTO DUMPFILE"):
-            self.assertNotIn(verb, body.upper(), verb)
-        self.assertIn("HEX(s.data)", SQL)
-        self.assertIn("s.source = 'ip_paid_expansion'", SQL)
-        self.assertIn("q.quest BETWEEN 66001 AND 66018", SQL)
+    FORBIDDEN = ("INSERT", "UPDATE", "DELETE", "REPLACE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT",
+                 "SET ", "CALL", "LOCK", "HANDLER", "LOAD", "INTO OUTFILE", "INTO DUMPFILE", "RENAME", "INTO @")
+
+    def test_every_statement_is_a_select(self):
+        expected = {"ip_paid_receipt_audit.sql": 1, "ip_paid_receipt_anomalies.sql": 3, "ip_paid_receipt_schema.sql": 2}
+        for path, count in expected.items():
+            stmts = statements(path)
+            self.assertEqual(len(stmts), count, path)
+            for stmt in stmts:
+                self.assertTrue(stmt.upper().startswith("SELECT"), (path, stmt[:40]))
+                for verb in self.FORBIDDEN:
+                    self.assertNotIn(verb, stmt.upper(), (path, verb))
+
+    def test_main_query_never_collapses_rows(self):
+        main = statements("ip_paid_receipt_audit.sql")[0]
+        self.assertNotIn("GROUP BY", main.upper())
+        self.assertNotIn("DISTINCT", main.upper())
+        self.assertIn("HEX(s.data)", main)
+        self.assertIn("HEX(s.source)", main)
+        self.assertIn("s.source = 'ip_paid_expansion'", main)
+        self.assertIn("q.quest BETWEEN 66001 AND 66018", main)
+
+    def test_anomaly_queries(self):
+        dup, orphan, variant = statements("ip_paid_receipt_anomalies.sql")
+        self.assertTrue(dup.startswith("SELECT 'duplicate'"))
+        self.assertIn("GROUP BY s.guid\nHAVING COUNT(*) > 1", dup)   # integer key only
+        self.assertTrue(orphan.startswith("SELECT 'orphan'"))
+        self.assertIn("LEFT JOIN characters c ON c.guid = s.guid", orphan)
+        self.assertIn("c.guid IS NULL", orphan)
+        self.assertTrue(variant.startswith("SELECT 'source_variant'"))
+        self.assertIn("BINARY s.source <> BINARY 'ip_paid_expansion'", variant)
+        schema = statements("ip_paid_receipt_schema.sql")
+        self.assertIn("information_schema.KEY_COLUMN_USAGE", schema[0])
+        self.assertIn("k.CONSTRAINT_NAME = 'PRIMARY'", schema[0])
+        self.assertIn("information_schema.COLUMNS", schema[1])
+        self.assertEqual(audit.EXPECTED_PRIMARY_KEY, "guid,source")
 
     def test_tool_never_connects(self):
         tool = (ROOT / "tools/ip_paid_receipt_audit.py").read_text(encoding="utf-8")
-        for token in ("mysql", "MySQLdb", "pymysql", "socket", "subprocess", "connect("):
+        for token in ("mysql", "MySQLdb", "pymysql", "socket", "subprocess", "connect(", "urllib", "http"):
             self.assertNotIn(token, tool.replace("mysql -B", ""), token)
 
     def test_port_constants_match_header(self):
         header = (ROOT / "src/IndividualProgressionReceiptPolicy.h").read_text(encoding="utf-8")
         self.assertIn("Valid, Missing, Malformed, WrongSlotCount, UnknownVersion, Inconsistent", header)
         self.assertIn("constexpr std::size_t Slots = 8;", header)
+        self.assertEqual(audit.CANONICAL_SOURCE_HEX, "69705F706169645F657870616E73696F6E")
 
 
 if __name__ == "__main__":

@@ -60,17 +60,39 @@ The purchase never writes quest status, so the quest dirty-list asymmetry from C
 - **Residual risk (owner gate):** after a very fast relog, the login read could run before the previous logout save commits. Commissioning would then stage an empty receipt over a just-made purchase. The window is the async commit latency. Owner approval and a DB test are needed before enabling the gate.
 
 ### Read-only receipt audit (before any commissioning decision)
-- **`tools/ip_paid_receipt_audit.sql`:** a single `SELECT` with no DDL or DML. Run it with `mysql -B --skip-column-names` against a **backup or replica** of the characters DB.
-  - It lists every character with `row_present`, `HEX(data)` (exact bytes, so trailing spaces survive) and its highest rewarded IP marker.
-- **`tools/ip_paid_receipt_audit.py <tsv> [--json report.json]`:** classifies each row offline, with no DB connection, exactly as the server's strict loader would:
-  - **absent:** a commissioning candidate;
-  - **valid:** an empty, paid or grandfathered receipt;
-  - **malformed, wrong slot count, unknown version or inconsistent:** needs staff repair, and is never commissioned.
-  - It also flags paid flags that are ignored below stage 7.
-- **Parity:** the Python port of `DecodeRaw` is checked against the **real C++ header** by `tests/test_ip_paid_receipt_audit_tool.py`, a differential test over about 30,000 generated and edge-case strings covering all six statuses.
-  - The same file covers fixtures, rejection of bad input, a read-only contract for the SQL, and a check that the tool never connects to a database.
-  - Mutations A1–A7 are all caught.
-- **Out of scope:** account names are in the auth DB, so bot and excluded accounts are listed by account id. Filter them with the configured regexes if needed.
+Run all three exports, read-only, against the **same backup or replica** of the characters DB:
+
+```
+mysql -B --skip-column-names <copy> < tools/ip_paid_receipt_audit.sql     > receipts.tsv
+mysql -B --skip-column-names <copy> < tools/ip_paid_receipt_anomalies.sql > anomalies.tsv
+mysql -B --skip-column-names <copy> < tools/ip_paid_receipt_schema.sql    > schema.tsv
+python3 tools/ip_paid_receipt_audit.py receipts.tsv --anomalies anomalies.tsv --schema schema.tsv --release --json report.json
+```
+
+- **Main query (`ip_paid_receipt_audit.sql`):**
+  - one row per matching settings row, with **no `GROUP BY` or `DISTINCT`**, so duplicates can't collapse;
+  - each row carries `HEX(source)` and `HEX(data)`, so case and trailing spaces survive export;
+  - the highest marker comes from a subquery.
+- **Anomalies (`ip_paid_receipt_anomalies.sql`, three `SELECT`s):**
+  - **duplicate:** more than one matching row per character, grouped by the integer `guid` only;
+  - **orphan:** a receipt row with no character;
+  - **source_variant:** a row matched only through the case- and trailing-space-insensitive collation (`BINARY` compare).
+  - Any of these rows **fails** the release audit.
+- **Schema (`ip_paid_receipt_schema.sql`):**
+  - `information_schema` reads of the `character_settings` primary key and the source/data collations;
+  - the release audit requires the key to be exactly **`(guid, source)`**, as in Core's base schema (`utf8mb4_unicode_ci`).
+- **Classifier (`ip_paid_receipt_audit.py`):** offline, with no DB connection. Categories match the strict loader:
+  - **absent:** the only commissioning candidates;
+  - **valid**;
+  - **malformed, wrong_slot_count, unknown_version, inconsistent**;
+  - **duplicate:** any character with more than one main row, never valid or commissionable;
+  - **source_variant**.
+  - `--release` requires the anomaly and schema reports, prints `RELEASE AUDIT: PASS/FAIL`, and **exits 2** on any anomaly or an unexpected key.
+- **Privacy:** reports stay local. The optional `--json` report is written only where you point it.
+- **Parity and tests:** the Python port of `DecodeRaw` is checked against the **real C++ header** by `tests/test_ip_paid_receipt_audit_tool.py`, a differential test over about 30,000 strings covering all six statuses.
+  - The same file covers fixtures (duplicates, including identical rows; collation variants; orphans; bad keys), the release exit codes, and read-only contracts for every statement.
+  - Mutations A1–A7 and B1–B11 are all caught.
+- **Out of scope:** account names are in the auth DB, so bot and excluded accounts are listed by account id.
 
 ## B3: account bypass
 - The purchase path is per-character: `CanPurchaseExpansion`, `PurchaseExpansion`, the callback, the entitlement and effective-stage APIs, and `GetPaidPurchaseState` read no account data. Contracts and a model test now pin this.
