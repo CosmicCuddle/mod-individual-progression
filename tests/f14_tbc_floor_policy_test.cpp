@@ -1,6 +1,7 @@
 // Native tests for IndividualProgressionF14TbcFloorPolicy (F14 verified
 // RandomBot TBC floor). Pure header; no AzerothCore needed.
 #include "IndividualProgressionF14TbcFloorPolicy.h"
+#include "IndividualProgressionF14StageFloorPolicy.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -196,6 +197,86 @@ namespace
             CHECK(b.stage == 0);
         }
     }
+
+    // CS01 6884969131: unified ON + legacy ProtectVerifiedRandomBotStageFloor
+    // ON (the owner's current live combination) must not veto the fallback.
+    struct Config
+    {
+        bool unified, social, legacyStage, legacyGroup, preserve, force;
+    };
+
+    Config ResolveAtConfigLoad(Config c)
+    {
+        if (c.unified)
+        {
+            c.legacyStage = P::LegacyFloorOptionActive(true, c.legacyStage);
+            c.legacyGroup = P::LegacyFloorOptionActive(true, c.legacyGroup);
+            c.preserve = P::LegacyFloorOptionActive(true, c.preserve);
+            c.force = P::LegacyFloorOptionActive(true, c.force);
+        }
+        return c;
+    }
+
+    bool LegacyBlocks(Config const& c, std::uint8_t current, std::uint8_t requested)
+    {
+        return IndividualProgressionF14StageFloorPolicy::BlocksVerifiedFloorDowngrade(
+            c.legacyStage, true, current, requested);
+    }
+
+    // ForceUpdateProgressionState: clamp first, then the legacy guard.
+    std::uint8_t ForceUpdateRoute(Config const& c, std::uint8_t current, std::uint8_t requested)
+    {
+        std::uint8_t state = requested;
+        if (c.unified && state < P::FirstTbcStage)
+            state = P::ClampWrite(state);
+        if (LegacyBlocks(c, current, state))
+            return current;
+        return state;
+    }
+
+    // `.ip set` and GM group set: the legacy guard sees the RAW request first.
+    std::uint8_t CommandRoute(Config const& c, std::uint8_t current, std::uint8_t requested)
+    {
+        if (LegacyBlocks(c, current, requested))
+            return current; // refused
+        return ForceUpdateRoute(c, current, requested);
+    }
+
+    void TestLegacyOptionsSuperseded()
+    {
+        // Owner's exact current combination, with the unified switch ON.
+        Config const owner = ResolveAtConfigLoad({true, true, true, false, false, false});
+        CHECK(owner.social);                     // social isolation untouched
+        CHECK(!owner.legacyStage && !owner.legacyGroup && !owner.preserve && !owner.force);
+        for (std::uint8_t requested = 0; requested < 8; ++requested)
+        {
+            CHECK(CommandRoute(owner, 13, requested) == 8);    // Wrath -> TBC, not 13, not 0
+            CHECK(ForceUpdateRoute(owner, 13, requested) == 8);
+            CHECK(CommandRoute(owner, 18, requested) == 8);
+        }
+        CHECK(CommandRoute(owner, 13, 10) == 10);   // same-era requests unchanged
+        CHECK(CommandRoute(owner, 8, 15) == 15);    // upward unchanged
+        // The defect being fixed: unresolved, the legacy guard refuses .ip set.
+        Config const unresolved{true, true, true, false, false, false};
+        CHECK(CommandRoute(unresolved, 13, 0) == 13);
+        // Unified OFF: every legacy option keeps its historical behaviour.
+        for (int mask = 0; mask < 16; ++mask)
+        {
+            Config const in{false, true, bool(mask & 1), bool(mask & 2), bool(mask & 4), bool(mask & 8)};
+            Config const out = ResolveAtConfigLoad(in);
+            CHECK(out.legacyStage == in.legacyStage && out.legacyGroup == in.legacyGroup &&
+                  out.preserve == in.preserve && out.force == in.force && out.social);
+            Config const on = ResolveAtConfigLoad({true, bool(mask & 1), bool(mask & 1), bool(mask & 2),
+                                                   bool(mask & 4), bool(mask & 8)});
+            CHECK(!on.legacyStage && !on.legacyGroup && !on.preserve && !on.force);
+            CHECK(on.social == bool(mask & 1));
+        }
+        Config const legacyOnly = ResolveAtConfigLoad({false, true, true, false, false, false});
+        CHECK(CommandRoute(legacyOnly, 13, 0) == 13);   // historical legacy refusal kept
+        for (int u = 0; u < 2; ++u)
+            for (int l = 0; l < 2; ++l)
+                CHECK(P::LegacyFloorOptionActive(u, l) == (l && !u));
+    }
 }
 
 int main()
@@ -204,6 +285,7 @@ int main()
     TestTargetStageExhaustive();
     TestClampWrite();
     TestScenarios();
+    TestLegacyOptionsSuperseded();
     std::printf("F14 TBC FLOOR POLICY %u/%u passed\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -148,8 +148,9 @@ IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor = 0
 #        Playerbots API. Owner approval required.
 #        With this switch ON, PreserveVerifiedRandomBotStageOnLogin,
 #        ForceVerifiedRandomBotTbcFloorOnLogin, ProtectVerifiedRandomBotStageFloor
-#        and ProtectVerifiedRandomBotGroupFloor are LEGACY/DEPRECATED: keep
-#        them at 0 (retained for compatibility only).
+#        and ProtectVerifiedRandomBotGroupFloor are LEGACY/DEPRECATED and are
+#        FORCED OFF (with a warning): set them to 0. RandomBotSocialIsolation
+#        is independent and unaffected.
 #
 IndividualProgression.F14.VerifiedRandomBotTbcFloor = 0
 

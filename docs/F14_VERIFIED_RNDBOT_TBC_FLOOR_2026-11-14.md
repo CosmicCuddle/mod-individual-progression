@@ -59,6 +59,12 @@
 `PreserveVerifiedRandomBotStageOnLogin`, `ForceVerifiedRandomBotTbcFloorOnLogin`, `ProtectVerifiedRandomBotStageFloor` and `ProtectVerifiedRandomBotGroupFloor` are unchanged (still default 0).
 - **CS01 decision (6884895017):** keep them present and default OFF for compatibility/history, but treat them as **legacy/deprecated** when the unified switch is used. Don't delete them yet. The new key's config block says so.
 - **CS01 decision:** the old Core visibility-refresh compile dependency is dropped for this rule (it belonged to the paused concealment design).
+- **Superseded at config load (CS01 6884969131):** with `VerifiedRandomBotTbcFloor = 1`, all four legacy floor options are **forced OFF**, with one `LOG_WARN` each if set (`LegacyFloorOptionActive(unified, legacy) = legacy && !unified`).
+  - **Why:** left ON, `ProtectVerifiedRandomBotStageFloor` would make `.ip set <bot> 0` and GM group set **refuse** a Wrath bot's fallback, because those commands call the legacy guard with the raw request below 8. The bot stays at 13 instead of landing on 8.
+  - Inside `ForceUpdateProgressionState` the clamp already runs first, and the legacy guard only refuses requests below 8, so that route was safe.
+  - `RandomBotSocialIsolation` is not a floor option and is untouched.
+- **Migration for the owner's current config** (social isolation 1, `ProtectVerifiedRandomBotStageFloor` 1, the group floor, preserve and force all 0): set `VerifiedRandomBotTbcFloor = 1` **and `ProtectVerifiedRandomBotStageFloor = 0`**. Keep `RandomBotSocialIsolation = 1`. If the stage floor is left at 1, it's forced OFF anyway, with a warning.
+- **Regression test:** `TestLegacyOptionsSuperseded` covers unified ON + legacy stage floor ON + a Wrath bot + a Vanilla request. The result is **8** through both `.ip set` and `ForceUpdateProgressionState`, never 13 or 0. It also confirms that with unified OFF, every legacy option keeps its historical behaviour.
 
 ## One-time repair versus ongoing enforcement
 - **One-time:** happens at each bot's next login. Nothing touches offline characters or the database.

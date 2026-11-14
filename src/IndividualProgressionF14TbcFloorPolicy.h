@@ -69,6 +69,18 @@ namespace IndividualProgressionF14TbcFloorPolicy
         return savedStage >= required ? savedStage : required;
     }
 
+    // CS01 6884969131: with the unified rule ON, the four legacy F14 floor
+    // options (PreserveVerifiedRandomBotStageOnLogin,
+    // ForceVerifiedRandomBotTbcFloorOnLogin, ProtectVerifiedRandomBotStageFloor,
+    // ProtectVerifiedRandomBotGroupFloor) are superseded and forced OFF at
+    // config load: left ON, the stage floor would refuse .ip set / group set
+    // requests below 8 instead of letting them land on TBC. Social isolation
+    // is not a floor option and is unaffected.
+    constexpr bool LegacyFloorOptionActive(bool unifiedOn, bool legacyRequested)
+    {
+        return legacyRequested && !unifiedOn;
+    }
+
     constexpr bool NeedsRepair(std::uint8_t savedStage, std::uint8_t targetStage)
     {
         return savedStage < targetStage;

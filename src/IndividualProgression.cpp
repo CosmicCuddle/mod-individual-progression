@@ -1722,6 +1722,25 @@ private:
             sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
         }
 #endif
+        // The unified verified RandomBot TBC floor supersedes the legacy F14
+        // floor options (CS01 6884969131). Social isolation is independent.
+        if (sIndividualProgression->f14VerifiedRandomBotTbcFloor)
+        {
+            struct LegacyFloorOption { bool* value; char const* key; };
+            LegacyFloorOption const legacyFloorOptions[] = {
+                { &sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin, "PreserveVerifiedRandomBotStageOnLogin" },
+                { &sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin, "ForceVerifiedRandomBotTbcFloorOnLogin" },
+                { &sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor, "ProtectVerifiedRandomBotStageFloor" },
+                { &sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor, "ProtectVerifiedRandomBotGroupFloor" },
+            };
+            for (LegacyFloorOption const& option : legacyFloorOptions)
+            {
+                if (*option.value)
+                    LOG_WARN("module", "IndividualProgression.F14.{} is superseded by IndividualProgression.F14.VerifiedRandomBotTbcFloor; forcing OFF (set it to 0)",
+                        option.key);
+                *option.value = IndividualProgressionF14TbcFloorPolicy::LegacyFloorOptionActive(true, *option.value);
+            }
+        }
         // F14 attack/corpse lifecycle registry: bookkeeping only (never hides,
         // never refreshes, never writes stages). Every (re)load starts empty.
         sIndividualProgression->f14ExperimentalAttackLifecycleRegistry = sConfigMgr->GetOption<bool>(

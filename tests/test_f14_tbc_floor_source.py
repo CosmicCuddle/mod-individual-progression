@@ -38,6 +38,25 @@ class TbcFloorDefaults(unittest.TestCase):
         vis = vis[:vis.index("#endif")]
         self.assertNotIn("f14VerifiedRandomBotTbcFloor", vis)
 
+    def test_unified_supersedes_all_four_legacy_floor_options(self):
+        # CS01 6884969131: legacy floor options must not veto the unified rule.
+        core = read("src/IndividualProgression.cpp")
+        block = core.split("        if (sIndividualProgression->f14VerifiedRandomBotTbcFloor)\n        {\n            struct LegacyFloorOption", 1)[1]
+        block = block[:block.index("        // F14 attack/corpse lifecycle registry")]
+        for member, key in (("f14PreserveVerifiedRandomBotStageOnLogin", "PreserveVerifiedRandomBotStageOnLogin"),
+                            ("f14ForceVerifiedRandomBotTbcFloorOnLogin", "ForceVerifiedRandomBotTbcFloorOnLogin"),
+                            ("f14ProtectVerifiedRandomBotStageFloor", "ProtectVerifiedRandomBotStageFloor"),
+                            ("f14ProtectVerifiedRandomBotGroupFloor", "ProtectVerifiedRandomBotGroupFloor")):
+            self.assertIn("{ &sIndividualProgression->%s, \"%s\" }," % (member, key), block)
+        self.assertIn("*option.value = IndividualProgressionF14TbcFloorPolicy::LegacyFloorOptionActive(true, *option.value);", block)
+        self.assertNotIn("SocialIsolation", block)
+        # After every legacy load and both compile-time gates; before use.
+        self.assertLess(core.index('"IndividualProgression.F14.VerifiedRandomBotTbcFloor", false);'), core.index("struct LegacyFloorOption"))
+        self.assertLess(core.index("racial RandomBot TBC stage floor requires Core visibility refresh integration"),
+                        core.index("struct LegacyFloorOption"))
+        policy = strip_comments(read("src/IndividualProgressionF14TbcFloorPolicy.h"))
+        self.assertIn("return legacyRequested && !unifiedOn;", policy)
+
 
 class TbcFloorRuntime(unittest.TestCase):
     def setUp(self):
