@@ -87,6 +87,8 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | PBD3 | a bot accepts a human's invite | the follow-up still runs (master set, strategies, summon) through `GroupAcceptOperation` |
 | PBB1 | `.playerbots bot add <offline RandomBot character>` | refused with a clear message (owner option B) |
 | PBB2 | `.playerbots bot add <own alt>` / linked-account alt / `addclass` | accepted, unchanged |
+| PBB3 | `.playerbots bot login <RandomBot character not currently in the active bot set>` | refused: the key is RandomBot account membership, not only `currentBots` |
+| PBB4 | the account classification is unavailable or ambiguous (Playerbots candidate test hook) | handled explicitly as the candidate defines it, never silently "not a RandomBot"; the result is logged |
 
 ## Pass criteria and evidence
 - **Pass criteria:**

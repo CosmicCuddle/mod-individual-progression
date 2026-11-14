@@ -129,6 +129,7 @@ This social feature is unaffected: it never restricts Altbots.
   - **The route:** at Playerbots `405f8119` the RandomBot check is commented out, so the bot could join the player's group with no invite or accept check. The other surfaces would then still block that pair.
   - **Owner decision (13 Nov 2026): option B.** Playerbots refuses adding any RandomBot character as a player's bot, generally and not by race.
   - **Ownership and status:** the Playerbots lane owns it. Nothing changes in IP.
+  - **Identity key (CS01 6875873942, 14 Nov 2026):** the refusal keys on membership of the authoritative RandomBot account population **and** on any positive active RandomBot signal (`currentBots` / `IsRandomBot(guid)`). `currentBots` alone isn't enough, because `.playerbots bot add|login` targets can be offline. It's never inferred from race or name. Own and linked Altbots are unchanged. An unavailable or ambiguous account classification must be handled and tested explicitly, never silently treated as "not a RandomBot".
 - **Guild invite: needs the owner-approved Core hook.**
   - Core25 has no "can invite" check, so `tests/core_patches/apply_f14_guild_invite_hook.py` adds a boolean player hook `OnPlayerCanGuildInvite(inviter, invitee)`. The enum entry is appended just before `PLAYERHOOK_END`, so nothing is renumbered.
   - `Guild::HandleInviteMember` calls it after Core's own checks and before the invite is sent; a refusal is silent, like Core's ignored-player case.
