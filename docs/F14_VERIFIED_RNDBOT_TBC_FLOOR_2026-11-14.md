@@ -51,12 +51,14 @@
 
 ### ProgressionLimit
 - `0` means no cap.
-- `0 < limit < 8` means **no writes** (logged at config load). The floor is impossible under a Vanilla-only cap, so this is an owner choice if needed.
+- `0 < limit < 8` means **no writes** (logged at config load). Accepted by CS01 (Issue #13 comment 6884895017): never force a TBC-race bot past an explicit Vanilla cap.
 - A target above a positive limit is capped at the limit.
 - A saved stage above a later-lowered limit is kept untouched.
 
 ### Legacy options
-`PreserveVerifiedRandomBotStageOnLogin`, `ForceVerifiedRandomBotTbcFloorOnLogin`, `ProtectVerifiedRandomBotStageFloor` and `ProtectVerifiedRandomBotGroupFloor` are unchanged (still default 0). With the new rule ON, they're redundant. Deprecating them is an owner/CS01 choice.
+`PreserveVerifiedRandomBotStageOnLogin`, `ForceVerifiedRandomBotTbcFloorOnLogin`, `ProtectVerifiedRandomBotStageFloor` and `ProtectVerifiedRandomBotGroupFloor` are unchanged (still default 0).
+- **CS01 decision (6884895017):** keep them present and default OFF for compatibility/history, but treat them as **legacy/deprecated** when the unified switch is used. Don't delete them yet. The new key's config block says so.
+- **CS01 decision:** the old Core visibility-refresh compile dependency is dropped for this rule (it belonged to the paused concealment design).
 
 ## One-time repair versus ongoing enforcement
 - **One-time:** happens at each bot's next login. Nothing touches offline characters or the database.
