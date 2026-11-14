@@ -7,11 +7,11 @@
 - the parent is the accepted social tree (`6634881458e7` = tree of `5918174b`);
 - source/native/contract/mutation evidence only; not built into a server, not played, nothing live.
 
-**Seams:** Core DRAFT #28 `137d5a27690bf5bae6e95b32e7f2df449b1a0863` (`COSMIC_F14_GUILD_POLICY_HOOK_VERSION 1`), providing:
-- `GuildScript::CanAddMember(Guild const*, ObjectGuid)`, called in `Guild::AddMember` before any petition, membership, DB or broadcast mutation;
+**Seams:** Core DRAFT #28 **v2** `2b356ff99ea93a1c8da1323aa1a07a6bb96384f0` (`COSMIC_F14_GUILD_POLICY_HOOK_VERSION 2`; v1 `137d5a27` is no longer consumed), providing:
+- `GuildScript::CanAddMember(Guild const*, uint32 guildId, ObjectGuid)`, called in `Guild::AddMember` with `m_id` before any petition, membership, DB or broadcast mutation. Off the world thread the IP consumer uses only the passed `guildId` and GUID, with **no Guild access at all**;
 - `GuildScript::CanSendChatToMember(Guild const*, Player* sender, Player* receiver, bool officerOnly, uint32 language, std::string_view msg)`, called per online recipient in `Guild::BroadcastToGuild`.
 
-**Unpatched Core:** every guild-policy piece is inside `#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1`, so on Core25 the behaviour is stock (verified by syntax checks against both trees).
+**Unpatched Core:** every guild-policy piece is inside `#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 2`, so on Core25 and on #28 v1 the guild code is compiled out (verified by syntax checks against Core25, #28 v1 and #28 v2).
 
 **Owner policy:**
 - **Option B:** a still-Vanilla human (real client) and a positively verified Blood Elf/Draenei RandomBot share neither guild membership nor guild chat. Humans, Altbots, SelfBots and unknown identities are never bot-removal targets, and race alone is never used.

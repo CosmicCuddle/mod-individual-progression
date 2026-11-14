@@ -196,7 +196,7 @@ namespace
     }
 
     // Dungeon Finder facts captured at queue join, by GUID (see policy).
-#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1
+#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 2
     // Guild remediation work (values only) for the world update.
     std::mutex& GuildRemediationLock()
     {
@@ -430,7 +430,7 @@ namespace
                 std::lock_guard<std::mutex> lock(ConfirmedLock());
                 Confirmed().Forget(player->GetGUID().GetRawValue());
             }
-#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1
+#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 2
             // Owner decision (14 Nov 2026): a still-Vanilla human's login to
             // a guild removes its restricted bots (next world update).
             MarkGuildRemediation(player);
@@ -974,7 +974,7 @@ namespace
     };
 #endif
 
-#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1
+#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 2
     // Live scan of the members other than `except` (world thread): is a
     // still-Vanilla human online, and which members are restricted bots
     // (online by live facts, offline only if confirmed at their last logout).
@@ -1080,7 +1080,7 @@ namespace
             RecheckLateJoin(guildId, ObjectGuid(joiner));
     }
 
-    // Core #28 seams (COSMIC_F14_GUILD_POLICY_HOOK_VERSION).
+    // Core #28 seams (COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 2: CanAddMember receives the guild id).
     class F14SocialIsolationGuildPolicyScript final : public GuildScript
     {
     public:
@@ -1090,19 +1090,22 @@ namespace
         // Before any petition, membership, DB or broadcast mutation. Only on
         // the world thread (guild and members may be read); anywhere else
         // fail open. Only a positively restricted bot is ever refused.
-        bool CanAddMember(Guild const* guild, ObjectGuid guid) override
+        bool CanAddMember(Guild const* guild, uint32 guildId, ObjectGuid guid) override
         {
-            if (!OptionOn() || !guild || !guid)
+            if (!OptionOn() || !guildId || !guid)
                 return true;
             if (!WorldThread().IsCurrent())
             {
-                // Values only: no Player or Guild read here. Allowed now,
-                // re-checked at the next world update (Playerbots level-up
-                // re-roll calls InitGuild from a map worker).
+                // Values only: the guild id Core passes and the GUID; no
+                // Player or Guild access at all. Allowed now, re-checked at
+                // the next world update (Playerbots level-up re-roll calls
+                // InitGuild from a map worker).
                 std::lock_guard<std::mutex> lock(GuildRemediationLock());
-                GuildLateJoins().Mark(guild->GetId(), guid.GetRawValue());
+                GuildLateJoins().Mark(guildId, guid.GetRawValue());
                 return true;
             }
+            if (!guild)
+                return true;
             bool joinerBot = false;
             if (Player const* joiner = ObjectAccessor::FindPlayer(guid))
                 joinerBot = Policy::BotIsRestrictedRandomBot(ReadBot(joiner));
@@ -1161,7 +1164,7 @@ namespace
         {
             WorldThread().Mark();
             SendPendingReplies();
-#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1
+#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 2
             RemediatePendingGuilds();
 #endif
         }
@@ -1199,7 +1202,7 @@ void AddSC_mod_individual_progression_f14_social_isolation()
 #if defined(COSMIC_F14_GUILD_INVITE_HOOK_VERSION) && COSMIC_F14_GUILD_INVITE_HOOK_VERSION >= 1
     new F14SocialIsolationGuildScript();
 #endif
-#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1
+#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 2
     new F14SocialIsolationGuildPolicyScript();
 #endif
 }

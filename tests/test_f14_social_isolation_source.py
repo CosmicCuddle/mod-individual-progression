@@ -304,7 +304,7 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertNotIn("sLFGMgr", veto)
 
     def test_guild_policy_core28_consumer(self):
-        guard = "#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1"
+        guard = "#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 2"
         raw = read(SCRIPT)
         # Every guild-policy piece is compiled only against Core #28.
         self.assertEqual(raw.count(guard), 5)  # accessors, login mark, scripts, update call, registration
@@ -316,12 +316,16 @@ class HooksAndAuthority(unittest.TestCase):
             self.assertGreater(before.rfind(guard), before.rfind("#endif"), name)
         # Admission: before persistence, world thread only, fail open
         # elsewhere; only a positively restricted bot is refused.
-        add = self.body("bool CanAddMember(Guild const* guild, ObjectGuid guid) override", "\n        }\n")
-        self.assertRegex(add, r"if \(!OptionOn\(\) \|\| !guild \|\| !guid\)\s*return true;")
+        add = self.body("bool CanAddMember(Guild const* guild, uint32 guildId, ObjectGuid guid) override", "\n        }\n")
+        self.assertNotIn("COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1", raw)  # v2 signature required
+        self.assertRegex(add, r"if \(!OptionOn\(\) \|\| !guildId \|\| !guid\)\s*return true;")
         # Off the world thread: values only (guild id + GUID), allow, re-check later.
         off = add.split("if (!WorldThread().IsCurrent())", 1)[1].split("\n            }\n", 1)[0]
-        self.assertIn("GuildLateJoins().Mark(guild->GetId(), guid.GetRawValue());", off)
+        self.assertIn("GuildLateJoins().Mark(guildId, guid.GetRawValue());", off)
         self.assertRegex(off, r"return true;\s*$")
+        self.assertNotIn("guild->", off)   # no Guild access at all off the world thread
+        self.assertNotIn("guild)", off)
+        self.assertLess(add.index("if (!WorldThread().IsCurrent())"), add.index("if (!guild)\n                return true;"))
         for token in ("FindPlayer", "ReadBot", "ReadHuman", "ScanGuild", "GetUnorderedMembers", "Confirmed()"):
             self.assertNotIn(token, off, token)
         self.assertLess(add.index("if (!WorldThread().IsCurrent())"), add.index("ObjectAccessor::FindPlayer(guid)"))
@@ -403,7 +407,7 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertIsNotNone(upd)
         self.assertEqual([l.strip() for l in upd.group(1).strip().splitlines()],
                          ["WorldThread().Mark();", "SendPendingReplies();",
-                          "#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 1",
+                          "#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 2",
                           "RemediatePendingGuilds();", "#endif"])
         # The per-update record touches only the player this thread updates.
         rec = self.body("void OnPlayerBeforeUpdate(Player* player, uint32 ) override", "\n        }\n")
