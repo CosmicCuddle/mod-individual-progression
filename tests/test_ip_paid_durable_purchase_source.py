@@ -122,6 +122,26 @@ class PurchaseSequence(unittest.TestCase):
         setters = [m.start() for m in re.finditer(r"bits \|=|_paidExpansionFlags\[guid\] \|=", EXP)]
         self.assertEqual(len(setters), 4)  # SetPaidExpansionFlag, 2x load, callback
 
+    def test_refresh_only_after_confirmed_grant(self):
+        # CS01 6885129881: phasing/adjustments refresh after the bit is set,
+        # for the same in-world character, never before the async commit.
+        c = code(body(EXP, SIG_COMPLETE))
+        grant_bit = c.index("_paidExpansionFlags[guid] |=")
+        confirmed = c.index("if (completion == PurchaseState::Completion::GrantAccess)\n    {")
+        refresh = c.index("checkIPPhasing(player, player->GetAreaId());")
+        adjust = c.index("CheckAdjustments(player);")
+        unconfirmed_log = c.index("could not be confirmed")
+        self.assertTrue(grant_bit < confirmed < adjust < refresh < unconfirmed_log)
+        guarded = c[confirmed:refresh]
+        self.assertIn("if (sameCharacter)", guarded)
+        self.assertIn("if (player->IsInWorld())", guarded)
+        self.assertEqual(c.count("checkIPPhasing("), 1)
+        self.assertEqual(c.count("CheckAdjustments("), 1)
+        for sig in (SIG_PURCHASE, SIG_CAN, SIG_LOAD):
+            b = code(body(EXP, sig))
+            self.assertNotIn("checkIPPhasing", b, sig)
+            self.assertNotIn("CheckAdjustments", b, sig)
+
     def test_no_refund_anywhere(self):
         self.assertNotIn("ModifyMoney(static_cast<int32>(costCopper))", EXP)
         self.assertEqual(EXP.count("ModifyMoney("), 1)

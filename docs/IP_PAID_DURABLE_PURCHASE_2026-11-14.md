@@ -26,7 +26,7 @@ Core's ordinary `Player::SaveToDB(bool, bool)` commits fire-and-forget. Before t
 2. **Reserve.** Under the IP lock, the purchase is re-checked and recorded as `Pending`, with a unique token and the session's identity. This happens before any debit.
 3. **Debit and stage.** The gold is debited, and all eight receipt slots are written to the Player settings map and to the IP cache. The entitlement bit is **not** set.
 4. **One transaction.** The code runs `SaveToDB(trans)`, then `session->AddTransactionCallback(CharacterDatabase.AsyncCommitTransaction(trans))`. This is the same Core pattern as `WorldSession::HandleTC9PrepareForRedirect`. The purchase returns **`Submitted`**.
-5. **Callback `true` (same token):** the purchase becomes `Confirmed`, the entitlement bit is set (TBC unlocks the 10259 hand-in; Wrath opens effective stage 13), and the player sees a confirmation.
+5. **Callback `true` (same token):** the purchase becomes `Confirmed`, the entitlement bit is set (TBC unlocks the 10259 hand-in; Wrath opens effective stage 13), and the player sees a confirmation. For the same in-world character, `CheckAdjustments` and `checkIPPhasing(player, GetAreaId())` then run, as after any legitimate progression change (CS01 6885129881). They run only here, never at Submitted, Pending or Unconfirmed.
 6. **Callback `false`:** the purchase becomes `Unconfirmed`. **There is no refund, retry, second charge or receipt reset.** The player is told not to buy again and that the purchase will be checked at the next login.
 
 ### Why gold and receipt can't diverge

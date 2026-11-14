@@ -445,7 +445,17 @@ void IndividualProgression::CompletePaidExpansionPurchase(WorldSession* session,
     {
         LOG_INFO("module", "IndividualProgression: character {} purchase of {} committed", guid, EraName(era));
         if (sameCharacter)
+        {
+            // Access just changed (Wrath: effective 12 -> 13): the same
+            // refresh as any legitimate progression change. Only here, after
+            // GrantAccess; never at Submitted/Pending/Unconfirmed.
+            if (player->IsInWorld())
+            {
+                CheckAdjustments(player);
+                checkIPPhasing(player, player->GetAreaId());
+            }
             ChatHandler(session).PSendSysMessage("|cff00ff00Your purchase of {} is complete.|r", EraName(era));
+        }
         return;
     }
     LOG_ERROR("module", "IndividualProgression: character {} purchase of {} could not be confirmed; NOT refunded or retried (reconcile from the database)",
