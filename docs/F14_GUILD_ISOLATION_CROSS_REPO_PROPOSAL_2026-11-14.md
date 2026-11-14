@@ -35,7 +35,7 @@
 | Bot guild chat | Playerbots `PlayerbotAI.cpp:2954` calls `guild->BroadcastToGuild(bot->GetSession(), …)` **directly** | **no hook at all** | **no** |
 | Guild roster, MOTD, events, bank logs | `Guild::Handle*`, `BroadcastPacket` | none | **no** (membership removal ends it) |
 | A human logs in to a guild that became mixed while they were offline | `OnPlayerLogin` | existing player hook | **yes** (owner decision): a still-Vanilla human's login is marked like that human's join, with the human facts; the same proven removal path runs at the next world update |
-| A human drops back to Vanilla (era regression) while in a guild with a restricted bot | stage change | none used | **no** (not a join; needs an owner decision) |
+| A human drops back to Vanilla (era regression) while in a guild with a restricted bot | stage change | none (by owner decision) | **at the next login**: owner accepted (14 Nov 2026) that nothing happens at the stage change itself; that human's next login runs the login check and removes the restricted bots |
 
 ## 2. IP-local implementation (candidate)
 
@@ -106,7 +106,7 @@ if (!sScriptMgr->OnGuildCanAddMember(this, guid, rankId))
 ## 4. Explicitly UNRESOLVED (not claimed)
 - **Logout before the update, off-thread join:** a joiner added off the world thread (or offline) whose facts are unknown. Logged; no action.
 - **Offline human:** resolved by the owner's login decision. The guild stays mixed only until that human's next login (world thread, option ON).
-- **Era regression:** a human dropping back to Vanilla while sharing a guild with a restricted bot. Owner decision.
+- **Era regression:** decided by the owner (14 Nov 2026): no action at the stage change; handled at that human's next login. Until then the guild stays mixed.
 - **Chat:** the human→bot direction (P-1) and bot direct broadcasts (P-1/P-2).
 - **Window:** the transient add→update window (P-3).
 - **Not built or played:** native build into a server and gameplay.
