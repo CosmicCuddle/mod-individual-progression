@@ -1,0 +1,39 @@
+name: F14 current pair-rights completeness hardening
+on:
+  push:
+    branches:
+      - feature/cs01-ip172-f14-pair-rights-completeness-20261112
+  pull_request:
+    paths:
+      - 'src/IndividualProgressionF14CurrentPairRightsRisk.h'
+      - 'tests/f14_current_pair_rights_risk_test.cpp'
+      - 'tests/test_f14_current_pair_rights_risk_source.py'
+      - 'docs/CUSTOM_MODIFICATIONS_REGISTER.md'
+      - '.github/workflows/f14-current-pair-rights-risk.yml'
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact fail-visible completeness scope
+        run: python3 tests/test_f14_current_pair_rights_risk_source.py
+      - name: Compile and execute current pair-rights completeness model
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in normal ndebug; do
+            extra=()
+            if [ "$mode" = ndebug ]; then extra+=(-DNDEBUG); fi
+            ${{ matrix.compiler }} -std=${{ matrix.standard }} -Wall -Wextra -Werror "${extra[@]}" \
+              -Isrc tests/f14_current_pair_rights_risk_test.cpp -o /tmp/f14_current_pair_rights_risk
+            /tmp/f14_current_pair_rights_risk
+          done

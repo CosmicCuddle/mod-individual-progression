@@ -1,0 +1,55 @@
+name: F14 pinned map-worker vs delayed removal phase boundary source audit OFF
+on:
+  push:
+    branches: [research/cs01-f14-map-worker-vs-delayed-removal-source-audit-off-20261106]
+  pull_request:
+    branches: [research/cs01-f14-stale-snapshot-handoff-failclosed-off-20261106]
+permissions:
+  contents: read
+jobs:
+  pinned-core-phase:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout pinned IP child under review
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify four source/doc/workflow/register files only; no runtime/flag edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=8e3708d2226686fd1424db0b5c14cd706ecf9531
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort >/tmp/actual
+          printf '%s\n' 'tests/test_ip_f14_map_worker_delayed_removal_phase_source.py' '.github/workflows/ip-f14-map-worker-delayed-remove-source-20261106.yml' 'docs/F14_MAP_WORKER_VS_DELAYED_REMOVE_2026-11-06.md' 'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src conf sql data optional)"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' src
+      - name: Checkout actual exact pinned Grim Core for source proof
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: pinned-core
+          sparse-checkout: |
+            src/server/game/Maps/MapMgr.cpp
+            src/server/game/Maps/MapUpdater.cpp
+            src/server/game/Maps/MapInstanced.cpp
+            src/server/game/Maps/Map.cpp
+            src/server/game/World/World.cpp
+            src/server/game/Entities/Creature/Creature.cpp
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Assert exact pinned Core SHA and worker-vs-removal ordering mutation tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C pinned-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          F14_PINNED_MAP_PHASE_CORE_ROOT="$PWD/pinned-core" python3 -B -m unittest discover -s tests -p 'test_ip_f14_map_worker_delayed_removal_phase_source.py' -v
+          echo 'PASS: pinned MapUpdater worker/MapMgr wait/MapInstanced child and coordinator Map::DelayedUpdate removal distinct; #108 current-frame marker is NOT delayed owner proof; no runtime or client modifications'

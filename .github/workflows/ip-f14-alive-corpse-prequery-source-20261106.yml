@@ -1,0 +1,106 @@
+# F14 Only/Alive pre-policy suppression negative veto; NO active hide.
+name: F14 Alive-only prequery corpse negative source and model (OFF)
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-alive-prequery-corpse-guard-off-20261106
+  pull_request:
+    branches:
+      - research/cs01-f14-viewer-session-native-ci-off-20261106
+    paths:
+      - 'tests/core_patches/apply_f14_alive_prequery_corpse_veto.py'
+      - 'tests/test_ip_f14_alive_prequery_corpse_veto.py'
+      - 'tests/f14_alive_prequery_corpse_veto_model.cpp'
+      - '.github/workflows/ip-f14-alive-corpse-prequery-source-20261106.yml'
+      - '.github/workflows/ip-f14-alive-corpse-prequery-native-20261106.yml'
+      - 'docs/F14_ALIVE_PREQUERY_CORPSE_GUARD_2026-11-06.md'
+      - 'docs/CUSTOM_MODIFICATIONS_REGISTER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  alive-negative-source:
+    name: "Two F14 paths: non-Alive NPC must not invoke future positive policy; 20480-case model"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact IP child SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify precisely seven child review paths; parent runtime and OFF switches unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=221d7b65c9d1721be9ec936fe16ae38afb9e8f9b
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            'tests/core_patches/apply_f14_alive_prequery_corpse_veto.py' \
+            'tests/test_ip_f14_alive_prequery_corpse_veto.py' \
+            'tests/f14_alive_prequery_corpse_veto_model.cpp' \
+            '.github/workflows/ip-f14-alive-corpse-prequery-source-20261106.yml' \
+            '.github/workflows/ip-f14-alive-corpse-prequery-native-20261106.yml' \
+            'docs/F14_ALIVE_PREQUERY_CORPSE_GUARD_2026-11-06.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src conf sql data optional)"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' src
+          echo 'PASS: 7 review paths; original Worldserver gameplay, paid and positive F14 visibility OFF and unchanged'
+      - name: Checkout exact pinned Grim Core Unit.h Alive-only semantic (read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: pinned-core
+          sparse-checkout: |
+            src/server/game/Entities/Unit/Unit.h
+            src/server/game/Entities/Creature/Creature.cpp
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Verify pinned Alive semantics, corpse/Dead update distinction
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C pinned-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          python3 -B - <<'PY'
+          from pathlib import Path
+          unit = Path("pinned-core/src/server/game/Entities/Unit/Unit.h").read_text()
+          creature = Path("pinned-core/src/server/game/Entities/Creature/Creature.cpp").read_text()
+          assert unit.count("[[nodiscard]] bool IsAlive() const { return (m_deathState == DeathState::Alive); };") == 1
+          assert creature.count("void Creature::Update(uint32 diff)") == 1
+          update = creature.split("void Creature::Update(uint32 diff)", 1)[1]
+          dead = update.split("case DeathState::Dead:", 1)[1].split("case DeathState::Corpse:", 1)[0]
+          corpse = update.split("case DeathState::Corpse:", 1)[1].split("case DeathState::Alive:", 1)[0]
+          assert "Unit::Update(diff);" not in dead
+          assert corpse.count("Unit::Update(diff);") == 1
+          print("PASS: pinned Unit::IsAlive requires strictly Alive, not JustDied/Corpse/Dead/JustRespawned; corpse Unit::Update may stop after Dead")
+          PY
+      - name: Run synthetic composed #111 to #113 Core patch fail-atomic regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_alive_prequery_corpse_veto.py' -v
+      - name: Compile and execute 20480-case no-new-hide death-state model in EIGHT modes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  tests/f14_alive_prequery_corpse_veto_model.cpp -o /tmp/f14-corpse-negative
+                /tmp/f14-corpse-negative
+              done
+            done
+          done
+          echo 'PASS: 20480 assertion-active F14 decision cases in EACH of eight compiler/NDEBUG modes; debt NOT cleared, positive policy remains OFF'

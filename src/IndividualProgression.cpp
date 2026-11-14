@@ -3,8 +3,16 @@
 */
 
 #include "IndividualProgression.h"
+#include "IndividualProgressionGroupPolicy.h"
+#include "IndividualProgressionF14LoginPolicy.h"
+#include "IndividualProgressionF14StageFloorPolicy.h"
+#include "IndividualProgressionF14SocialIsolationPolicy.h"
 #include "naxxramas_40.h"
+#include "Mail.h"
+#include <mutex>
+#include <limits>
 #include "ReputationMgr.h"
+#include "WorldSession.h"
 #include "PetDefines.h"
 
 IndividualProgression* IndividualProgression::instance()
@@ -36,7 +44,9 @@ bool IndividualProgression::hasPassedProgression(Player* player, ProgressionStat
     if (progressionLimit && (state > progressionLimit))
         return false;
 
-    return sIndividualProgression->GetPlayerProgressionFromQuests(player) >= state;
+    // Same as the rewarded stage unless the paid expansion feature caps an
+    // unpaid Kil'jaeden (13) character to TBC access (12).
+    return sIndividualProgression->GetEffectiveProgression(player) >= state;
 }
 
 bool IndividualProgression::isBeforeProgression(Player* player, ProgressionState state)
@@ -44,7 +54,7 @@ bool IndividualProgression::isBeforeProgression(Player* player, ProgressionState
     if (!state || !player || !player->IsInWorld())
         return false;
 
-    return sIndividualProgression->GetPlayerProgressionFromQuests(player) < state;
+    return sIndividualProgression->GetEffectiveProgression(player) < state;
 }
 
 void IndividualProgression::UpdateProgressionState(Player* player, ProgressionState newState) const
@@ -53,6 +63,11 @@ void IndividualProgression::UpdateProgressionState(Player* player, ProgressionSt
         return;
 
     if (progressionLimit && newState > progressionLimit)
+        return;
+
+    // Paid expansion (default OFF): automatic progression may not open an era
+    // this character has not bought. The grant is refused, not partially applied.
+    if (!sIndividualProgression->IsAutomaticGrantAllowed(player, newState))
         return;
 
     uint8 currentState = GetPlayerProgressionFromQuests(player);
@@ -78,6 +93,21 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
     if (!player || !player->IsInWorld())
         return;
 
+    // F14 stage-8 floor durability (default OFF): every IP-owned route that
+    // could lower an earned stage funnels through here. A refused write is a
+    // no-op: the current earned stage stays exactly as it is.
+    if (sIndividualProgression->BlocksF14VerifiedStageFloorDowngrade(player, static_cast<uint8>(newState)))
+    {
+        uint8 const keptStage = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+        if (IndividualProgressionF14StageFloorPolicy::IsHistoricOverCapStage(keptStage, sIndividualProgression->progressionLimit))
+            LOG_INFO("module", "IndividualProgression F14: refused progression write {} for verified RandomBot guid {}; preserved historic over-cap stage {} (limit {}) untouched",
+                static_cast<uint32>(newState), player->GetGUID().GetCounter(), static_cast<uint32>(keptStage), sIndividualProgression->progressionLimit);
+        else
+            LOG_INFO("module", "IndividualProgression F14: refused progression write {} for verified RandomBot guid {} (earned TBC stage {} kept)",
+                static_cast<uint32>(newState), player->GetGUID().GetCounter(), static_cast<uint32>(keptStage));
+        return;
+    }
+
     if (!newState && newState != 0)
         return;
 
@@ -101,6 +131,8 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
         player->CompleteQuest(PROGRESSION_QUEST);
         player->RewardQuest(quest, 0, player, false, false);
     }
+
+    sIndividualProgression->GrantAttunements(player, newState);
 }
 
 void IndividualProgression::CheckAdjustments(Player* player) const
@@ -289,6 +321,93 @@ void IndividualProgression::UpdateGroupAttunement(Player* player, std::string lo
     }
 }
 
+// Grants the attunements of the raids that state has reached, for a bump only. Nothing is taken back when progression goes down.
+void IndividualProgression::GrantAttunements(Player* player, ProgressionState state)
+{
+    if (!enabled || !AutoAttune || !player || !player->IsInWorld() || isBotAccount(player))
+        return;
+
+    uint8 stage = state;
+    if (progressionLimit && stage > progressionLimit)
+        stage = progressionLimit;
+
+    auto giveItem = [player](uint32 itemId, uint32 otherItemId = 0)
+    {
+        if (player->HasItemCount(itemId, 1, true) || (otherItemId && player->HasItemCount(otherItemId, 1, true)))
+            return;
+
+        // An earlier grant may still be waiting in the mailbox
+        for (Mail const* mail : player->GetMails())
+            for (MailItemInfo const& info : mail->items)
+                if (info.item_template == itemId)
+                    return;
+
+        ItemPosCountVec dest;
+        InventoryResult const result = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, 1);
+        if (result == EQUIP_ERR_OK)
+        {
+            player->AddItem(itemId, 1);
+            return;
+        }
+
+        // Only a full bag is mailed: any other refusal, such as the unique check on an item in a trade window, would make a second copy
+        if (result != EQUIP_ERR_INVENTORY_FULL)
+            return;
+
+        constexpr uint32 NPC_SORIDORMI = 19935;
+        Item* item = Item::CreateItem(itemId, 1, player);
+        if (!item)
+            return;
+
+        CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+        MailDraft draft("Raid attunement", "Your bags were full when your progression granted you this attunement. Mail that is not collected is deleted when it expires, 30 days after it was sent.");
+        item->SaveToDB(transaction);
+        draft.AddItem(item);
+        draft.SendMailTo(transaction, MailReceiver(player, player->GetGUID().GetCounter()), MailSender(MAIL_CREATURE, NPC_SORIDORMI));
+        CharacterDatabase.CommitTransaction(transaction);
+    };
+
+    // Marked as rewarded without the quest's own rewards. A quest in the log leaves it the way an abandon does, slot included, or the next slot walk brings its status back.
+    auto giveQuest = [player](uint32 questId)
+    {
+        QuestStatus const status = player->GetQuestStatus(questId);
+        if (status == QUEST_STATUS_REWARDED)
+            return;
+
+        if (status != QUEST_STATUS_NONE)
+        {
+            uint16 const slot = player->FindQuestSlot(questId);
+            if (slot < MAX_QUEST_LOG_SIZE)
+                player->SetQuestSlot(slot, 0);
+
+            player->TakeQuestSourceItem(questId, false);
+            player->AbandonQuest(questId);
+            player->RemoveActiveQuest(questId);
+        }
+
+        player->SetRewardedQuest(questId);
+    };
+
+    if (stage >= PROGRESSION_MOLTEN_CORE)
+        giveItem(ITEM_DRAKEFIRE_AMULET);
+
+    if (stage >= PROGRESSION_AQ && !isAttuned(player))
+        giveQuest(NAXX40_ATTUNEMENT_1);
+
+    if (stage >= PROGRESSION_TBC_TIER_1)
+    {
+        giveItem(ITEM_TEMPEST_KEY);
+        giveQuest(TRIAL_MAGTHERIDON);
+        giveQuest(CUDGEL_OF_KARDESH);
+    }
+
+    if (stage >= PROGRESSION_TBC_TIER_2)
+    {
+        giveQuest(VIALS_OF_ETERNITY);
+        giveItem(ITEM_MEDALLION_OF_KARABOR, ITEM_BLESSED_MEDALLION_OF_KARABOR);
+    }
+}
+
 void IndividualProgression::RemovePlayerAchievement(ObjectGuid::LowType playerGUID, uint32 achievementId)
 {
 	if (!playerGUID || !achievementId)
@@ -369,15 +488,18 @@ IndividualProgression::AccountMatch IndividualProgression::GetAccountMatch(uint3
             return itr->second;
     }
 
-    // AccountMgr::GetName is a blocking login database query, so it runs without the lock held
+    // AccountMgr::GetName and GetSecurity are blocking login database queries, so they run without the lock held
     std::string accountName;
     if (!AccountMgr::GetName(accountId, accountName))
         return {};
+
+    uint32 const security = AccountMgr::GetSecurity(accountId);
 
     std::unique_lock<std::shared_mutex> lock(_accountMatchLock);
     AccountMatch match;
     match.excluded = std::regex_match(accountName, _excludedAccountsRegex);
     match.bot = std::regex_match(accountName, _botAccountsRegex);
+    match.gm = security >= SEC_GAMEMASTER;
     _accountMatchCache[accountId] = match;
     return match;
 }
@@ -393,6 +515,15 @@ bool IndividualProgression::isExcludedAccount(Player* player)
 bool IndividualProgression::isExcludedAccount(uint32 accountId)
 {
     return GetAccountMatch(accountId).excluded;
+}
+
+// By the account and not the session: a bot's session has player security, also on a GM's account.
+bool IndividualProgression::isGMAccount(Player* player)
+{
+    // Headless or disconnecting Playerbots may not have a session.
+    // Never dereference a missing session while computing optional tier caps.
+    return player && player->GetSession() &&
+        GetAccountMatch(player->GetSession()->GetAccountId()).gm;
 }
 
 bool IndividualProgression::isBotAccount(const Player* player)
@@ -419,6 +550,81 @@ bool IndividualProgression::isNormalAccount(Player* player)
     return true;
 }
 
+#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
+bool IndividualProgression::TryReadF14CachedNormalHumanAccount(uint32 accountId)
+{
+    // Core viewer actor/WHO callbacks MUST NOT call the DB-loading matcher:
+    // on a cache MISS that method runs blocking Auth DB GetName/GetSecurity.
+    // Login-time account classification has already warmed this shared cache
+    // for ordinary IP players; absent/invalidated cache is NOT human proof.
+    if (!accountId)
+        return false;
+    std::shared_lock<std::shared_mutex> lock(_accountMatchLock);
+    auto const itr = _accountMatchCache.find(accountId);
+    return itr != _accountMatchCache.end() &&
+        !itr->second.excluded && !itr->second.bot && !itr->second.gm;
+}
+#endif
+
+// True for gear from an expansion the character has not reached. The id alone would also lock the
+// Death Knight starting gear and heirlooms, which have high ids but a low or no level requirement.
+// A character above its cap, such as a GM's, is not locked: it was never held back by progression.
+bool IndividualProgression::isLockedExpansionGear(Player* player, ItemTemplate const* proto)
+{
+    if (!enabled || !LockLaterExpansionGear || !player || !proto || isExcludedAccount(player))
+        return false;
+
+    if (proto->Class != ITEM_CLASS_WEAPON && proto->Class != ITEM_CLASS_ARMOR)
+        return false;
+
+    uint8 cap;
+    if (isBotAccount(player))
+        cap = BotAccountsMaxLevel;
+    else if (!hasPassedProgression(player, PROGRESSION_PRE_TBC))
+        cap = 60;
+    else if (!hasPassedProgression(player, PROGRESSION_TBC_TIER_5))
+        cap = 70;
+    else
+        return false;
+
+    if (player->GetLevel() > cap)
+        return false;
+
+    if (cap <= 60)
+    {
+        // The Blood Elf and Draenei versions of the vanilla rank gear, sold by the vanilla vendors.
+        if (proto->ItemId >= 29594 && proto->ItemId <= 29617)
+            return false;
+
+        return proto->ItemId >= 23728 && (proto->RequiredLevel >= 57 || proto->ItemLevel > 92);
+    }
+
+    if (cap <= 70)
+    {
+        // TBC gear with WotLK ids: Sunwell jewelcrafting, a Sunwell drop and the last arena and honor rewards.
+        switch (proto->ItemId)
+        {
+            case 35693:
+            case 35694:
+            case 35700:
+            case 35702:
+            case 35703:
+            case 35733:
+            case 36737:
+            case 37739:
+            case 37740:
+            case 37927:
+            case 37928:
+            case 37929:
+                return false;
+        }
+
+        return proto->ItemId >= 35570 && (proto->RequiredLevel >= 67 || proto->ItemLevel > 164);
+    }
+
+    return false;
+}
+
 bool IndividualProgression::isPlayerInDungeonOrRaid(Player* player)
 {
     if (!player || !player->IsInWorld())
@@ -428,9 +634,282 @@ bool IndividualProgression::isPlayerInDungeonOrRaid(Player* player)
     return (map && (map->IsDungeon() || map->IsRaid()));
 }
 
+void IndividualProgression::RememberF14VerifiedRandomBotGroupIdentity(
+    Player* player, bool verified, F14ActorPublicationLoginLease sourceLease)
+{
+    if (!player)
+        return;
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    // A sourceLease captured at OnPlayerLogin ENTRY, before the original
+    // Playerbots verified-login predicates, is passed here. A login already
+    // in progress as config reloads cannot republish under the new generation.
+    // Read Player / Session facts ONLY on the established verified login
+    // source path, OUTSIDE the identity lock. WHO readers never dereference
+    // Player or consult mutable RandomPlayerbotMgr.
+    ObjectGuid const fullGuid = player->GetGUID();
+    WorldSession const* currentSession = player->GetSession();
+    uint32 const accountId = currentSession ? currentSession->GetAccountId() : 0;
+    uint8 const race = player->getRace();
+    bool const canPublishActor = verified && fullGuid.IsPlayer() &&
+        player->IsInWorld() && currentSession && currentSession->IsHeadless() &&
+        !player->IsGameMaster() && isBotAccount(player) && accountId != 0 &&
+        (race == RACE_BLOODELF || race == RACE_DRAENEI);
+#endif
+    // The previous login epoch (if any) is expired from the F14 lifecycle
+    // registry AFTER the identity lock is released (lock order: registry
+    // mutex -> identity lock). Logout/relogin never relies on AttackStop.
+    std::uint64_t expiredLoginEpoch = 0;
+    [&]()
+    {
+        std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+        uint32 const guid = player->GetGUID().GetCounter();
+        auto const previousEpoch = _f14VerifiedRandomBotLoginEpoch.find(guid);
+        if (previousEpoch != _f14VerifiedRandomBotLoginEpoch.end())
+            expiredLoginEpoch = previousEpoch->second;
+        // Always evict the previous login incarnation, even if this call is
+        // an unverified login. An old GUID cannot resurrect a stale attack proof.
+        _f14VerifiedRandomBotGroupCache.erase(guid);
+        _f14VerifiedRandomBotLoginEpoch.erase(guid);
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+        // Revoke the old public identity at the same lock boundary as its
+        // login epoch, even if the new login fails proof or overflows.
+        _f14VerifiedActorPublications.erase(guid);
+#endif
+        if (!verified)
+            return;
+
+        // Keep the historically protected group/login identity independent
+        // of the optional F14 visibility epoch. A token exhaustion must NEVER
+        // weaken established RandomBot group-progression safeguards.
+        _f14VerifiedRandomBotGroupCache[guid] = true;
+
+        // Epoch 0 is always invalid, and wrap would reuse an old token.
+        // On exhaustion, group protections survive but no new event/visibility
+        // incarnation token is issued. The missing token fails visible.
+        if (_f14NextRandomBotLoginEpoch == std::numeric_limits<std::uint64_t>::max())
+            return;
+
+        const std::uint64_t loginEpoch = ++_f14NextRandomBotLoginEpoch;
+        _f14VerifiedRandomBotLoginEpoch[guid] = loginEpoch;
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+        // Config reload may revoke identity between the login precheck
+        // and this lock. Always recheck the atomic while holding the lock.
+        if (canPublishActor && _f14ActorPublicationEnabled.load(std::memory_order_acquire))
+        {
+            if (sourceLease.publicationWasEnabled &&
+                sourceLease.generation ==
+                    _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire))
+                _f14VerifiedActorPublications.emplace(
+                    guid, F14VerifiedActorPublication{fullGuid, accountId, race, loginEpoch});
+        }
+#endif
+    }();
+    ExpireF14LifecycleActor(expiredLoginEpoch);
+}
+
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+void IndividualProgression::BeginF14ActorPublicationConfigReload()
+{
+    // WHO/visibility readers and bot-login writers use the same mutex.
+    // A reload invalidates ALL old snapshots (even if re-enabled): the
+    // next publication must come from a fresh verified bot login.
+    std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    _f14ActorPublicationEnabled.store(false, std::memory_order_release);
+    std::uint64_t const previousGeneration =
+        _f14ActorPublicationReloadGeneration.load(std::memory_order_relaxed);
+    if (previousGeneration != std::numeric_limits<std::uint64_t>::max())
+        _f14ActorPublicationReloadGeneration.store(
+            previousGeneration + 1, std::memory_order_release);
+    _f14VerifiedActorPublications.clear();
+}
+
+void IndividualProgression::FinishF14ActorPublicationConfigReload(bool ipEnabled)
+{
+    // The publication switch must be rearmed under the same identity mutex
+    // as login-lease capture and BeginReload. A login captured during the
+    // reload must never see the NEW generation with the OLD enabled state.
+    std::unique_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    // End is reached only after the existing LoadConfig completed.
+    // Incomplete reload leaves publication OFF, never stale-enabled.
+    if (_f14ActorPublicationReloadGeneration.load(std::memory_order_acquire) ==
+        std::numeric_limits<std::uint64_t>::max())
+        return; // permanent safe OFF, never wrap back into a prior lease
+    _f14ActorPublicationEnabled.store(ipEnabled, std::memory_order_release);
+}
+
+#endif
+
+// Capture the optional source lease at OnPlayerLogin entry. Ordinary builds
+// return a disabled value only; no positive F14 publisher or player hide.
+IndividualProgression::F14ActorPublicationLoginLease
+IndividualProgression::CaptureF14ActorPublicationLoginLease()
+{
+    F14ActorPublicationLoginLease lease;
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    // Serialize BOTH lease fields with BeginReload and FinishReload. An
+    // in-flight OnPlayerLogin either sees the old generation (then fails
+    // under the writer lock) or sees disabled while a reload is open;
+    // it cannot synthesize a new-generation/old-enabled torn snapshot.
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    lease.generation =
+        _f14ActorPublicationReloadGeneration.load(std::memory_order_acquire);
+    lease.publicationWasEnabled =
+        _f14ActorPublicationEnabled.load(std::memory_order_acquire);
+#endif
+    return lease;
+}
+
+// New WHO/actor identity snapshot read does not depend on mutable bot manager,
+// Player*, current world/map pointers, SQL or cached WHO race. A snapshot is
+// ONLY evidence at the lock acquisition; callers MUST revalidate on send,
+// logout, GUID re-use and era changes. Never use it alone to hide anyone.
+bool IndividualProgression::TryReadF14VerifiedActorPublication(
+    ObjectGuid const& fullGuid, F14VerifiedActorPublication& out)
+{
+    out = F14VerifiedActorPublication{};
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+    // The producer remains a diagnostic-only source. On an IP runtime
+    // disable, any old snapshot MUST fail visible immediately, even before
+    // the normal logout hook retires its epoch. out was reset above.
+    // Local atomic snapshot intentionally shadows the historical public
+    // non-atomic 'enabled' field: never read that field from WHO workers.
+    bool const enabled = _f14ActorPublicationEnabled.load(std::memory_order_acquire);
+    if (!enabled || !fullGuid || !fullGuid.IsPlayer())
+        return false;
+
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    // A reload may begin after the first atomic read but before this
+    // shared lock. Retry under the lock, paired with reload's exclusive
+    // lock, to avoid returning an old published identity.
+    if (!_f14ActorPublicationEnabled.load(std::memory_order_acquire))
+        return false;
+    uint32 const lowGuid = fullGuid.GetCounter();
+    auto const valid = _f14VerifiedRandomBotGroupCache.find(lowGuid);
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(lowGuid);
+    auto const identity = _f14VerifiedActorPublications.find(lowGuid);
+    if (valid == _f14VerifiedRandomBotGroupCache.end() || !valid->second ||
+        epoch == _f14VerifiedRandomBotLoginEpoch.end() || !epoch->second ||
+        identity == _f14VerifiedActorPublications.end() ||
+        identity->second.fullGuid != fullGuid ||
+        identity->second.loginEpoch != epoch->second ||
+        !identity->second.accountId ||
+        (identity->second.race != RACE_BLOODELF &&
+         identity->second.race != RACE_DRAENEI))
+        return false;
+
+    out = identity->second;
+    return true;
+#else
+    (void)fullGuid;
+    return false;
+#endif
+}
+
+void IndividualProgression::ForgetF14VerifiedRandomBotGroupIdentity(Player* player)
+{
+    RememberF14VerifiedRandomBotGroupIdentity(player, false);
+}
+
+// Read-only, lock-protected identity: never ask mutable Playerbots state
+// from a per-viewer Core visibility worker. Absence always means visible.
+bool IndividualProgression::HasF14VerifiedRandomBotIdentity(Player const* player)
+{
+    if (!player)
+        return false;
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    uint32 const lowGuid = player->GetGUID().GetCounter();
+    auto const it = _f14VerifiedRandomBotGroupCache.find(lowGuid);
+    if (it == _f14VerifiedRandomBotGroupCache.end() || !it->second)
+        return false;
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(lowGuid);
+    return epoch != _f14VerifiedRandomBotLoginEpoch.end() && epoch->second != 0;
+}
+
+// WHO queries carry a cached GUID. Never look up a target Player or call
+// mutable RandomPlayerbotMgr on a session/WHO worker. Missing means ALLOW.
+// F14 social isolation reply text: read by session handlers, rewritten on
+// .reload, so both sides take this small lock and copy the string.
+std::string IndividualProgression::GetF14SocialIsolationReply()
+{
+    std::lock_guard<std::mutex> lock(_f14SocialIsolationReplyLock);
+    return _f14SocialIsolationReply;
+}
+
+void IndividualProgression::SetF14SocialIsolationReply(std::string reply)
+{
+    std::lock_guard<std::mutex> lock(_f14SocialIsolationReplyLock);
+    _f14SocialIsolationReply = std::move(reply);
+}
+
+bool IndividualProgression::HasF14VerifiedRandomBotGuid(ObjectGuid const& guid)
+{
+    if (!guid)
+        return false;
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    auto const it = _f14VerifiedRandomBotGroupCache.find(guid.GetCounter());
+    if (it == _f14VerifiedRandomBotGroupCache.end() || !it->second)
+        return false;
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(guid.GetCounter());
+    return epoch != _f14VerifiedRandomBotLoginEpoch.end() && epoch->second != 0;
+}
+
+// Read-only, incarnation-safe actor identity. Never consult mutable Playerbots
+// state on visibility/session workers. Zero means no current verified login.
+std::uint64_t IndividualProgression::GetF14VerifiedRandomBotLoginEpoch(ObjectGuid const& guid)
+{
+    if (!guid || !guid.IsPlayer())
+        return 0;
+
+    std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+    uint32 const lowGuid = guid.GetCounter();
+    auto const verified = _f14VerifiedRandomBotGroupCache.find(lowGuid);
+    if (verified == _f14VerifiedRandomBotGroupCache.end() || !verified->second)
+        return 0;
+
+    auto const epoch = _f14VerifiedRandomBotLoginEpoch.find(lowGuid);
+    return epoch == _f14VerifiedRandomBotLoginEpoch.end() ? 0 : epoch->second;
+}
+
+bool IndividualProgression::BlocksF14VerifiedStageFloorDowngrade(Player* player, uint8 requestedStage)
+{
+    // Cheap early exits keep the historical behaviour byte-for-byte when the
+    // option is OFF. Identity is the login-thread verified epoch only; race,
+    // bot account and headless are additional requirements, never proof.
+    if (!enabled || !f14ProtectVerifiedRandomBotStageFloor || !player || !player->IsInWorld())
+        return false;
+    bool const identity = isBotAccount(player) &&
+        (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
+        player->GetSession() && player->GetSession()->IsHeadless() &&
+        HasF14VerifiedRandomBotIdentity(player);
+    // The cap is deliberately NOT an input: refusing is a no-op, never a grant.
+    return IndividualProgressionF14StageFloorPolicy::BlocksVerifiedFloorDowngrade(
+        true, identity, GetPlayerProgressionFromQuests(player), requestedStage);
+}
+
+bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage)
+{
+    // Preserve all historical behaviour unless this independent pilot is
+    // deliberately enabled. Group-policy ON already refuses cross-era joins.
+    if (!enabled || !f14ProtectVerifiedRandomBotGroupFloor || enforceGroupRules ||
+        !player || !player->IsInWorld() || !isBotAccount(player) ||
+        !player->GetSession() || !player->GetSession()->IsHeadless() ||
+        !IndividualProgressionGroupPolicy::IsExpansionRace(player->getRace()))
+        return false;
+
+    {
+        std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+        auto const it = _f14VerifiedRandomBotGroupCache.find(player->GetGUID().GetCounter());
+        if (it == _f14VerifiedRandomBotGroupCache.end() || !it->second)
+            return false;
+    }
+    return IndividualProgressionF14LoginPolicy::SkipVerifiedGroupDowngrade(
+        GetPlayerProgressionFromQuests(player), targetStage, player->GetLevel());
+}
+
 void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
 {
-    if (!group)
+    // Disabling Individual Progression must also disable its group-time quest writes.
+    if (!enabled || !group)
         return;
 
     ObjectGuid leaderGuid = group->GetLeaderGUID();
@@ -441,10 +920,23 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
     if (!leader || !isNormalAccount(leader))
         return;
 
-    uint8 refProgress = GetPlayerProgressionFromQuests(leader);
+    // With group enforcement ON the leader's era is the effective (paid) one;
+    // the established OFF sync keeps the raw stage.
+    uint8 refProgress = enforceGroupRules ? GetEffectiveProgression(leader) : GetPlayerProgressionFromQuests(leader);
 
-    if (!refProgress)
+    // Preserve the historical tier-0 skip with the switch OFF. When grouping
+    // enforcement is ON, Vanilla bots must also sync down to a stage-0 leader.
+    if (!refProgress && !enforceGroupRules)
         return;
+
+    int32 const limit = progressionLimit;
+    if (enforceGroupRules && (limit < 0 || limit > IndividualProgressionGroupPolicy::LastSupportedStage ||
+                              refProgress > IndividualProgressionGroupPolicy::LastSupportedStage ||
+                              (limit && refProgress > limit)))
+        return;
+    uint8 const permittedState = enforceGroupRules
+        ? IndividualProgressionGroupPolicy::EffectiveStage(refProgress, limit)
+        : refProgress;
 
     for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
     {
@@ -452,7 +944,29 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
         if (!member || isNormalAccount(member))
             continue;
 
-        ForceUpdateProgressionState(member, static_cast<ProgressionState>(refProgress));
+        // When group enforcement is enabled, never force a bot/excluded account
+        // across expansion boundaries or admit a TBC-race member to Vanilla.
+        // The global positive-RandomBot starting-floor rule is tracked
+        // separately under F14; do not implement it via account-regex guesses.
+        uint8 const memberStage = GetPlayerProgressionFromQuests(member);
+        if (enforceGroupRules)
+        {
+            if (!IndividualProgressionGroupPolicy::MayGroup(
+                    refProgress, leader->getRace(), memberStage, member->getRace(), limit))
+                continue;
+
+            // A no-op sync must not remove and re-add rewarded progression quests.
+            if (memberStage == permittedState)
+                continue;
+        }
+
+        // F14 default-OFF: no Playerbots identity access on group/map thread.
+        // When the login-verified TBC-race bot has earned its minimum stage,
+        // never downgrade it below the earned TBC floor 8 at any level.
+        if (ShouldSkipF14VerifiedRandomBotGroupDowngrade(member, permittedState))
+            continue;
+
+        ForceUpdateProgressionState(member, static_cast<ProgressionState>(permittedState));
     }
 }
 
@@ -1059,6 +1573,12 @@ class IndividualPlayerProgression_WorldScript : public WorldScript
 private:
     static void LoadConfig()
     {
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+        // Revoke BEFORE reloading the non-atomic legacy options. An old
+        // actor identity must not reappear if .reload disables then
+        // re-enables IP without an intervening bot login.
+        sIndividualProgression->BeginF14ActorPublicationConfigReload();
+#endif
         sIndividualProgression->customProgressionMap.clear();
         sIndividualProgression->enabled = sConfigMgr->GetOption<bool>("IndividualProgression.Enable", true);
         sIndividualProgression->vanillaPowerAdjustment = sConfigMgr->GetOption<float>("IndividualProgression.VanillaPowerAdjustment", 1);
@@ -1072,6 +1592,95 @@ private:
         sIndividualProgression->doableNaxx40Bosses_Patchwerk = sConfigMgr->GetOption<bool>("IndividualProgression.doableNaxx40Bosses_Patchwerk", false);
         sIndividualProgression->doableNaxx40Bosses_Razuvious = sConfigMgr->GetOption<bool>("IndividualProgression.doableNaxx40Bosses_Razuvious", false);
         sIndividualProgression->enforceGroupRules = sConfigMgr->GetOption<bool>("IndividualProgression.EnforceGroupRules", false);
+        sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = sConfigMgr->GetOption<bool>("IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin", false);
+        sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor", false);
+        sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin", false);
+        sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor", false);
+        sIndividualProgression->f14RandomBotSocialIsolation = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.RandomBotSocialIsolation", false);
+        sIndividualProgression->f14RandomBotSocialIsolationReplyCooldownSeconds = sConfigMgr->GetOption<uint32>(
+            "IndividualProgression.F14.RandomBotSocialIsolation.ReplyCooldownSeconds",
+            IndividualProgressionF14SocialIsolationPolicy::DefaultReplyCooldownSeconds);
+        sIndividualProgression->SetF14SocialIsolationReply(sConfigMgr->GetOption<std::string>(
+            "IndividualProgression.F14.RandomBotSocialIsolation.Reply",
+            IndividualProgressionF14SocialIsolationPolicy::DefaultReply));
+        // F14 observer + WHO pilot remains OFF until the separately reviewed,
+        // immediate, per-viewer Core visibility-refresh bridge is present.
+        sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ExperimentalRndbotPlayerVisibility", false);
+#if !defined(COSMIC_F14_OBSERVER_HOOK_VERSION) || !defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION) || !defined(COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION) || COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION < 1
+        if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)
+        {
+            LOG_ERROR("module", "F14 player observer pilot requires Core observer, cached WHO and immediate refresh hooks; forcing OFF");
+            sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = false;
+        }
+#endif
+#if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
+        if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 saved-RandomBot login safeguard requested, but required Playerbots API header is missing: feature is NOT active; forcing OFF");
+            sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin = false;
+        }
+        if (sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 verified RandomBot group floor requires Playerbots API header; forcing OFF");
+            sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor = false;
+        }
+        if (sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 verified RandomBot stage floor requires Playerbots API header; forcing OFF");
+            sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor = false;
+        }
+        if (sIndividualProgression->f14RandomBotSocialIsolation)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 RandomBot social isolation requires Playerbots API header; forcing OFF");
+            sIndividualProgression->f14RandomBotSocialIsolation = false;
+        }
+        if (sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 verified racial RandomBot TBC stage floor requires Playerbots API header; forcing OFF");
+            sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
+        }
+        if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)
+        {
+            LOG_ERROR("module", "F14 observer pilot requires positive Playerbots RandomBot identity; forcing OFF");
+            sIndividualProgression->f14ExperimentalRndbotPlayerVisibility = false;
+        }
+#endif
+#if !defined(COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION) || COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION < 1
+        // The source-only F14 models are NOT sufficient. Never move racial
+        // RandomBots to TBC until the Core refresh bridge is compiled in.
+        if (sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 racial RandomBot TBC stage floor requires Core visibility refresh integration; forcing OFF");
+            sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
+        }
+#endif
+        // F14 attack/corpse lifecycle registry: bookkeeping only (never hides,
+        // never refreshes, never writes stages). Every (re)load starts empty.
+        sIndividualProgression->f14ExperimentalAttackLifecycleRegistry = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.ExperimentalAttackLifecycleRegistry", false);
+#if !defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION) || COSMIC_F14_ATTACK_EVENT_HOOK_VERSION < 1
+        if (sIndividualProgression->f14ExperimentalAttackLifecycleRegistry)
+        {
+            LOG_ERROR("module", "F14 attack lifecycle registry requires the Core attack/corpse event hooks; forcing OFF");
+            sIndividualProgression->f14ExperimentalAttackLifecycleRegistry = false;
+        }
+#endif
+#if !__has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
+        if (sIndividualProgression->f14ExperimentalAttackLifecycleRegistry)
+        {
+            LOG_ERROR("module", "F14 attack lifecycle registry requires positive Playerbots RandomBot identity; forcing OFF");
+            sIndividualProgression->f14ExperimentalAttackLifecycleRegistry = false;
+        }
+#endif
+        // The registry is its own verified-identity source: when ON (and not
+        // forced OFF above), OnPlayerLogin records positive headless BE/Draenei
+        // RandomBot login epochs without enabling any other F14 feature.
+        sIndividualProgression->ResetF14LifecycleRegistry();
         sIndividualProgression->fishingFix = sConfigMgr->GetOption<bool>("IndividualProgression.FishingFix", true);
         sIndividualProgression->VanillaHunterPets = sConfigMgr->GetOption<bool>("IndividualProgression.VanillaHunterPets", true);
         sIndividualProgression->WarlockDemonTrainers = sConfigMgr->GetOption<bool>("IndividualProgression.WarlockDemonTrainers", true);
@@ -1122,6 +1731,18 @@ private:
         sIndividualProgression->LimitedSetRepCommand = sConfigMgr->GetOption<bool>("IndividualProgression.LimitedSetRepCommand", true);
         sIndividualProgression->sharedFactionIdsRegex = sConfigMgr->GetOption<std::string>("IndividualProgression.sharedFactionIdsRegex", "59|270|349|509|510|529|576|589|609|729|730|749|889|890|909");
         sIndividualProgression->BotAccountsMaxLevel = sConfigMgr->GetOption<uint8>("IndividualProgression.BotAccountsMaxLevel", 80);
+        sIndividualProgression->LockLaterExpansionGear = sConfigMgr->GetOption<bool>("IndividualProgression.LockLaterExpansionGear", false);
+        sIndividualProgression->ProfessionTierCap = sConfigMgr->GetOption<bool>("IndividualProgression.ProfessionTierCap", false);
+        sIndividualProgression->AllowVanillaRaidAccess = sConfigMgr->GetOption<bool>("IndividualProgression.AllowVanillaRaidAccess", false);
+        sIndividualProgression->AutoAttune = sConfigMgr->GetOption<bool>("IndividualProgression.AutoAttune", false);
+        sIndividualProgression->paidExpansionEnabled = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.Enable", false);
+        sIndividualProgression->paidExpansionGrandfatherStage13 = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.GrandfatherStage13", false);
+        sIndividualProgression->paidExpansionVendorName = sConfigMgr->GetOption<std::string>("IndividualProgression.PaidExpansion.VendorName", "Chronomancer Vezrath");
+#if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
+        // The atomic actor-source gate is published only after LoadConfig.
+        // The old identity map stays EMPTY until a newly verified login.
+        sIndividualProgression->FinishF14ActorPublicationConfigReload(sIndividualProgression->enabled);
+#endif
     }
 
     static void LoadXpValues()
@@ -1148,14 +1769,77 @@ private:
 public:
     IndividualPlayerProgression_WorldScript() : WorldScript("IndividualProgression_WorldScript") { }
 
-    void OnBeforeConfigLoad(bool /*reload*/) override
+    void OnBeforeConfigLoad(bool reload) override
     {
+        // The paid expansion switch is read at startup only: online characters'
+        // purchase flags are cached at login, so toggling it by .reload could
+        // briefly treat a paid character as unpaid.
+        bool const paidExpansionAtStartup = sIndividualProgression->paidExpansionEnabled;
+        bool const grandfatherAtStartup = sIndividualProgression->paidExpansionGrandfatherStage13;
         LoadConfig();
+        if (reload)
+        {
+            sIndividualProgression->paidExpansionEnabled = paidExpansionAtStartup;
+            sIndividualProgression->paidExpansionGrandfatherStage13 = grandfatherAtStartup;
+        }
         LoadXpValues();
     }
 
-    void OnAfterConfigLoad(bool /*reload*/) override
+    void OnAfterConfigLoad(bool reload) override
     {
+        // Paid expansion flags live in the Core character settings store.
+        // Startup: without it a purchase could not be remembered, so the
+        // feature stays OFF and established progression continues.
+        // Reload: keep the startup value. Turning the gate off here would make
+        // every unpaid stage 13 Wrath-owned; purchases are refused instead.
+        bool const requested = sIndividualProgression->paidExpansionEnabled;
+        bool const storeSaving = sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);
+        sIndividualProgression->paidExpansionEnabled =
+            IndividualProgressionExpansionPolicy::FeatureEnabledAfterConfigLoad(reload, requested, storeSaving);
+        if (requested && !storeSaving)
+        {
+            if (!reload)
+                LOG_ERROR("module", "IndividualProgression.PaidExpansion.Enable requires worldserver EnablePlayerSettings = 1: paid expansion feature is NOT active; forcing OFF");
+            else
+                LOG_ERROR("module", "IndividualProgression: EnablePlayerSettings was turned off by .reload while PaidExpansion is on: the paid gate stays on, purchases are refused, and characters who log in meanwhile read as unpaid (fail closed) until it is restored and the server restarted");
+        }
+
+        // Owner-configured starts and unlocks that hand out an era without a
+        // purchase. Warn only; historical start behaviour is not changed.
+        if (!reload && sIndividualProgression->paidExpansionEnabled)
+        {
+            auto const* ip = sIndividualProgression;
+            // An account gated at stage 13 cannot create a Death Knight while
+            // unpaid (effective stage 12). Warn only if the unlock threshold
+            // is absent or below Wrath access and the DK would start in Wrath.
+            if (ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage &&
+                (ip->deathKnightProgressionLevel == 0 ||
+                 ip->deathKnightProgressionLevel < IndividualProgressionExpansionPolicy::WrathAccessStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: DeathKnightStartingProgression = {} with DeathKnightUnlockProgression = {} may give Wrath without a purchase", ip->deathKnightStartingProgression, ip->deathKnightProgressionLevel);
+            // Check TBC independently: a DK starting at 8..12 can bypass a
+            // lower account creation threshold without owning TBC.
+            if (ip->deathKnightStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage &&
+                (ip->deathKnightProgressionLevel == 0 ||
+                 ip->deathKnightProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: DeathKnightStartingProgression = {} with DeathKnightUnlockProgression = {} may give TBC without a purchase", ip->deathKnightStartingProgression, ip->deathKnightProgressionLevel);
+            // With an account unlock threshold of stage 8, creation already
+            // requires TBC access. Only a lower/absent threshold bypasses it.
+            if (ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage &&
+                (ip->tbcRacesProgressionLevel == 0 ||
+                 ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: tbcRacesStartingProgression = {} with TbcRacesUnlockProgression = {} may give TBC without a purchase", ip->tbcRacesStartingProgression, ip->tbcRacesProgressionLevel);
+            // A TBC-only account can also create a character starting at 13
+            // unless the race unlock requires Wrath ownership independently.
+            if (ip->tbcRacesStartingProgression >= IndividualProgressionExpansionPolicy::WrathAccessStage &&
+                (ip->tbcRacesProgressionLevel == 0 ||
+                 ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::WrathAccessStage))
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: tbcRacesStartingProgression = {} with TbcRacesUnlockProgression = {} may give Wrath without a purchase", ip->tbcRacesStartingProgression, ip->tbcRacesProgressionLevel);
+            if (ip->startingProgression >= IndividualProgressionExpansionPolicy::TbcEntryStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: StartingProgression = {} gives every new character an expansion without a purchase", ip->startingProgression);
+            if (ip->tbcRacesProgressionLevel > 0 && ip->tbcRacesProgressionLevel < IndividualProgressionExpansionPolicy::TbcEntryStage)
+                LOG_WARN("module", "IndividualProgression.PaidExpansion: TbcRacesUnlockProgression = {} lets an unpaid account unlock Blood Elf/Draenei creation; set it to 8 or higher to require a TBC purchase", ip->tbcRacesProgressionLevel);
+        }
+
         if (sIndividualProgression->simpleConfigOverride)
         {
             sWorld->setIntConfig(CONFIG_WATER_BREATH_TIMER, 60000);
@@ -1177,8 +1861,18 @@ public:
     }
 };
 
+void AddSC_ip_paid_expansion();
+
 // Add all scripts in one
+// F14 lifecycle consumer lives in IndividualProgressionF14LifecycleScript.cpp;
+// registered here so the upstream Grim loader stays byte-identical.
+void AddSC_mod_individual_progression_f14_lifecycle();
+void AddSC_mod_individual_progression_f14_social_isolation();
+
 void AddSC_mod_individual_progression()
 {
     new IndividualPlayerProgression_WorldScript();
+    AddSC_ip_paid_expansion();
+    AddSC_mod_individual_progression_f14_lifecycle();
+    AddSC_mod_individual_progression_f14_social_isolation();
 }

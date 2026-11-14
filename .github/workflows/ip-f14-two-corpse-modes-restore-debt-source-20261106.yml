@@ -1,0 +1,83 @@
+name: F14 two corpse modes restoration debt pure model OFF
+on:
+  push:
+    branches: [research/cs01-f14-two-corpse-modes-restore-debt-source-off-20261106]
+  pull_request:
+    branches: [research/cs01-f14-alive-prequery-corpse-guard-off-20261106]
+permissions:
+  contents: read
+jobs:
+  source-and-pure-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout IP review branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Exact change scope and disabled policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=3116ce3938f78d53c39628288b99e8d09a084efc
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort >/tmp/actual
+          printf '%s\n' 'tests/f14_two_corpse_modes_restore_debt.cpp' '.github/workflows/ip-f14-two-corpse-modes-restore-debt-source-20261106.yml' 'docs/F14_TWO_CORPSE_MODES_RESTORE_DEBT_2026-11-06.md' 'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src conf sql data optional)"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' src
+      - name: Checkout exact Grim Core corpse source
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: pinned-core
+          sparse-checkout: |
+            src/server/game/Entities/Creature/Creature.cpp
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Assert both pinned corpse removal branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C pinned-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          python3 -B - <<'PY'
+          from pathlib import Path
+          s = Path('pinned-core/src/server/game/Entities/Creature/Creature.cpp').read_text()
+          assert s.count('void Creature::RemoveCorpse(bool setSpawnTime, bool skipVisibility)') == 1
+          rem = s.split('void Creature::RemoveCorpse(bool setSpawnTime, bool skipVisibility)', 1)[1]
+          rem = rem.split('change the entry of creature until respawn', 1)[0]
+          assert rem.count('if (_respawnCompatibilityMode)') == 1
+          compat, dynamic = rem.split('    else\n    {', 1)
+          assert 'setDeathState(DeathState::Dead);' in compat
+          assert 'DestroyForVisiblePlayers();' in compat
+          assert 'AddObjectToRemoveList();' in dynamic
+          assert 'SaveRespawnTime();' in dynamic
+          assert 'loot.clear();' in compat and 'loot.clear();' in dynamic
+          update = s.split('void Creature::Update(uint32 diff)', 1)[1]
+          dead = update.split('case DeathState::Dead:', 1)[1].split('case DeathState::Corpse:', 1)[0]
+          corpse = update.split('case DeathState::Corpse:', 1)[1].split('case DeathState::Alive:', 1)[0]
+          assert 'Unit::Update(diff);' not in dead
+          assert corpse.index('Unit::Update(diff);') < corpse.index('RemoveCorpse(false);')
+          print('PASS source: both corpse-removal modes, no guaranteed post-Dead Unit update')
+          PY
+      - name: Run original restore protocol in GCC and Clang C++17 and C++20 normal and NDEBUG
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for std in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$std" -Isrc -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" tests/f14_two_corpse_modes_restore_debt.cpp -o /tmp/f14-corpse-restore-debt
+                /tmp/f14-corpse-restore-debt
+              done
+            done
+          done
+          echo 'PASS: 16 original protocol corpse-mode x path x link x relink tests, eight compiler variants; client proof still ABSENT'

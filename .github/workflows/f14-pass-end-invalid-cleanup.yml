@@ -1,0 +1,37 @@
+name: F14 pass End invalid-identity cleanup
+on:
+  push:
+    branches:
+      - feature/cs01-ip166-f14-pass-end-invalid-cleanup-20261112
+  pull_request:
+    paths:
+      - src/IndividualProgressionF14CurrentPassIdentity.h
+      - tests/f14_current_pass_identity_test.cpp
+      - tests/test_f14_pass_end_invalid_cleanup_source.py
+      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
+      - .github/workflows/f14-current-pass-identity.yml
+      - .github/workflows/f14-pass-end-invalid-cleanup.yml
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact IP166 liveness correction boundary
+        run: python3 tests/test_f14_pass_end_invalid_cleanup_source.py
+      - name: Compile and run current pass identity model in normal and NDEBUG
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in normal ndebug; do
+            extra=()
+            if [ "$mode" = ndebug ]; then extra+=(-DNDEBUG); fi
+            ${{ matrix.compiler }} -std=${{ matrix.standard }} -Wall -Wextra -Werror -pthread "${extra[@]}" -Isrc tests/f14_current_pass_identity_test.cpp -o /tmp/f14_current_pass_identity_test
+            /tmp/f14_current_pass_identity_test
+          done

@@ -43,10 +43,9 @@ INSERT INTO `smart_scripts` (`entryorguid`, `source_type`, `id`, `link`, `event_
 -- Vaelastrasz the Corrupt
 UPDATE `creature_template` SET `flags_extra` = 32769 WHERE `entry` = 13020; -- was 1, now includes CREATURE_FLAG_EXTRA_GUARD
 
--- removing the spell script for now, until a solution is found for the threat issue it causes.
 DELETE FROM `spell_script_names` WHERE `spell_id` = 23310 AND `ScriptName` = 'spell_bwl_chromaggus_time_lapse';
--- INSERT INTO `spell_script_names` (`spell_id`, `ScriptName`) VALUES
--- (23310, 'spell_bwl_chromaggus_time_lapse');
+INSERT INTO `spell_script_names` (`spell_id`, `ScriptName`) VALUES
+(23310, 'spell_bwl_chromaggus_time_lapse');
 
 -- Nefarian Loot
 DELETE FROM `creature_loot_template` WHERE `Entry` = 11583;

@@ -1,0 +1,36 @@
+# Read-only Git object identity for a reviewed two-parent development merge.
+# No source edit, no branch update, no host/deploy or database operation.
+name: IP Grim exact source tree identity for dev merge (NO HOST)
+on:
+  pull_request:
+    branches:
+      - integration/cs01-grim-upstream-into-ip46-20261104
+    paths:
+      - ".github/workflows/ip-grim-upstream-tree-identity-20261104.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check-tree:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR development head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Audit parents and print exact existing tree SHA (READ ONLY)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor 26d5b7a1de30ad92a595aaf251fc14754cf54f32 HEAD
+          git show -s --format='%H %s' 42c9a32892740af55a40e076e6381cc879181396
+          test "$(git rev-parse 42c9a32892740af55a40e076e6381cc879181396^{tree})" != ""
+          echo "COSMIC_GRIM_SOURCE_HEAD=$(git rev-parse HEAD)"
+          echo "COSMIC_GRIM_SOURCE_TREE=$(git rev-parse HEAD^{tree})"
+          echo "COSMIC_GRIM_UPSTREAM_PARENT=42c9a32892740af55a40e076e6381cc879181396"
+          echo 'The SHA is information only. No merge commit is created by this job.'

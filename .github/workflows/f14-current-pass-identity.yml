@@ -1,0 +1,46 @@
+name: F14 current pass identity correlation
+on:
+  push:
+    branches:
+      - feature/cs01-ip159-f14-pass-identity-20261112
+  pull_request:
+    paths:
+      - src/IndividualProgressionF14CurrentPassIdentity.h
+      - src/IndividualProgressionF14CurrentCoreLifecycle.cpp
+      - tests/f14_current_pass_identity_test.cpp
+      - tests/test_f14_current_pass_identity_source.py
+      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
+      - .github/workflows/f14-current-pass-identity.yml
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify immutable IP159 additive observer-only source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          hist="$(mktemp -d)/ip159"
+          git worktree add --detach "$hist" 013a2e0e63e41bbd7b21ddf31c6fa4f6fc8ea554
+          python3 "$hist/tests/test_f14_current_pass_identity_source.py"
+          git worktree remove --force "$hist"
+      - name: Compile and run pass identity plus inherited pure safety models
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in normal ndebug; do
+            extra=()
+            if [ "$mode" = ndebug ]; then extra+=(-DNDEBUG); fi
+            for test in f14_current_pass_identity_test f14_current_viewer_session_test f14_departure_storage_bridge_test f14_current_combat_ownership_test f14_owned_restore_shards_test; do
+              ${{ matrix.compiler }} -std=${{ matrix.standard }} -Wall -Wextra -Werror -pthread "${extra[@]}" -Isrc "tests/$test.cpp" -o "/tmp/$test"
+              "/tmp/$test"
+            done
+            ${{ matrix.compiler }} -std=${{ matrix.standard }} -Wall -Wextra -Werror "${extra[@]}" -c src/IndividualProgressionF14CurrentCoreLifecycle.cpp -o /tmp/f14-current-off.o
+          done

@@ -1,0 +1,58 @@
+# F14 guild policy: Core #28 consumer (14 Nov 2026)
+
+## Status and scope
+
+**Status:**
+- an isolated DRAFT candidate on `feature/cs03-ip-f14-guild-core28-consumer-20261114`;
+- the parent is the accepted social tree (`6634881458e7` = tree of `5918174b`);
+- source/native/contract/mutation evidence only; not built into a server, not played, nothing live.
+
+**Seams:** Core DRAFT #28 **v2** `2b356ff99ea93a1c8da1323aa1a07a6bb96384f0` (`COSMIC_F14_GUILD_POLICY_HOOK_VERSION 2`; v1 `137d5a27` is no longer consumed), providing:
+- `GuildScript::CanAddMember(Guild const*, uint32 guildId, ObjectGuid)`, called in `Guild::AddMember` with `m_id` before any petition, membership, DB or broadcast mutation. Off the world thread the IP consumer uses only the passed `guildId` and GUID, with **no Guild access at all**;
+- `GuildScript::CanSendChatToMember(Guild const*, Player* sender, Player* receiver, bool officerOnly, uint32 language, std::string_view msg)`, called per online recipient in `Guild::BroadcastToGuild`.
+
+**Unpatched Core:** every guild-policy piece is inside `#if defined(COSMIC_F14_GUILD_POLICY_HOOK_VERSION) && COSMIC_F14_GUILD_POLICY_HOOK_VERSION >= 2`, so on Core25 and on #28 v1 the guild code is compiled out (verified by syntax checks against Core25, #28 v1 and #28 v2).
+
+**Owner policy:**
+- **Option B:** a still-Vanilla human (real client) and a positively verified Blood Elf/Draenei RandomBot share neither guild membership nor guild chat. Humans, Altbots, SelfBots and unknown identities are never bot-removal targets, and race alone is never used.
+- **New-join instruction:** the bots leave; a bot Guild Master leaves too, by stock succession.
+- **Login remediation:** "Yes remove them on login".
+- **Era regression:** no action at the stage change; the next login handles it.
+
+## Behaviour (option ON; default OFF)
+
+| Event | Seam | Result |
+|---|---|---|
+| A restricted RandomBot is added (client, GM, Playerbots `InitGuild`, offline GUID) to a guild with an **online** still-Vanilla member | `CanAddMember`, world thread | **refused before persistence**; no DB write, no broadcast, no removal needed |
+| The same, off the world thread (Playerbots re-rolls a bot from its level-up hook, `RandomBotLevelMgr` `OnPlayerLevelChanged` → `SkipBotLevel`/`ResetBot` → `PlayerbotFactory::Randomize` → `InitGuild` → `Guild::AddMember`, on a map worker) | `CanAddMember` | allowed then (values only: the guild id and GUID are queued, with no Player/Guild read), **re-checked at the next world update**: a restricted joiner sharing the guild with an online still-Vanilla human is removed, with the same survivor proof |
+| A human, Altbot, ordinary bot or unknown GUID is added | `CanAddMember` | allowed (only a positively restricted bot is ever refused) |
+| A still-Vanilla human **joins** a guild containing restricted bots | `OnEvent(GUILD_EVENT_LOG_JOIN_GUILD)`, world thread | the join is allowed; the restricted bots are removed at the next world update (owner: "the Blood elf or Draenei left") |
+| A still-Vanilla human **logs in** to a guild containing restricted bots | `OnPlayerLogin`, world thread | the same removal at the next world update (owner decision) |
+| A human drops back to Vanilla | none | nothing until that human's next login (owner decision) |
+| Guild or officer chat between a still-Vanilla human and a restricted bot, either direction | `CanSendChatToMember` | that delivery only is suppressed; everyone else receives it; no reply |
+| `LANG_ADDON` guild traffic | `CanSendChatToMember` | always delivered |
+| Chat off the world thread (Playerbots' direct `BroadcastToGuild` from bot AI) | `CanSendChatToMember` | decided only if both players are proven in the owned map, otherwise delivered (T1 fail open) |
+
+## Removal (remediation only)
+- **Work set:** `PendingGuildRemediation`, keyed `(guild id, human)`. It coalesces, **never drops**, and every world update empties it. It's started only by a still-Vanilla real-client human's join or login on the world thread.
+- **At the world update (option still ON):**
+  1. the guild is looked up again, and the human must still be a member (otherwise nothing happens);
+  2. restricted members are online bots by live facts, or offline bots confirmed at their last logout. Unknown members are kept.
+- **Immediately before each removal:** the guild exists, the target is still a member, **the member count is ≥ 2**, and the human is still a member. Then `Guild::DeleteMember(target, false, true, false)`: stock kick flags, `canDeleteGuild` false. With a surviving member, Core's sole-member `Disband()` branch can't be reached.
+- **No calendar cleanup:** stock kick doesn't do it.
+- There is no admission-time `DeleteMember` and no bulk sweep. A human is never removed.
+
+## Remaining dependencies (not claimed)
+- **Playerbots P-2:** closed by PB #22 `d4451103` (bot guild chat queued to the world thread; peer-reviewed PASS at source level). Native/gameplay UNKNOWN.
+- **Playerbots F-5:** bot guild accept (`GuildAcceptAction.cpp:52`) calls Core's accept handler from bot AI, so `AddMember` runs off the world thread and is caught by the late re-check rather than prevented. PB fix: queue `CMSG_GUILD_ACCEPT`.
+- **Playerbots P-4:** bot-guild assignment filter. With admission refused, Playerbots' `InitGuild` just logs a failed add.
+- **Admission off the world thread:** a real caller exists (the Playerbots level-up re-roll, when `ResetBotLevelEnabled`). It's handled by the world-update re-check, so the bot is a member for at most one world update. Chat is filtered per recipient meanwhile (bot sends too, once PB #22 is in). A second caller is PB bot guild accept (F-5).
+- **Human join and login remediation:** removal runs at the next world update, so the roster is shared for that interval. Chat is already filtered per recipient.
+- **Native build and gameplay:** UNKNOWN.
+
+## Evidence
+See the Issue #13 handback for exact counts:
+- **Native:** `TestGuildPolicyCore28` — truth tables, exhaustive 7-kind guilds, a bot leader, multiple bots, the human leaving before the update, OFF before the update, eligible/Altbot/SelfBot/unknown, disband protection, era regression, chat in both directions, addon, mixed recipients, and the non-dropping work set;
+- **Contracts:** `test_guild_policy_core28_consumer`;
+- **Mutations:** C1–C16;
+- **Syntax:** against Core #28, unpatched Core25 and the guild-invite patch.

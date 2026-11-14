@@ -1,0 +1,56 @@
+name: CosmicCuddle F14 atomic actor publication reload barrier OFF (source)
+on:
+  push:
+    branches:
+      - fix/cs01-f14-atomic-publication-reload-revoke-20261108
+  pull_request:
+    branches:
+      - fix/cs01-f14-logout-reload-failvisible-identity-20261108
+permissions:
+  contents: read
+jobs:
+  reload-must-evict-unleased-actor-publication:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact owner IP child
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Confirm immutable IP130 parent and exact six reviewed paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=fb689e84b2cc6f42b8625940d06edda7beaaac4b
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            'src/IndividualProgression.h' \
+            'src/IndividualProgression.cpp' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'tests/test_ip_f14_atomic_publication_reload_source.py' \
+            'docs/F14-ATOMIC-ACTOR-PUBLICATION-RELOAD-20261108.md' \
+            '.github/workflows/f14-ip-atomic-actor-publication-reload-source-20261108.yml' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$base" HEAD -- sql/ data/ conf/)"
+      - name: Source+mutation atomic reload and inherited negative safety suites
+        run: |
+          python3 -B -m unittest discover -s tests -p test_ip_f14_atomic_publication_reload_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_disabled_login_revoke_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_current_actor_publication_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_core6_negative_actor_who_adapter_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_actor_who_unified_publication_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_grim_player_who_observer_source.py -v
+      - name: Original pure native C++ WHO and actual player parity (not runtime)
+        run: |
+          g++ -std=c++17 -O1 -Wall -Wextra -Werror -pedantic -Isrc tests/f14_actor_who_unified_publication.cpp -o /tmp/f14-parity
+          /tmp/f14-parity
+      - name: Evidence boundary
+        if: always()
+        run: |
+          echo 'No real IP/Worldserver source compile here; opt-in macro OFF in normal builds.'
+          echo 'No positive hide, no client packets, SQL/DB, owner host, stage8/paid grant or gameplay test.'
+          echo 'The only goal is fail-visible stale publication on config reload and atomic reads.'
