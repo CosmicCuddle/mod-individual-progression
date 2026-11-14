@@ -69,8 +69,16 @@ class CentralGuard(unittest.TestCase):
         # Null/world check, then the floor guard, before ANY marker removal.
         self.assertEqual(statements[0], "if (!player || !player->IsInWorld())")
         self.assertEqual(statements[1], "return;")
-        self.assertTrue(statements[2].startswith(
-            "if (sIndividualProgression->BlocksF14VerifiedStageFloorDowngrade(player, static_cast<uint8>(newState)))"))
+        # The only statement allowed before this guard is the separately
+        # reviewed F14 TBC floor clamp, which itself writes nothing.
+        guard_line = "if (sIndividualProgression->BlocksF14VerifiedStageFloorDowngrade(player, static_cast<uint8>(newState)))"
+        if not statements[2].startswith(guard_line):
+            self.assertTrue(statements[2].startswith(
+                "if (newState < IndividualProgressionF14TbcFloorPolicy::FirstTbcStage &&"))
+            clamp = fn[:fn.index("BlocksF14VerifiedStageFloorDowngrade")]
+            for token in ("RemoveRewardedQuest", "RewardQuest", "AddQuest", "return;\n    }"):
+                self.assertNotIn(token, clamp.split("IsInWorld())", 1)[1].split("return;", 1)[1], token)
+        self.assertTrue(any(st.startswith(guard_line) for st in statements[2:12]))
         guard = fn[fn.index("BlocksF14VerifiedStageFloorDowngrade"):]
         guard = guard[:guard.index("return;") + len("return;")]
         # Over-cap is a diagnostic only, inside the refusal branch.
@@ -117,7 +125,7 @@ class LoginAndGm(unittest.TestCase):
         login = player.split("void OnPlayerLogin(Player* player) override", 1)[1]
         gate = login[login.index("#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE"):]
         gate = gate[:gate.index("#endif")]
-        self.assertIn("sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor) &&", gate)
+        self.assertRegex(gate, r"sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor(\) &&| \|\|\s*sIndividualProgression->f14VerifiedRandomBotTbcFloor\) &&)")
         self.assertIn("sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter())", gate)
         # The refresh-macro-gated creation floor is unchanged.
         self.assertIn("#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE && defined(COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION) && COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION >= 1", player)

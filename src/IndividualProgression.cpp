@@ -6,6 +6,7 @@
 #include "IndividualProgressionGroupPolicy.h"
 #include "IndividualProgressionF14LoginPolicy.h"
 #include "IndividualProgressionF14StageFloorPolicy.h"
+#include "IndividualProgressionF14TbcFloorPolicy.h"
 #include "IndividualProgressionF14SocialIsolationPolicy.h"
 #include "naxxramas_40.h"
 #include "Mail.h"
@@ -92,6 +93,18 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
 {
     if (!player || !player->IsInWorld())
         return;
+
+    // F14 TBC floor (one authoritative rule, default OFF): any IP-owned
+    // write below TBC for a floored verified BE/Draenei RandomBot lands on
+    // TBC instead (Wrath can fall back to TBC, never to Vanilla).
+    if (newState < IndividualProgressionF14TbcFloorPolicy::FirstTbcStage &&
+        sIndividualProgression->IsF14VerifiedRandomBotTbcFloorTarget(player))
+    {
+        uint8 const clamped = IndividualProgressionF14TbcFloorPolicy::ClampWrite(static_cast<uint8>(newState));
+        LOG_INFO("module", "IndividualProgression F14: progression write {} for verified RandomBot guid {} raised to the TBC floor {}",
+            static_cast<uint32>(newState), player->GetGUID().GetCounter(), static_cast<uint32>(clamped));
+        newState = static_cast<ProgressionState>(clamped);
+    }
 
     // F14 stage-8 floor durability (default OFF): every IP-owned route that
     // could lower an earned stage funnels through here. A refused write is a
@@ -886,6 +899,49 @@ bool IndividualProgression::BlocksF14VerifiedStageFloorDowngrade(Player* player,
         true, identity, GetPlayerProgressionFromQuests(player), requestedStage);
 }
 
+bool IndividualProgression::IsF14VerifiedRandomBotTbcFloorTarget(Player* player)
+{
+    // Cheap early exits keep historical behaviour byte-for-byte when OFF.
+    // Identity is the login-thread verified epoch; race, bot account and
+    // headless are additional requirements, never proof on their own.
+    if (!enabled || !f14VerifiedRandomBotTbcFloor || !player || !player->IsInWorld())
+        return false;
+    bool const identity = isBotAccount(player) &&
+        (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
+        player->GetSession() && player->GetSession()->IsHeadless() &&
+        HasF14VerifiedRandomBotIdentity(player);
+    return IndividualProgressionF14TbcFloorPolicy::FloorApplies(true, identity, progressionLimit);
+}
+
+void IndividualProgression::RepairF14VerifiedRandomBotTbcFloors()
+{
+    if (!enabled || !f14VerifiedRandomBotTbcFloor)
+        return;
+    // Snapshot the verified identities (values only) under the lock, then
+    // resolve and repair outside it. Only already-verified GUIDs are visited.
+    std::vector<uint32> verified;
+    {
+        std::shared_lock<std::shared_mutex> lock(_f14GroupCacheLock);
+        verified.reserve(_f14VerifiedRandomBotGroupCache.size());
+        for (auto const& [lowGuid, isVerified] : _f14VerifiedRandomBotGroupCache)
+            if (isVerified)
+                verified.push_back(lowGuid);
+    }
+    for (uint32 const lowGuid : verified)
+    {
+        Player* player = ObjectAccessor::FindPlayer(ObjectGuid::Create<HighGuid::Player>(lowGuid));
+        if (!player || !IsF14VerifiedRandomBotTbcFloorTarget(player))
+            continue;
+        uint8 const saved = GetPlayerProgressionFromQuests(player);
+        uint8 const target = IndividualProgressionF14TbcFloorPolicy::TargetStage(saved, player->GetLevel(), progressionLimit);
+        if (!IndividualProgressionF14TbcFloorPolicy::NeedsRepair(saved, target))
+            continue;
+        LOG_INFO("module", "IndividualProgression F14: repaired verified RandomBot guid {} from stage {} to TBC floor {} (markers missing)",
+            lowGuid, static_cast<uint32>(saved), static_cast<uint32>(target));
+        ForceUpdateProgressionState(player, static_cast<ProgressionState>(target));
+    }
+}
+
 bool IndividualProgression::ShouldSkipF14VerifiedRandomBotGroupDowngrade(Player* player, uint8 targetStage)
 {
     // Preserve all historical behaviour unless this independent pilot is
@@ -1601,6 +1657,8 @@ private:
             "IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor", false);
         sIndividualProgression->f14RandomBotSocialIsolation = sConfigMgr->GetOption<bool>(
             "IndividualProgression.F14.RandomBotSocialIsolation", false);
+        sIndividualProgression->f14VerifiedRandomBotTbcFloor = sConfigMgr->GetOption<bool>(
+            "IndividualProgression.F14.VerifiedRandomBotTbcFloor", false);
         sIndividualProgression->f14RandomBotSocialIsolationReplyCooldownSeconds = sConfigMgr->GetOption<uint32>(
             "IndividualProgression.F14.RandomBotSocialIsolation.ReplyCooldownSeconds",
             IndividualProgressionF14SocialIsolationPolicy::DefaultReplyCooldownSeconds);
@@ -1644,6 +1702,11 @@ private:
             LOG_ERROR("module", "IndividualProgression F14 verified racial RandomBot TBC stage floor requires Playerbots API header; forcing OFF");
             sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
         }
+        if (sIndividualProgression->f14VerifiedRandomBotTbcFloor)
+        {
+            LOG_ERROR("module", "IndividualProgression F14 verified RandomBot TBC floor requires Playerbots API header; forcing OFF");
+            sIndividualProgression->f14VerifiedRandomBotTbcFloor = false;
+        }
         if (sIndividualProgression->f14ExperimentalRndbotPlayerVisibility)
         {
             LOG_ERROR("module", "F14 observer pilot requires positive Playerbots RandomBot identity; forcing OFF");
@@ -1659,6 +1722,25 @@ private:
             sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
         }
 #endif
+        // The unified verified RandomBot TBC floor supersedes the legacy F14
+        // floor options (CS01 6884969131). Social isolation is independent.
+        if (sIndividualProgression->f14VerifiedRandomBotTbcFloor)
+        {
+            struct LegacyFloorOption { bool* value; char const* key; };
+            LegacyFloorOption const legacyFloorOptions[] = {
+                { &sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin, "PreserveVerifiedRandomBotStageOnLogin" },
+                { &sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin, "ForceVerifiedRandomBotTbcFloorOnLogin" },
+                { &sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor, "ProtectVerifiedRandomBotStageFloor" },
+                { &sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor, "ProtectVerifiedRandomBotGroupFloor" },
+            };
+            for (LegacyFloorOption const& option : legacyFloorOptions)
+            {
+                if (*option.value)
+                    LOG_WARN("module", "IndividualProgression.F14.{} is superseded by IndividualProgression.F14.VerifiedRandomBotTbcFloor; forcing OFF (set it to 0)",
+                        option.key);
+                *option.value = IndividualProgressionF14TbcFloorPolicy::LegacyFloorOptionActive(true, *option.value);
+            }
+        }
         // F14 attack/corpse lifecycle registry: bookkeeping only (never hides,
         // never refreshes, never writes stages). Every (re)load starts empty.
         sIndividualProgression->f14ExperimentalAttackLifecycleRegistry = sConfigMgr->GetOption<bool>(
@@ -1686,6 +1768,10 @@ private:
         sIndividualProgression->WarlockDemonTrainers = sConfigMgr->GetOption<bool>("IndividualProgression.WarlockDemonTrainers", true);
         sIndividualProgression->simpleConfigOverride = sConfigMgr->GetOption<bool>("IndividualProgression.SimpleConfigOverride", true);
         sIndividualProgression->progressionLimit = sConfigMgr->GetOption<uint8>("IndividualProgression.ProgressionLimit", 0);
+        if (sIndividualProgression->f14VerifiedRandomBotTbcFloor &&
+            !IndividualProgressionF14TbcFloorPolicy::LimitAllowsFloor(sIndividualProgression->progressionLimit))
+            LOG_ERROR("module", "IndividualProgression F14 verified RandomBot TBC floor: ProgressionLimit {} is below TBC; the floor makes no writes",
+                sIndividualProgression->progressionLimit);
         sIndividualProgression->startingProgression = sConfigMgr->GetOption<uint8>("IndividualProgression.StartingProgression", 0);
         sIndividualProgression->questMoneyAtLevelCap = sConfigMgr->GetOption<bool>("IndividualProgression.QuestMoneyAtLevelCap", true);
         sIndividualProgression->repeatableVanillaQuestsXp = sConfigMgr->GetOption<bool>("IndividualProgression.RepeatableVanillaQuestsXP", true);
@@ -1868,6 +1954,7 @@ void AddSC_ip_paid_expansion();
 // registered here so the upstream Grim loader stays byte-identical.
 void AddSC_mod_individual_progression_f14_lifecycle();
 void AddSC_mod_individual_progression_f14_social_isolation();
+void AddSC_mod_individual_progression_f14_tbc_floor();
 
 void AddSC_mod_individual_progression()
 {
@@ -1875,4 +1962,5 @@ void AddSC_mod_individual_progression()
     AddSC_ip_paid_expansion();
     AddSC_mod_individual_progression_f14_lifecycle();
     AddSC_mod_individual_progression_f14_social_isolation();
+    AddSC_mod_individual_progression_f14_tbc_floor();
 }
