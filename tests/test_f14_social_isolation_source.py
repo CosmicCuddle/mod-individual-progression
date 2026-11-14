@@ -317,8 +317,23 @@ class HooksAndAuthority(unittest.TestCase):
         # Admission: before persistence, world thread only, fail open
         # elsewhere; only a positively restricted bot is refused.
         add = self.body("bool CanAddMember(Guild const* guild, ObjectGuid guid) override", "\n        }\n")
-        self.assertRegex(add, r"if \(!OptionOn\(\) \|\| !guild \|\| !guid \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return true;")
-        self.assertLess(add.index("WorldThread().IsCurrent()"), add.index("ObjectAccessor::FindPlayer(guid)"))
+        self.assertRegex(add, r"if \(!OptionOn\(\) \|\| !guild \|\| !guid\)\s*return true;")
+        # Off the world thread: values only (guild id + GUID), allow, re-check later.
+        off = add.split("if (!WorldThread().IsCurrent())", 1)[1].split("\n            }\n", 1)[0]
+        self.assertIn("GuildLateJoins().Mark(guild->GetId(), guid.GetRawValue());", off)
+        self.assertRegex(off, r"return true;\s*$")
+        for token in ("FindPlayer", "ReadBot", "ReadHuman", "ScanGuild", "GetUnorderedMembers", "Confirmed()"):
+            self.assertNotIn(token, off, token)
+        self.assertLess(add.index("if (!WorldThread().IsCurrent())"), add.index("ObjectAccessor::FindPlayer(guid)"))
+        late = self.body("void RecheckLateJoin(uint32 guildId, ObjectGuid joinerGuid)", "\n    }\n")
+        self.assertIn("if (!guild || !guild->GetMember(joinerGuid))\n            return;", late)
+        self.assertRegex(late, r"if \(!joinerBot\)\s*return;")
+        self.assertLess(late.index("Policy::GuildLateJoinerRemoved(true, true, anyHuman)"),
+                        late.index("guild->DeleteMember(joinerGuid, false, true, false);"))
+        self.assertIn("!Policy::GuildRemovalSafe(true, true, guild->GetMemberSize(), anyHuman)", late)
+        drain2 = self.body("void RemediatePendingGuilds()", "\n    }\n")
+        self.assertIn("GuildLateJoins().Drain(", drain2)
+        self.assertLess(drain2.index("if (!OptionOn())\n            return;"), drain2.index("RecheckLateJoin("))
         self.assertRegex(add, r"if \(!joinerBot\)\s*return true;")
         self.assertLess(add.index("if (!joinerBot)"), add.index("ScanGuild("))
         self.assertIn("return !Policy::GuildAdmissionRefused(true, true, anyHuman);", add)
@@ -352,7 +367,7 @@ class HooksAndAuthority(unittest.TestCase):
         safe = self.body("void RemoveRestrictedIfSafe(uint32 guildId, ObjectGuid target, ObjectGuid human)", "\n    }\n")
         self.assertIn("bool const reason = guild && guild->GetMember(human);", safe)
         self.assertLess(safe.index("Policy::GuildRemovalSafe("), safe.index("guild->DeleteMember(target, false, true, false);"))
-        self.assertEqual(self.src.count("DeleteMember("), 1)
+        self.assertEqual(self.src.count("DeleteMember("), 2)  # remediation + late re-check
         self.assertNotIn("sCalendarMgr", self.src)
         self.assertNotIn("PendingGuildJoins", self.src)  # the rejected fallback queue is not here
         scan = self.body("void ScanGuild(Guild const& guild, ObjectGuid except, bool& anyOnlineHuman, std::vector<ObjectGuid>* restricted)\n    {", "\n    }\n")
@@ -361,6 +376,7 @@ class HooksAndAuthority(unittest.TestCase):
             self.assertNotIn(token, locked, token)
         policy = strip_comments(read(POLICY))
         self.assertIn("return optionEnabled && joinerRestrictedBot && anyOnlineStillVanillaHumanMember;", policy)
+        self.assertIn("return GuildAdmissionRefused(optionEnabled, joinerRestrictedBot, anyOnlineStillVanillaHumanMember);", policy)
         self.assertIn("return guildExists && targetIsMember && memberCount >= 2 && reasonStillHolds;", policy)
         self.assertIn("return optionEnabled && worldThread && inGuild && stillVanillaHuman;", policy)
         self.assertIn("return online ? onlineRestrictedBot : offlineConfirmed;", policy)

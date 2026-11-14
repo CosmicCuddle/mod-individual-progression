@@ -210,6 +210,14 @@ namespace
         return work;
     }
 
+    // Adds Core performed off the world thread: (guild, joiner) values,
+    // re-checked at the next world update. Same never-dropping set type.
+    Policy::PendingGuildRemediation& GuildLateJoins()
+    {
+        static Policy::PendingGuildRemediation work;
+        return work;
+    }
+
     // World thread only: a still-Vanilla human in a guild (join or login)
     // asks the next world update to remove the restricted bots.
     void MarkGuildRemediation(Player* player)
@@ -1022,20 +1030,54 @@ namespace
             RemoveRestrictedIfSafe(guildId, guid, human);
     }
 
+    // An off-world-thread add, re-checked on the world thread: the joiner
+    // leaves only if it is a restricted bot and an online still-Vanilla
+    // human member exists, re-proven immediately before the removal.
+    void RecheckLateJoin(uint32 guildId, ObjectGuid joinerGuid)
+    {
+        Guild* guild = sGuildMgr->GetGuildById(guildId);
+        if (!guild || !guild->GetMember(joinerGuid))
+            return;
+        bool joinerBot = false;
+        if (Player const* joiner = ObjectAccessor::FindPlayer(joinerGuid))
+            joinerBot = Policy::BotIsRestrictedRandomBot(ReadBot(joiner));
+        else
+        {
+            std::lock_guard<std::mutex> lock(ConfirmedLock());
+            joinerBot = Confirmed().Contains(joinerGuid.GetRawValue());
+        }
+        if (!joinerBot)
+            return;
+        bool anyHuman = false;
+        ScanGuild(*guild, joinerGuid, anyHuman, nullptr);
+        // Nothing runs between this scan and the removal (world thread).
+        if (!Policy::GuildLateJoinerRemoved(true, true, anyHuman) ||
+            !Policy::GuildRemovalSafe(true, true, guild->GetMemberSize(), anyHuman))
+            return;
+        guild->DeleteMember(joinerGuid, false, true, false);
+    }
+
     void RemediatePendingGuilds()
     {
         std::vector<std::pair<uint32, uint64>> work;
+        std::vector<std::pair<uint32, uint64>> late;
         {
             std::lock_guard<std::mutex> lock(GuildRemediationLock());
             GuildRemediation().Drain([&work](std::uint32_t guildId, std::uint64_t human)
             {
                 work.emplace_back(guildId, human);
             });
+            GuildLateJoins().Drain([&late](std::uint32_t guildId, std::uint64_t joiner)
+            {
+                late.emplace_back(guildId, joiner);
+            });
         }
         if (!OptionOn())
             return;
         for (auto const& [guildId, human] : work)
             RemediateGuild(guildId, ObjectGuid(human));
+        for (auto const& [guildId, joiner] : late)
+            RecheckLateJoin(guildId, ObjectGuid(joiner));
     }
 
     // Core #28 seams (COSMIC_F14_GUILD_POLICY_HOOK_VERSION).
@@ -1050,8 +1092,17 @@ namespace
         // fail open. Only a positively restricted bot is ever refused.
         bool CanAddMember(Guild const* guild, ObjectGuid guid) override
         {
-            if (!OptionOn() || !guild || !guid || !WorldThread().IsCurrent())
+            if (!OptionOn() || !guild || !guid)
                 return true;
+            if (!WorldThread().IsCurrent())
+            {
+                // Values only: no Player or Guild read here. Allowed now,
+                // re-checked at the next world update (Playerbots level-up
+                // re-roll calls InitGuild from a map worker).
+                std::lock_guard<std::mutex> lock(GuildRemediationLock());
+                GuildLateJoins().Mark(guild->GetId(), guid.GetRawValue());
+                return true;
+            }
             bool joinerBot = false;
             if (Player const* joiner = ObjectAccessor::FindPlayer(guid))
                 joinerBot = Policy::BotIsRestrictedRandomBot(ReadBot(joiner));

@@ -427,6 +427,16 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         return optionEnabled && worldThread && inGuild && stillVanillaHuman;
     }
 
+    // An add Core performed off the world thread (Playerbots re-rolls a bot
+    // from its level-up hook on a map worker) could not be decided before
+    // persistence. Re-checked at the next world update: a restricted joiner
+    // sharing the guild with an online still-Vanilla human is removed.
+    constexpr bool GuildLateJoinerRemoved(bool optionEnabled, bool joinerRestrictedBot,
+                                          bool anyOnlineStillVanillaHumanMember)
+    {
+        return GuildAdmissionRefused(optionEnabled, joinerRestrictedBot, anyOnlineStillVanillaHumanMember);
+    }
+
     // Re-proven immediately before EVERY removal: the guild exists, the
     // target is still a member, another member survives (so Core's
     // DeleteMember can never disband the guild, whatever its flags), and

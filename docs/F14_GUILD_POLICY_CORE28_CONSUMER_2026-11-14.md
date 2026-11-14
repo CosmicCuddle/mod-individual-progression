@@ -24,7 +24,7 @@
 | Event | Seam | Result |
 |---|---|---|
 | A restricted RandomBot is added (client, GM, Playerbots `InitGuild`, offline GUID) to a guild with an **online** still-Vanilla member | `CanAddMember`, world thread | **refused before persistence**; no DB write, no broadcast, no removal needed |
-| The same, off the world thread | `CanAddMember` | **allowed (fail open)**: no foreign Player/Guild traversal off the world thread |
+| The same, off the world thread (Playerbots re-rolls a bot from its level-up hook, `RandomBotLevelMgr` `OnPlayerLevelChanged` → `SkipBotLevel`/`ResetBot` → `PlayerbotFactory::Randomize` → `InitGuild` → `Guild::AddMember`, on a map worker) | `CanAddMember` | allowed then (values only: the guild id and GUID are queued, with no Player/Guild read), **re-checked at the next world update**: a restricted joiner sharing the guild with an online still-Vanilla human is removed, with the same survivor proof |
 | A human, Altbot, ordinary bot or unknown GUID is added | `CanAddMember` | allowed (only a positively restricted bot is ever refused) |
 | A still-Vanilla human **joins** a guild containing restricted bots | `OnEvent(GUILD_EVENT_LOG_JOIN_GUILD)`, world thread | the join is allowed; the restricted bots are removed at the next world update (owner: "the Blood elf or Draenei left") |
 | A still-Vanilla human **logs in** to a guild containing restricted bots | `OnPlayerLogin`, world thread | the same removal at the next world update (owner decision) |
@@ -45,7 +45,7 @@
 ## Remaining dependencies (not claimed)
 - **Playerbots P-2:** bot guild chat calls `Guild::BroadcastToGuild` from bot AI on a map thread. The recipient hook then usually fails open. Routing it through the world thread is the PB fix.
 - **Playerbots P-4:** bot-guild assignment filter. With admission refused, Playerbots' `InitGuild` just logs a failed add.
-- **Admission off the world thread:** fails open. Whether any real caller adds off the world thread is a runtime inventory item.
+- **Admission off the world thread:** a real caller exists (the Playerbots level-up re-roll, when `ResetBotLevelEnabled`). It's handled by the world-update re-check, so the bot is a member for at most one world update. Chat is filtered per recipient meanwhile, but the bot's own sends from bot AI fail open (P-2).
 - **Human join and login remediation:** removal runs at the next world update, so the roster is shared for that interval. Chat is already filtered per recipient.
 - **Native build and gameplay:** UNKNOWN.
 

@@ -1381,6 +1381,17 @@ namespace
             CHECK(delivered == 4); // only the Vanilla human misses the bot's line
         }
 
+        // Late (off-world-thread) adds: the restricted joiner leaves only
+        // beside an online still-Vanilla human; others stay; OFF nothing.
+        for (int o2 = 0; o2 < 2; ++o2)
+            for (int b2 = 0; b2 < 2; ++b2)
+                for (int h2 = 0; h2 < 2; ++h2)
+                    CHECK(P::GuildLateJoinerRemoved(o2, b2, h2) == (o2 && b2 && h2));
+        // The late removal's own survivor proof: an online human member is the
+        // survivor, so the count is >= 2 whenever the removal is allowed.
+        CHECK(P::GuildLateJoinerRemoved(true, true, true) && P::GuildRemovalSafe(true, true, 2, true));
+        CHECK(!P::GuildRemovalSafe(true, true, 1, false)); // sole member: never
+
         // Pending remediation: coalescing, never drops, emptied by a drain.
         P::PendingGuildRemediation work;
         work.Mark(0, 1);
