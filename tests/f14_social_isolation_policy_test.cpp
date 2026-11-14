@@ -1074,6 +1074,37 @@ namespace
     }
 }
 
+namespace
+{
+    // Replies decided off the world thread wait in a bounded queue and are
+    // sent once from the world update; full means dropped, never unbounded.
+    void TestPendingReplies()
+    {
+        P::PendingReplies<3> pending;
+        CHECK(!pending.Push(0, 5) && !pending.Push(5, 0));   // no GUID: ignored
+        CHECK(pending.Push(1, 10) && pending.Push(2, 20) && pending.Push(3, 30));
+        CHECK(!pending.Push(4, 40));                          // full: dropped
+        CHECK(pending.Size() == 3 && pending.Dropped() == 1);
+        std::vector<std::uint64_t> order;
+        pending.Drain([&](std::uint64_t h, std::uint64_t b) { order.push_back(h * 100 + b); });
+        CHECK((order == std::vector<std::uint64_t>{110, 220, 330}));   // oldest first, once each
+        CHECK(pending.Size() == 0);
+        unsigned again = 0;
+        pending.Drain([&](std::uint64_t, std::uint64_t) { ++again; });
+        CHECK(again == 0);                                    // nothing is sent twice
+        CHECK(pending.Push(4, 40) && pending.Size() == 1);    // usable again after a drain
+
+        // One reply per cooldown window survives deferral: the limiter is
+        // consulted before queueing, so a burst queues at most one.
+        P::ReplyLimiter<8> limiter;
+        P::PendingReplies<16> queue;
+        for (int attempt = 0; attempt < 10; ++attempt)
+            if (limiter.MayReply(7, 70, 1000, 60))
+                queue.Push(7, 70);
+        CHECK(queue.Size() == 1);
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -1098,6 +1129,7 @@ int main()
     TestBattlegroundMatcher();
     TestDuelAndMail();
     TestOfflineMail();
+    TestPendingReplies();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

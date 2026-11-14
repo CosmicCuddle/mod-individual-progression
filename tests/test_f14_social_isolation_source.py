@@ -276,7 +276,8 @@ class HooksAndAuthority(unittest.TestCase):
         # The world-update hook only marks the thread and tick; it reads nothing.
         upd = re.search(r"void OnUpdate\(uint32\s*\)\s*override\s*\{([^}]*)\}", self.src)
         self.assertIsNotNone(upd)
-        self.assertEqual(upd.group(1).strip(), "WorldThread().Mark();")
+        self.assertEqual([l.strip() for l in upd.group(1).strip().splitlines()],
+                         ["WorldThread().Mark();", "SendPendingReplies();"])
         # The per-update record touches only the player this thread updates.
         rec = self.body("void OnPlayerBeforeUpdate(Player* player, uint32 ) override", "\n        }\n")
         self.assertIn("ThisThreadOwnedMap() = {player->FindMap(), WorldThread().Tick(), true};", rec)
@@ -363,13 +364,24 @@ class HooksAndAuthority(unittest.TestCase):
     def test_reply_is_a_direct_packet_not_a_whisper(self):
         self.assertNotRegex(self.src, r"\bWhisper\(")
         reply = self.src.split("void SendInCharacterReply(", 1)[1].split("\n    }\n", 1)[0]
-        self.assertIn("ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, LANG_UNIVERSAL, bot, human, text);", reply)
-        self.assertIn("human->SendDirectMessage(&data);", reply)
-        self.assertLess(reply.index("MayReply("), reply.index("BuildChatPacket("))
+        packet = self.src.split("void SendReplyPacket(Player const* bot, Player* human)", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, LANG_UNIVERSAL, bot, human, text);", packet)
+        self.assertIn("human->SendDirectMessage(&data);", packet)
         # Operator text is normalized (one line, bounded) right before the sink.
-        self.assertIn("Policy::NormalizeReply(sIndividualProgression->GetF14SocialIsolationReply())", reply)
-        self.assertLess(reply.index("NormalizeReply("), reply.index("BuildChatPacket("))
-        self.assertLess(reply.index("if (text.empty())"), reply.index("BuildChatPacket("))
+        self.assertIn("Policy::NormalizeReply(sIndividualProgression->GetF14SocialIsolationReply())", packet)
+        self.assertLess(packet.index("NormalizeReply("), packet.index("BuildChatPacket("))
+        self.assertLess(packet.index("if (text.empty())"), packet.index("BuildChatPacket("))
+        # The cooldown is spent first; off the world thread the reply is only
+        # queued, and packets are sent only from the world thread.
+        self.assertLess(reply.index("MayReply("), reply.index("if (!WorldThread().IsCurrent())"))
+        off = reply.split("if (!WorldThread().IsCurrent())", 1)[1].split("return;", 1)[0]
+        self.assertIn("PendingReplies().Push(human->GetGUID().GetRawValue(), bot->GetGUID().GetRawValue());", off)
+        self.assertNotIn("SendDirectMessage", reply)
+        self.assertEqual(self.src.count("SendDirectMessage("), 1)
+        self.assertEqual(self.src.count("SendReplyPacket("), 3)  # definition, direct world-thread send, drain
+        drain = self.src.split("void SendPendingReplies()", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("ObjectAccessor::FindPlayer(ObjectGuid(humanGuid))", drain)
+        self.assertIn("ObjectAccessor::FindPlayer(ObjectGuid(botGuid))", drain)
         self.assertIn("constexpr std::size_t MaxReplyBytes = 512;", read(POLICY))
         self.assertIn("std::lock_guard<std::mutex> lock(ReplyLock());", reply)
 

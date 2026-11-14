@@ -202,6 +202,53 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         return onWorldThread || (ownedScopeValid && firstInOwnedMap && secondInOwnedMap);
     }
 
+    // Replies decided off the world thread (for example a duel request,
+    // processed in the caster's map update) are not sent there: they wait
+    // here and the world-thread update sends them. Bounded: when full, the
+    // reply is dropped (the interaction stays blocked either way).
+    template<std::size_t Capacity>
+    class PendingReplies
+    {
+        static_assert(Capacity > 0, "pending replies need capacity");
+
+    public:
+        bool Push(std::uint64_t human, std::uint64_t bot)
+        {
+            if (!human || !bot || _size == Capacity)
+            {
+                if (_size == Capacity)
+                    ++_dropped;
+                return false;
+            }
+            _items[_size++] = Item{human, bot};
+            return true;
+        }
+
+        // Hands every waiting reply to `send(human, bot)` once, oldest
+        // first, and empties the queue.
+        template<typename Send>
+        void Drain(Send send)
+        {
+            std::size_t const count = _size;
+            _size = 0;
+            for (std::size_t i = 0; i < count; ++i)
+                send(_items[i].human, _items[i].bot);
+        }
+
+        std::size_t Size() const { return _size; }
+        std::uint64_t Dropped() const { return _dropped; }
+
+    private:
+        struct Item
+        {
+            std::uint64_t human = 0;
+            std::uint64_t bot = 0;
+        };
+        std::array<Item, Capacity> _items{};
+        std::size_t _size = 0;
+        std::uint64_t _dropped = 0;
+    };
+
     // Dungeon Finder (owner decision 13 Nov 2026): a still-Vanilla human
     // who queues is never matched into one group with a restricted
     // RandomBot. TBC/Wrath humans keep stock matching. The facts are taken

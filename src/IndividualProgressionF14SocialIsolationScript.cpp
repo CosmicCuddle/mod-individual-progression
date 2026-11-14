@@ -121,6 +121,50 @@ namespace
     // One in-character whisper from the bot to the human, rate-limited per
     // pair. Sent only to the human's own session; nothing is written to the
     // bot. An empty configured reply disables the answer, not the block.
+    Policy::WorldThreadMarker& WorldThread();
+
+    std::mutex& PendingRepliesLock()
+    {
+        static std::mutex lock;
+        return lock;
+    }
+
+    Policy::PendingReplies<256>& PendingReplies()
+    {
+        static Policy::PendingReplies<256> pending;
+        return pending;
+    }
+
+    // Build and send one reply. World thread only.
+    void SendReplyPacket(Player const* bot, Player* human)
+    {
+        // One line, bounded length; empty means decline silently.
+        std::string const text = Policy::NormalizeReply(sIndividualProgression->GetF14SocialIsolationReply());
+        if (text.empty())
+            return;
+        WorldPacket data;
+        ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, LANG_UNIVERSAL, bot, human, text);
+        human->SendDirectMessage(&data);
+    }
+
+    // World thread: send every reply that was decided elsewhere. Both
+    // players are looked up again; anyone gone simply gets no reply.
+    void SendPendingReplies()
+    {
+        Policy::PendingReplies<256> due;
+        {
+            std::lock_guard<std::mutex> lock(PendingRepliesLock());
+            PendingReplies().Drain([&due](uint64 human, uint64 bot) { due.Push(human, bot); });
+        }
+        due.Drain([](uint64 humanGuid, uint64 botGuid)
+        {
+            Player* human = ObjectAccessor::FindPlayer(ObjectGuid(humanGuid));
+            Player const* bot = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
+            if (human && bot && human->GetSession())
+                SendReplyPacket(bot, human);
+        });
+    }
+
     void SendInCharacterReply(Player const* bot, Player* human)
     {
         if (!bot || !human || !human->GetSession())
@@ -134,13 +178,16 @@ namespace
         }
         if (!mayReply)
             return;
-        // One line, bounded length; empty means decline silently.
-        std::string const text = Policy::NormalizeReply(sIndividualProgression->GetF14SocialIsolationReply());
-        if (text.empty())
+        // Packets are sent only from the world thread; a reply decided on a
+        // map thread waits for the world update (the cooldown is already
+        // spent, so it is still at most one reply per window).
+        if (!WorldThread().IsCurrent())
+        {
+            std::lock_guard<std::mutex> lock(PendingRepliesLock());
+            PendingReplies().Push(human->GetGUID().GetRawValue(), bot->GetGUID().GetRawValue());
             return;
-        WorldPacket data;
-        ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, LANG_UNIVERSAL, bot, human, text);
-        human->SendDirectMessage(&data);
+        }
+        SendReplyPacket(bot, human);
     }
 
     // Dungeon Finder facts captured at queue join, by GUID (see policy).
@@ -825,6 +872,7 @@ namespace
         void OnUpdate(uint32 /*diff*/) override
         {
             WorldThread().Mark();
+            SendPendingReplies();
         }
     };
 
