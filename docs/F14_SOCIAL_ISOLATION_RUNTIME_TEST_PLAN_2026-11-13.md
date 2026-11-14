@@ -83,6 +83,8 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | GM7 | a guild whose only other member is a restricted bot Guild Master; H0 joins | the bot is removed, H0 becomes Guild Master by stock succession; the guild is never disbanded |
 | GM8 | R types in guild chat and officer chat while H0 (guild member) is online | R's message is refused; with H0 offline or stage 8+, stock |
 | GM9 | H0 types in guild chat while R is still a member (transient window) | **known gap**: R receives it (needs Core P-1) |
+| GM10 | while H0 is offline, a restricted RandomBot is added to H0's guild; H0 then logs in | the bot is removed at the next world update after H0's login (owner decision) |
+| GM11 | as GM10, but H0 is stage 8+, or the logging-in member is an Altbot or a bot | nobody is removed |
 | GI1 | (patched Core only) H0's guild officer invites R; R's guild invites H0 | no invitation is sent; H0 gets one reply when H0 started it |
 | GI2 | (patched Core only) H8 invites R | stock |
 | OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |

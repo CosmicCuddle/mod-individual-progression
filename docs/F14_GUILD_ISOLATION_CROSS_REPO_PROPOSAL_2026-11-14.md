@@ -16,9 +16,9 @@
 - real human Blood Elf/Draenei characters, Altbots, SelfBots and unknown identities are outside the rule;
 - eligible (TBC/Wrath) humans interact normally.
 
-**Boundary (CS01 6876847293):**
-- this covers **new joins** only;
-- there is no sweep of existing mixed guilds;
+**Boundary (CS01 6876847293), widened by the owner on 14 Nov 2026:**
+- new joins, **and a still-Vanilla human logging in** to a guild (owner: "Yes remove them on login", Issue #13 comment 6877216646);
+- there is no bulk sweep of existing mixed guilds (only per login, per guild);
 - a real human is never removed;
 - ranks and leadership change only by Core's stock succession inside `DeleteMember`.
 
@@ -34,7 +34,7 @@
 | Officer chat (client) | `ChatHandler.cpp:487-499` | same | same |
 | Bot guild chat | Playerbots `PlayerbotAI.cpp:2954` calls `guild->BroadcastToGuild(bot->GetSession(), …)` **directly** | **no hook at all** | **no** |
 | Guild roster, MOTD, events, bank logs | `Guild::Handle*`, `BroadcastPacket` | none | **no** (membership removal ends it) |
-| A human logs in to a guild that became mixed while they were offline | login | none used | **no** (unresolved by design: unknown facts) |
+| A human logs in to a guild that became mixed while they were offline | `OnPlayerLogin` | existing player hook | **yes** (owner decision): a still-Vanilla human's login is marked like that human's join, with the human facts; the same proven removal path runs at the next world update |
 | A human drops back to Vanilla (era regression) while in a guild with a restricted bot | stage change | none used | **no** (not a join; needs an owner decision) |
 
 ## 2. IP-local implementation (candidate)
@@ -105,7 +105,7 @@ if (!sScriptMgr->OnGuildCanAddMember(this, guid, rankId))
 
 ## 4. Explicitly UNRESOLVED (not claimed)
 - **Logout before the update, off-thread join:** a joiner added off the world thread (or offline) whose facts are unknown. Logged; no action.
-- **Offline human:** a guild that becomes mixed while its still-Vanilla human member is offline. When the human logs in, the guild is mixed. Login-time remediation is an **owner/CS01 decision**, because it touches existing mixed guilds.
+- **Offline human:** resolved by the owner's login decision. The guild stays mixed only until that human's next login (world thread, option ON).
 - **Era regression:** a human dropping back to Vanilla while sharing a guild with a restricted bot. Owner decision.
 - **Chat:** the human→bot direction (P-1) and bot direct broadcasts (P-1/P-2).
 - **Window:** the transient add→update window (P-3).
