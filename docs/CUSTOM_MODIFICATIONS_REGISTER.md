@@ -1309,3 +1309,31 @@ Focused native tests require every completeness family independently, exercise t
 
   Hosted CI is milestone-only. No Worldserver link or gameplay test.
 - **Live status/approval/rollback:** NOT MERGED, NOT DEPLOYED, OFF by default; owner approval required. Rollback: keep the option `0`, or close the DRAFT; no host, DB, config or client was touched.
+
+## IP-PAID-DURABLE-PURCHASE-20261114: durable paid purchase acknowledgement and commissioning gate (DRAFT/OFF), CS03-IP
+- **Owner / request:**
+  - owner: CosmicCuddle (Coordination #61 and #18);
+  - requested by CS01 in Issue #13 comment 6884694721.
+- **Branch:** `feature/cs03-ip-paid-durable-purchase-20261114`, from `master` `05ff032b`.
+- **Behaviour, with `PaidExpansion.Enable = 1` only:**
+  - a purchase returns `Submitted`;
+  - access opens only when the `AsyncCommitTransaction` callback confirms the single gold+receipt transaction;
+  - a failure is `Unconfirmed`, with no refund, retry or second charge;
+  - duplicate clicks return `PurchasePending`;
+  - a teleport or reconnect reload keeps the staged cache.
+- **API:** `COSMIC_IP_PAID_EXPANSION_API_VERSION 2`, plus `GetPaidPurchaseState`.
+- **New option:** `IndividualProgression.PaidExpansion.CommissionMissingReceipt = 0`. It stages the canonical empty receipt for a truly absent row only.
+- **Files:**
+  - `src/IndividualProgressionPaidPurchaseState.h` (new, pure);
+  - `src/IndividualProgressionExpansion.cpp`, `src/IndividualProgression.h`, `src/IndividualProgression.cpp`, `src/IndividualProgressionExpansionPolicy.h`;
+  - conf;
+  - tests;
+  - `docs/IP_PAID_DURABLE_PURCHASE_2026-11-14.md`.
+- **Dependencies:**
+  - stock Core `AsyncCommitTransaction`/`AddTransactionCallback`;
+  - Core's existing paid-row preservation;
+  - no SQL, DBC or client change.
+- **Tests:** model 1,786/1,786 (×8 toolchains); contracts 13/13; mutations M1–M17 caught.
+- **Status:** NOT MERGED, NOT DEPLOYED, OFF.
+- **Release gates:** a DB failure test; CS v2 consumer; owner commissioning decision; backup/rollback.
+- **Rollback:** keep the options at 0, or revert.
