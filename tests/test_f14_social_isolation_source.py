@@ -24,6 +24,7 @@ SCOPE = {
     "tests/f14_social_isolation_policy_test.cpp", "tests/test_f14_social_isolation_source.py",
     ".github/workflows/f14-social-isolation.yml",
     "docs/F14_SOCIAL_ISOLATION_2026-11-13.md", "docs/CUSTOM_MODIFICATIONS_REGISTER.md",
+    ".gitignore",
 }
 
 
@@ -649,6 +650,11 @@ class ExactInsertions(unittest.TestCase):
         for sig in ("bool OnPlayerCanGroupInvite(Player* player, std::string& membername) override",
                     "bool OnPlayerCanGroupAccept(Player* player, Group* group) override"):
             self.assertEqual(cur.split(sig, 1)[1][:3000], old.split(sig, 1)[1][:3000], sig)
+
+    def test_gitignore_only_adds_python_bytecode_rules(self):
+        plus, minus = added_lines(".gitignore")
+        self.assertEqual(minus, [])
+        self.assertEqual([l for l in plus if l and not l.startswith("#")], ["__pycache__/", "*.py[cod]"])
 
     def test_every_other_parent_file_is_byte_identical(self):
         tracked = git("ls-tree", "-r", "--name-only", PARENT).decode().splitlines()
