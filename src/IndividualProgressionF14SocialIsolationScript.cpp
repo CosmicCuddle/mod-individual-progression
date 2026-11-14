@@ -29,7 +29,9 @@
 #include "GameTime.h"
 #include "GlobalScript.h"
 #include "Group.h"
+#include "GroupScript.h"
 #include "LFG.h"
+#include "LFGMgr.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
 #include "PlayerScript.h"
@@ -374,7 +376,8 @@ namespace
              PLAYERHOOK_CAN_GROUP_INVITE, PLAYERHOOK_CAN_GROUP_ACCEPT,
              PLAYERHOOK_ON_BEFORE_UPDATE, PLAYERHOOK_CAN_JOIN_LFG, PLAYERHOOK_ON_LOGOUT,
              PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE, PLAYERHOOK_CAN_BATTLEFIELD_PORT,
-             PLAYERHOOK_CAN_SEND_MAIL, PLAYERHOOK_ON_LOGIN}) { }
+             PLAYERHOOK_CAN_SEND_MAIL, PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_CREATE,
+             PLAYERHOOK_ON_DELETE}) { }
 
         // Offline mail: a character that logs in is no longer "remembered";
         // its next logout re-remembers it only if still a verified
@@ -385,6 +388,27 @@ namespace
                 return;
             std::lock_guard<std::mutex> lock(ConfirmedLock());
             Confirmed().Forget(player->GetGUID().GetRawValue());
+        }
+
+        // F-3: a created or deleted character never keeps an offline-mail
+        // entry for its GUID, so the set no longer depends on GUIDs never
+        // being reused (cluster mode). Cleanup only: runs with the option
+        // OFF too and never classifies anyone. Core calls OnPlayerDelete
+        // only on its accepted deletion path (refusals go to
+        // OnPlayerFailedDelete), and OnPlayerCreate after the creation
+        // transaction succeeded.
+        void OnPlayerCreate(Player* player) override
+        {
+            if (!player)
+                return;
+            std::lock_guard<std::mutex> lock(ConfirmedLock());
+            Confirmed().Forget(player->GetGUID().GetRawValue());
+        }
+
+        void OnPlayerDelete(ObjectGuid guid, uint32 /*accountId*/) override
+        {
+            std::lock_guard<std::mutex> lock(ConfirmedLock());
+            Confirmed().Forget(guid.GetRawValue());
         }
 
         // Mail. CMSG_SEND_MAIL is PROCESS_THREADUNSAFE (world thread), so the
@@ -678,6 +702,47 @@ namespace
         }
     };
 
+    // F-2: Core keeps a party in the Dungeon Finder role check when a member
+    // is added (only a QUEUED party is removed), then queues it with the
+    // stored role-check set. A party IP already tracks gets the new member
+    // and its facts here, on the world thread, so the value-only proposal
+    // veto sees it. Disband drops the party record (cleanup, also OFF).
+    class F14SocialIsolationGroupScript final : public GroupScript
+    {
+    public:
+        F14SocialIsolationGroupScript() : GroupScript("IndividualProgression_F14SocialIsolationGroup",
+            {GROUPHOOK_ON_ADD_MEMBER, GROUPHOOK_ON_DISBAND}) { }
+
+        void OnAddMember(Group* group, ObjectGuid guid) override
+        {
+            if (!OptionOn() || !group || !guid || !WorldThread().IsCurrent())
+                return;
+            uint64 const groupGuid = group->GetGUID().GetRawValue();
+            bool tracked;
+            {
+                std::lock_guard<std::mutex> lock(QueueFactsLock());
+                tracked = QueueFacts().TracksGroup(groupGuid);
+            }
+            bool const inRoleCheck = tracked && sLFGMgr->GetState(group->GetGUID()) == lfg::LFG_STATE_ROLECHECK;
+            if (!Policy::RoleCheckMemberRefresh(true, true, tracked, inRoleCheck))
+                return;
+            Player const* member = ObjectAccessor::FindPlayer(guid);
+            if (!member)
+                return;
+            Policy::QueueFacts const facts = Policy::MakeQueueFacts(ReadHuman(member), ReadBot(member));
+            std::lock_guard<std::mutex> lock(QueueFactsLock());
+            QueueFacts().RefreshGroupMember(groupGuid, guid.GetRawValue(), facts);
+        }
+
+        void OnDisband(Group* group) override
+        {
+            if (!group)
+                return;
+            std::lock_guard<std::mutex> lock(QueueFactsLock());
+            QueueFacts().EraseGroup(group->GetGUID().GetRawValue());
+        }
+    };
+
     // World thread only: what kind of player a GUID is right now. Offline
     // or unknown players carry no facts and never restrict anyone.
     Policy::MatchKinds KindsOfGuid(ObjectGuid const& guid)
@@ -902,6 +967,7 @@ void AddSC_mod_individual_progression_f14_social_isolation()
     new F14SocialIsolationWhoScript();
     new F14SocialIsolationWorldThreadScript();
     new F14SocialIsolationLfgScript();
+    new F14SocialIsolationGroupScript();
     new F14SocialIsolationBattlegroundScript();
     new F14SocialIsolationSpellScript();
 #if defined(COSMIC_F14_GUILD_INVITE_HOOK_VERSION) && COSMIC_F14_GUILD_INVITE_HOOK_VERSION >= 1

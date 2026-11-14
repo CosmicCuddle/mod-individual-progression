@@ -1105,6 +1105,133 @@ namespace
     }
 }
 
+namespace
+{
+    // F-2: the group script's add-member path, step for step: the gate,
+    // then the tracked-party refresh under the lock.
+    bool ModelOnAddMember(P::QueueFactsTable& table, bool optionOn, bool worldThread,
+                          std::uint64_t groupGuid, bool inRoleCheck, std::uint64_t member,
+                          P::QueueFacts facts)
+    {
+        if (!optionOn || !groupGuid || !member || !worldThread)
+            return false;
+        bool const tracked = table.TracksGroup(groupGuid);
+        if (!P::RoleCheckMemberRefresh(true, true, tracked, tracked && inRoleCheck))
+            return false;
+        return table.RefreshGroupMember(groupGuid, member, facts);
+    }
+
+    void TestRoleCheckMemberRefresh()
+    {
+        using G = std::vector<std::uint64_t>;
+        P::QueueFacts const vanilla = P::MakeQueueFacts(VanillaHuman(3), P::Bot{});
+        P::QueueFacts const tbc = P::MakeQueueFacts(VanillaHuman(8), P::Bot{});
+        P::QueueFacts const restricted = P::MakeQueueFacts(P::Human{}, VerifiedBot());
+        for (int o = 0; o < 2; ++o)
+            for (int w = 0; w < 2; ++w)
+                for (int t = 0; t < 2; ++t)
+                    for (int r = 0; r < 2; ++r)
+                        CHECK(P::RoleCheckMemberRefresh(o, w, t, r) == (o && w && t && r));
+
+        std::uint64_t const party = 2000, soloBot = 700, soloHuman = 701;
+        auto fresh = [&]()
+        {
+            P::QueueFactsTable t;
+            t.Record(601, tbc);              // the party queued with only a TBC member
+            t.RecordGroup(party, {601});
+            t.Record(soloBot, restricted);
+            t.Record(soloHuman, vanilla);
+            return t;
+        };
+
+        // The gap without F-2: a Vanilla human added during the role check is
+        // missing from the record, so party + solo restricted bot passes.
+        {
+            P::QueueFactsTable t = fresh();
+            CHECK(!t.Rejects(true, G{party, soloBot}));
+            // Role check add H: the party now carries the Vanilla human.
+            CHECK(ModelOnAddMember(t, true, true, party, true, 602, vanilla));
+            CHECK(t.Rejects(true, G{party, soloBot}));
+            CHECK(t.Groups() == 1 && t.Size() == 4);
+            // Duplicate add: idempotent (no second entry, same verdict).
+            CHECK(ModelOnAddMember(t, true, true, party, true, 602, vanilla));
+            CHECK(t.Rejects(true, G{party, soloBot}));
+            // Member logout: its facts and the party record go (inert).
+            t.Erase(602);
+            CHECK(t.Groups() == 0 && !t.Rejects(true, G{party, soloBot}));
+        }
+        // Role check add R: the party now carries a restricted bot.
+        {
+            P::QueueFactsTable t = fresh();
+            CHECK(!t.Rejects(true, G{party, soloHuman}));
+            CHECK(ModelOnAddMember(t, true, true, party, true, 603, restricted));
+            CHECK(t.Rejects(true, G{party, soloHuman}));
+        }
+        // Not applied: QUEUED (Core removes the party), untracked party, OFF,
+        // off the world thread, zero GUIDs. Nothing changes in any case.
+        {
+            P::QueueFactsTable t = fresh();
+            CHECK(!ModelOnAddMember(t, true, true, party, false, 602, vanilla));   // ordinary queued add
+            CHECK(!ModelOnAddMember(t, true, true, 2999, true, 602, vanilla));     // untracked group
+            CHECK(!ModelOnAddMember(t, false, true, party, true, 602, vanilla));   // OFF
+            CHECK(!ModelOnAddMember(t, true, false, party, true, 602, vanilla));   // off-world callback
+            CHECK(!ModelOnAddMember(t, true, true, 0, true, 602, vanilla));
+            CHECK(!ModelOnAddMember(t, true, true, party, true, 0, vanilla));
+            CHECK(t.Groups() == 1 && t.Size() == 3 && !t.TracksGroup(2999));
+            CHECK(!t.Rejects(true, G{party, soloBot}));
+            // The table itself never creates a party record either.
+            CHECK(!t.RefreshGroupMember(2999, 602, vanilla) && !t.TracksGroup(2999));
+        }
+        // Requeue overwrites the refreshed list; disband drops the record.
+        {
+            P::QueueFactsTable t = fresh();
+            CHECK(ModelOnAddMember(t, true, true, party, true, 602, vanilla));
+            t.RecordGroup(party, {601});     // party left, rejoined without 602
+            CHECK(!t.Rejects(true, G{party, soloBot}));
+            t.EraseGroup(party);
+            CHECK(t.Groups() == 0 && !t.TracksGroup(party));
+            t.EraseGroup(party);             // harmless twice
+            CHECK(!ModelOnAddMember(t, true, true, party, true, 602, vanilla));
+        }
+        // OFF -> ON -> OFF: OFF adds are ignored, ON adds apply, OFF vetoes nothing.
+        {
+            P::QueueFactsTable t = fresh();
+            CHECK(!ModelOnAddMember(t, false, true, party, true, 602, vanilla));
+            CHECK(!t.Rejects(true, G{party, soloBot}));
+            CHECK(ModelOnAddMember(t, true, true, party, true, 602, vanilla));
+            CHECK(t.Rejects(true, G{party, soloBot}));
+            CHECK(!t.Rejects(false, G{party, soloBot}));
+        }
+    }
+
+    // F-3: create/delete forget the offline-mail entry for that GUID, with
+    // the option in any state, and never add one.
+    void TestCharacterCreateDeleteCleanup()
+    {
+        P::ConfirmedRestrictedBots confirmed;
+        bool const vanillaSender = P::HumanStillVanilla(VanillaHuman(3));
+        confirmed.Remember(42);
+        confirmed.Remember(77);
+        // Remembered -> deleted -> absent.
+        confirmed.Forget(42);                       // OnPlayerDelete(42)
+        CHECK(!confirmed.Contains(42) && confirmed.Contains(77));
+        // GUID reused by a new character before its first login: not blocked.
+        confirmed.Forget(42);                       // OnPlayerCreate(new 42), duplicate is harmless
+        CHECK(!P::OfflineMailRefused(true, vanillaSender, confirmed.Contains(42)));
+        // Stale entry that was never deleted (cluster reuse): create clears it.
+        confirmed.Remember(55);
+        CHECK(P::OfflineMailRefused(true, vanillaSender, confirmed.Contains(55)));
+        confirmed.Forget(55);                       // OnPlayerCreate(new 55)
+        CHECK(!P::OfflineMailRefused(true, vanillaSender, confirmed.Contains(55)));
+        // Unrelated GUID unchanged; nothing was ever added by cleanup.
+        CHECK(confirmed.Contains(77) && confirmed.Size() == 1);
+        // Cleanup is option-independent: forgetting with the option OFF still
+        // leaves no entry for a later ON period.
+        confirmed.Forget(77);
+        CHECK(!P::OfflineMailRefused(true, vanillaSender, confirmed.Contains(77)) && confirmed.Size() == 0);
+    }
+}
+
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -1130,6 +1257,8 @@ int main()
     TestDuelAndMail();
     TestOfflineMail();
     TestPendingReplies();
+    TestRoleCheckMemberRefresh();
+    TestCharacterCreateDeleteCleanup();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

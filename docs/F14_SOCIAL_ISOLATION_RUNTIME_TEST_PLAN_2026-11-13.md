@@ -56,6 +56,8 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | LFG2 | H8 (stage ≥8) and R queue for the same dungeon | may be matched (stock) |
 | LFG3 | H0 queues, then `.ip set H0 8` while still queued | stays kept apart from R until H0 re-queues (conservative) |
 | LFG4 | H0 queues with N, A or S | stock matching |
+| LFG5 | a TBC player queues as a party; during the role check H0 joins the party; R queues solo for the same dungeon | never matched into one group (F-2) |
+| LFG6 | as LFG5 but the option is OFF | stock matching |
 | BG1 | H0 queues Warsong Gulch, then R (solo) tries to queue for the same battleground or the random battleground at the same bracket | R's queue join is quietly refused |
 | BG2 | H0 is inside a battleground; R is invited to that same instance | R's "enter battle" is refused; its invite lapses and it leaves the queue |
 | BG3 | H8 (TBC) queues and enters with R | stock |
@@ -70,6 +72,8 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | M1 | H0 mails R while R is online | refused with a mail error; one reply |
 | M2 | H0 mails R while R is offline, after R was online earlier in this run | refused (confirmed earlier), with no reply |
 | M3 | H0 mails a BE/Dr RandomBot that hasn't logged in since the restart | delivered (unknown) |
+| M4 | R logs out (remembered), then R is deleted; H0 mails to that name/GUID | not refused by F14 (F-3; the deleted name itself is Core's normal "not found") |
+| M5 | a new character is created (any race); H0 mails it before its first login | delivered (F-3: create forgets the GUID) |
 | GI1 | (patched Core only) H0's guild officer invites R; R's guild invites H0 | no invitation is sent; H0 gets one reply when H0 started it |
 | GI2 | (patched Core only) H8 invites R | stock |
 | OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |

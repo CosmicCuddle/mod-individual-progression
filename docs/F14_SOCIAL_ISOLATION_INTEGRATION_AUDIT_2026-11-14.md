@@ -9,17 +9,19 @@
 
 **Pins:**
 - **IP social:** branch `feature/cs03-ip-f14-social-isolation-20261113`. Runtime is identical to `e62de448`.
-- **Playerbots:** PR #21 `0737ed3e` (parent `405f8119`).
+- **Playerbots:** PR #21 `06b6c7ae` (parent `405f8119`; first reviewed at `0737ed3e`).
 - **Core25:** `395b68ee`. The candidate Core `240f6250` adds only a test and a workflow file; `src/` is identical.
 
 **Owner rules applied:** the decisions recorded in `docs/F14_SOCIAL_ISOLATION_2026-11-13.md`:
 - every surface is owner-approved;
 - the T1 rule allows by default;
-- Altbots get the same treatment as normal players;
-- option B applies.
+- option B applies;
+- Information #10 (owner, 14 Nov 2026): the temporary grouped-era floor applies to verified RandomBots only, and Altbots never have their stage changed by it.
 
 **Terms:**
-- **H** = a still-Vanilla human (IP stage below 8, not a verified RandomBot). Altbots are humans.
+- **H** = a still-Vanilla human: `HumanStillVanilla` — present, in world, a **non-headless session** (a real client), a player-security account, not in GM mode, not a verified RandomBot, IP stage below 8.
+- **Headless Altbots/SelfBots** are **neither** side of F14 social isolation: not H (no client session) and not R (not a verified RandomBot). They're never restricted, whatever their race or stage.
+- **Ordinary expansion grouping** (`EnforceGroupRules`) treats Altbots like other player characters under its own rule. That rule is separate from social isolation.
 - **R** = a verified Blood Elf/Draenei RandomBot. It is never inferred from race alone.
 - **OFF** = `IndividualProgression.F14.RandomBotSocialIsolation = 0` (the default).
 
@@ -38,7 +40,7 @@ Each row lists, in order: the initiator, the target, the thread, the Core entry,
 | Group invite | human master on a bot's behalf → R | world (human session queue) | same | block | yes, to the master | same | #21 `:284`/`:434` | stock |
 | Group accept | R accepts an invite to H's group | world (#21 `GroupAcceptOperation`) | `GroupHandler.cpp:257` `OnPlayerCanGroupAccept` (S1 checks every member) | block | none | membership; `SetMaster`/strategies/greeting/summon | #21, epoch gate **OPEN** | stock |
 | Group accept | H accepts into a group holding R | world | same | block | yes | membership | none | stock |
-| Group add (bot login) | master's bot → master's group | world (`GroupInviteOperation`) | **no hook**: direct `Group::AddMember` | **not consulted** | none | a Vanilla Altbot alongside R | **finding F-1** (below) | stock |
+| Group add (bot login) | master's bot → master's group | world (`GroupInviteOperation`) | PB #21 `06b6c7ae` preflight `OnPlayerCanGroupInvite(master, botName)` before `Create`/`AddMember` | social: master is the initiator. Ordinary grouping: `EnforceGroupRules` checks the invitee against the inviter and every member | social: master only, if R (unreachable under option B) | group create/convert/add | PB #21 `c5b9d6c3`+ | stock |
 | Duel | H ↔ R | caster's map / world | `AllSpellScript::OnSpellCheckCast` (`SPELL_EFFECT_DUEL`) | `SPELL_FAILED_BAD_TARGETS` if the owned map holds both | H as caster: one, queued to the world thread | the duel request | none | stock |
 | Mail (receiver online) | H → R | world | `OnPlayerCanSendMail` | refuse | yes | the mail item | none | stock |
 | Mail (receiver offline) | H → R | world | same | refuse if the GUID is in the confirmed set | none | the mail item | none | stock |
@@ -63,7 +65,9 @@ Each row lists, in order: the initiator, the target, the thread, the Core entry,
 | OFF → ON → OFF | ON: every check is live; queued players are unknown until they re-queue. OFF: every veto returns allow straight away; replies already queued drain within one world tick | Section 4 |
 | Identity revoked | `ReadBot` is live on every check. The offline set is cleared at the bot's next login | mail lifecycle |
 | Server restart | Every structure is static and in memory only, so it starts empty | Section 3 |
-| Stale bot operation across a relog (PB) | Not an F14 bypass: Core and IP checks run at execution with live facts. Session integrity is a PB gate (epoch) | Issue #13 comment 6876246814 §7 |
+| Stale bot operation across a relog (PB) | Not an F14 bypass: Core and IP checks run at execution with live facts. PB #21 `06b6c7ae` adds login epochs (bot and inviter/master) and invitation generations, so a stale operation is refused | Issue #13 comment 6876246814 §7; §12 below |
+| Member added during the Dungeon Finder role check | **F-2:** the tracked party record gains the member and its facts (world thread, option ON) | native `TestRoleCheckMemberRefresh`; contract `test_f2_role_check_member_refresh` |
+| Character deleted / created with a reused GUID | **F-3:** the offline-mail entry for that GUID is forgotten (also when OFF) | native `TestCharacterCreateDeleteCleanup`; contract `test_f3_create_delete_forget_offline_mail` |
 
 ## 3. Caches and registries at the latest head
 
@@ -71,10 +75,10 @@ Each row lists, in order: the initiator, the target, the thread, the Core entry,
 |---|---|---|---|---|---|---|---|
 | `ReplyLimiter<1024>` | reply decision | same | any thread, `ReplyLock` | slot reuse after the cooldown | empty | a stale slot only delays one reply | none |
 | `PendingReplies<256>` | map-thread block decision | world `OnUpdate` | `PendingRepliesLock` | drained every tick | empty | both players are looked up again; anyone gone gets nothing | none |
-| `QueueFactsTable` (`_facts`, `_groups`) | `OnPlayerCanJoinLfg` (world, option ON) | `CanCreateLfgProposal` (LFG worker) | `QueueFactsLock` | logout (the player and every party listing them); overwritten at rejoin | empty | unknown ⇒ allow; see section 5 | role-check add window (section 5) |
+| `QueueFactsTable` (`_facts`, `_groups`) | `OnPlayerCanJoinLfg` (world, option ON); **F-2** `GroupScript::OnAddMember` (world, ON, tracked party in role check only) | `CanCreateLfgProposal` (LFG worker) | `QueueFactsLock` | logout (the player and every party listing them); overwritten at rejoin; **group disband** (`OnDisband`, also OFF) | empty | unknown ⇒ allow | none |
 | `BgVanillaRoster` | `OnBattlegroundAddPlayer` (world, ON) | port check | `BgLock` | leave / destroy (regardless of the option) | empty | missed humans are covered by (d) | none |
 | `BgQueuedHumans` | BG queue join (world, ON) | (b) bot join | `BgLock` | live re-check plus prune; logout; BG add | empty | re-checked live | none |
-| `ConfirmedRestrictedBots` | logout (world, ON, verified R) | mail (world) | `ConfirmedLock` | that GUID's next login | empty | over-blocks mail only for that GUID; section 6 | cluster GUID |
+| `ConfirmedRestrictedBots` | logout (world, ON, verified R) | mail (world) | `ConfirmedLock` | that GUID's next login; **character create or delete** (F-3, also OFF) | empty | over-blocks mail only for that GUID, until create/delete/login | none (cluster GUID reuse is no longer a dependency) |
 | `WorldThreadMarker` | `WorldScript::OnUpdate` | all hooks | atomics | — | unset until the first tick (until then everything is allowed) | — | none |
 | `thread_local OwnedMapRecord` | `OnPlayerBeforeUpdate` | same thread | per thread | tick expiry | — | an expired record ⇒ no scope ⇒ allow | none |
 | Reply text | config load/reload | reply send (world) | `_f14SocialIsolationReplyLock` | reload | config | — | none |
@@ -91,8 +95,8 @@ Each row lists, in order: the initiator, the target, the thread, the Core entry,
 - duel; /who.
 
 **Ungated, and cleanup only:**
-- login `Forget`;
-- logout erase;
+- login `Forget`; character create/delete `Forget` (F-3);
+- logout erase; group disband erase (F-2);
 - BG leave/destroy removal;
 - the world-tick marker;
 - draining replies already queued.
@@ -101,7 +105,7 @@ None of these blocks anything or changes gameplay.
 
 **Nothing is written while OFF:** no recording (LFG facts, BG roster, BG queued, confirmed set) happens unless ON.
 
-## 5. Dungeon Finder party changes: **closed, with one narrow case UNKNOWN**
+## 5. Dungeon Finder party changes: **closed (source); the role-check case is fixed by F-2**
 
 **Core source (`LFGScripts.cpp`):**
 - `OnAddMember` (`:155-195`): if the group is `LFG_STATE_QUEUED`, it calls `LeaveLfg(gguid)`. A member who was queued solo is also removed.
@@ -114,13 +118,16 @@ So a party that changes while queued always leaves the queue. To requeue it must
 - `UpdateRoleCheck` (`LFGMgr.cpp:1570-1574`) queues the party with the role-check roles from the join.
 - IP's party record comes from the join too, so a human H added during the role check isn't in IP's member list for that party GUID.
 - **Impact:** narrow. Joining the party already went through IP's group-accept check against every member, so H can't join a party that contains R. The only gap is a cross-party proposal that pairs this party with a separately queued R.
-- Whether Core's queue counts H in the proposal isn't proven, so it stays **UNKNOWN**.
-
-**Smallest fix (designed, NOT implemented; no Core change):**
-- an IP `GroupScript` on `OnAddMember` (world thread);
-- if `QueueFacts` holds a record for that group GUID, append the new member's GUID and facts under `QueueFactsLock`;
-- value-only and bounded by the group size;
-- nothing is recorded when OFF.
+**F-2 (implemented, CS01-approved hardening):**
+- `F14SocialIsolationGroupScript` subscribes to `GROUPHOOK_ON_ADD_MEMBER` and `GROUPHOOK_ON_DISBAND` only.
+- **Add:** the gate is option ON, a valid group and GUID, and the world thread, before any read. Then:
+  1. only a party IP already tracks;
+  2. only while `sLFGMgr->GetState(group) == LFG_STATE_ROLECHECK`;
+  3. the member is read on the world thread and its facts appended under `QueueFactsLock`.
+- **Never** creates a party record.
+- **Why role check only:** a QUEUED party is removed from the queue by Core on any add (`LFGScripts.cpp:178-179`), so its record is inert. The order of IP's and Core's group scripts doesn't matter for the role-check state, because Core's LFG script doesn't change it on an add.
+- **Disband:** erases the party record (group GUIDs are never reused), so `_groups` is bounded by live groups plus logout cleanup.
+- **The LFG worker veto still reads values only.**
 
 ## 6. Cluster GUID and offline mail
 
@@ -132,9 +139,12 @@ So a party that changes while queued always leaves the queue. To requeue it must
 - **If it happens:** an H mailing a *new* offline character with a reused GUID is refused until that character's first login.
 - **Direction of failure:** over-blocking mail only, never a leak.
 
-**Proposed fail-safe (designed, NOT implemented):**
-- `Forget(guid)` in `OnPlayerDelete`, plus `OnPlayerCreate` for the new GUID;
-- this removes the dependency on non-reuse for the life of the process.
+**F-3 (implemented, CS01-approved hardening):**
+- `OnPlayerDelete(guid)` and `OnPlayerCreate(player)` both call `Confirmed().Forget(guid)`, unconditionally (option OFF too).
+- They never remember or classify anyone; no database access.
+- **Core ordering:** a refused deletion goes to `OnPlayerFailedDelete` and returns before `OnPlayerDelete`. `OnPlayerDelete` runs on the accepted path just before `Player::DeleteFromDB`. `OnPlayerCreate` runs after the creation transaction succeeded.
+- **Limit:** a database commit failure after `OnPlayerDelete` isn't visible to this hook. The only effect would be a forgotten entry, i.e. no block until that bot's next logout.
+- **Result:** cluster-GUID non-reuse is **no longer a correctness dependency** of the offline-mail set. Whether cluster mode is enabled stays a runtime inventory fact (C0).
 
 ## 7. Guild hook helper against the candidate Core
 
@@ -159,24 +169,30 @@ So a party that changes while queued always leaves the queue. To requeue it must
 | Ordinary humans (any stage) with ordinary humans | stock everywhere |
 | TBC/Wrath humans with R | stock everywhere |
 | Ordinary RandomBots (not Blood Elf/Draenei, or not verified) | stock |
-| Altbots / SelfBots of a Blood Elf/Draenei race | **not R**; treated as humans (by stage) |
+| Headless Altbots / SelfBots (any race, any stage) | **neither H nor R**: never restricted by social isolation. Ordinary grouping (`EnforceGroupRules`) applies its own rule |
 | GM targets / GM viewers | stock (no special-casing; identity decides) |
 | Blood Elf/Draenei human characters | not R; never hidden or blocked as bots |
 | Unknown identity (unverified, offline, unreadable thread) | allow (stock) |
 | Race alone | never classifies anyone as R (contract plus native tests) |
 | Option OFF | byte-for-byte stock decisions |
 
-## 9. Information #10: grouped-era floor population (**BLOCKED**, test expectations only)
+## 9. Information #10: grouped-era floor population (**resolved by the owner, 14 Nov 2026**)
 
-There's no runtime wiring. These are the two likely answers, with the expectations ready for each:
+**Owner decision** (Information #10 comment 6876429606):
+- verified RandomBots only;
+- Altbots never have their stage changed by this system;
+- a verified Blood Elf/Draenei RandomBot has an absolute TBC minimum. It may sync upward (for example to Wrath) and later fall back only to TBC;
+- race alone never establishes RandomBot identity.
 
-| Case | Variant A: verified RandomBots only | Variant B: RandomBots plus Altbots, excluding non-normal accounts |
-|---|---|---|
-| Verified Blood Elf/Draenei RandomBot | floor applies | floor applies |
-| Blood Elf/Draenei Altbot of a normal account | no floor | floor applies |
-| Blood Elf/Draenei Altbot of an excluded or non-normal account | no floor | no floor |
-| Blood Elf/Draenei human-played character | no floor | no floor |
-| Unverified bot, Blood Elf/Draenei race only | no floor | no floor |
+**Variant B is rejected** and must not be wired. Expectations (test-only here; this branch wires nothing):
+
+| Case | Expected |
+|---|---|
+| Verified Blood Elf/Draenei RandomBot | TBC floor; never used as a Vanilla-era bot; may sync up to Wrath and fall back no lower than TBC |
+| Verified RandomBot of another race | stock grouped-era sync |
+| Blood Elf/Draenei Altbot (any account) | stage never changed |
+| Blood Elf/Draenei human-played character | stage never changed |
+| Unverified bot, Blood Elf/Draenei race only | stage never changed |
 
 ## 10. Composition manifest (no merge or rebase)
 
@@ -212,17 +228,39 @@ There's no runtime wiring. These are the two likely answers, with the expectatio
 2. **Each matrix row (section 1):** perform the action from both sides. Observe the client result (no whisper, trade window, invite or duel; mail error) and count replies (≤ 1 per 60 s).
 3. **Section 2 cases:** relog, teleport, requeue, leader change, disband, OFF→ON→OFF via `.reload config`, restart.
 4. **PB #21:** PBD1–3, PBB1–4. Repeat with a backlog (many bots) for queued-operation delay.
-5. **F-1:** a T master groups with R, then logs in the Vanilla Altbot. The expected outcome is pending CS01's ruling.
+5. **F-1 (ordinary grouping, `EnforceGroupRules = 1`):** a T master groups with R, then logs in a Vanilla Altbot. Expected: PB #21's preflight is refused by IP's grouping rule, so no group is created/converted and the Altbot isn't added. With `EnforceGroupRules = 0` the add proceeds (stock).
+6. **F-2:** a party queues; during its role check a Vanilla H joins; a solo R is queued for the same dungeon. Expected: no proposal pairs them.
+7. **F-3:** a fixture GUID reuse isn't reproducible without cluster mode, so test the observable halves: (a) remember R (logout), delete R, then H mails that name/GUID → no refusal; (b) a newly created character is never refused before its first login.
 
 **Cleanup:** delete the disposable characters; restore the config.
 
 **Rollback:** the option `0`, or a binary built without the branch.
 
+## 12. Playerbots PR #21 at `06b6c7ae` (re-review)
+
+| Gate | Result (source) | Evidence |
+|---|---|---|
+| Login epoch (bot) | **PASS** | `IssueLogin` in `OnBotLogin` (after the duplicate/AI-null early returns, before any operation is built); `RetireLogin` in `LogoutPlayerBot`, `DisablePlayerBot` and `OnPlayerBeforeLogout` |
+| Login epoch (human) | **PASS** | `IssueLogin` in the player script's `OnPlayerLogin` for non-headless sessions; retired in `OnPlayerBeforeLogout` |
+| One login, one epoch | **PASS** | a process-wide counter starting at 1, under a mutex; at `UINT64_MAX` it issues 0, which fails closed (no operation is queued or run); erased at retire, so the map is bounded by online players |
+| Invitation generation | **PASS** | `IssueInvitation` on `GROUPHOOK_ON_INVITE_MEMBER` (Core `Group::AddInvite`, `Group.cpp:388`, after `SetGroupInvite`); cleared at login/retire |
+| `GroupAcceptOperation` | **PASS** | captures bot epoch + inviter epoch + invitation generation at queue time (0 ⇒ not queued). `EpochsMatch()` is checked in both `IsValid()` and first thing in `Execute()`. A→logout→A, inviter relog, and re-invite before the drain are all refused |
+| Direct group add (`GroupInviteOperation`) | **PASS** | bot and target epochs are captured in the constructor and checked in `IsValid`/`Execute`. `OnPlayerCanGroupInvite(bot, targetName)` runs after live resolution and the target-in-group check, **before** `new Group`/`Create`/`AddGroup`/`ConvertToRaid`/`AddMember` |
+| IP interaction | **PASS** | every route reaches IP on the world thread (`anyPlayer` scope). The preflight's initiator is the master. Social applies only if the added bot were R, which option B prevents. Ordinary grouping applies `EnforceGroupRules` |
+| Option B and dispatch ordering | unchanged from `0737ed3e` | Issue #13 comment 6876246814 §1–6 |
+| Native / gameplay | **UNKNOWN** | not built here |
+
+## 13. F-4: Playerbots bot-guild direct add (classification only)
+
+- **Callers:** `PlayerbotFactory::InitGuild()` (`PlayerbotFactory.cpp:5040-5070`), reached from factory randomization (`:1048`) and `RandomPlayerbotMgr.cpp:2893`. It calls `guild->AddMember(bot, rank)` for a guild that `PlayerbotGuildMgr::AssignToGuild` picked, or creates a new bot guild.
+- **Population:** RandomBots only (`RandomBotGuildCount` 20, `RandomBotGuildSizeMax` 15 by default; skipped when `DeleteRandomBotGuilds`).
+- **Could a human end up there?** Only if a human joined that bot guild earlier, by invite from a member. With the guild patch, an invite between a restricted pair is refused. An invite from a non-restricted member (another human or a non-BE/Draenei bot) is allowed.
+- **Effect:** a later direct fill could put a verified Blood Elf/Draenei RandomBot into a guild that already holds a still-Vanilla human. That shares only guild chat and roster. No whisper, trade, group, duel or mail rule is bypassed, because those are decided per pair.
+- **Classification:** the owner-approved surface is the guild **invite**. Guild **membership/chat** isn't an approved surface. **No implementation without an explicit owner decision.**
+
 ## Findings needing a decision
 
-- **F-1 (Playerbots, existing before #21):**
-  - **The route:** `GroupInviteOperation` (queued from `PlayerbotMgr.cpp:597-626` at bot login) calls `Group::AddMember` with no group hook, so a still-Vanilla Altbot can join a master's group that contains R.
-  - **Minimum PB fix:** consult `OnPlayerCanGroupAccept(target, group)` before `AddMember`.
-- **F-2 (Core/LFG):** the role-check add window (section 5). The IP-local value-only fix is designed.
-- **F-3 (mail):** cluster-GUID reuse could over-block one mail target (section 6). The IP-local delete/create forget is designed.
-- **F-4 (Playerbots guild fill):** direct `guild->AddMember` for bot guilds. Needs a classification.
+- **F-1 (Playerbots):** **closed at PB #21 `c5b9d6c3`+** (preflight). It was an ordinary expansion-grouping admission gap, not social isolation (CS01 6876278508).
+- **F-2 (IP):** **implemented** (section 5).
+- **F-3 (IP):** **implemented** (section 6).
+- **F-4 (Playerbots guild fill):** classification only (section 13); an owner decision is needed only if guild membership/chat should be isolated.

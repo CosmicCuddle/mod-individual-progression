@@ -84,7 +84,7 @@ class HooksAndAuthority(unittest.TestCase):
         self.src = strip_comments(read(SCRIPT))
 
     def test_only_social_hooks_and_who(self):
-        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z0-9_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+|ALLBATTLEGROUNDHOOK_[A-Z0-9_]+|ALLSPELLHOOK_[A-Z0-9_]+)\b", self.src)))
+        hooks = sorted(set(re.findall(r"\b(PLAYERHOOK_[A-Z0-9_]+|WORLDOBJECTHOOK_[A-Z0-9_]+|WORLDHOOK_[A-Z0-9_]+|GLOBALHOOK_[A-Z0-9_]+|ALLBATTLEGROUNDHOOK_[A-Z0-9_]+|ALLSPELLHOOK_[A-Z0-9_]+|GROUPHOOK_[A-Z0-9_]+)\b", self.src)))
         self.assertEqual(hooks, sorted([
             "PLAYERHOOK_CAN_GROUP_ACCEPT", "PLAYERHOOK_CAN_GROUP_INVITE", "PLAYERHOOK_CAN_INIT_TRADE",
             "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT", "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY",
@@ -94,14 +94,16 @@ class HooksAndAuthority(unittest.TestCase):
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_ADD_PLAYER", "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_REMOVE_PLAYER_AT_LEAVE",
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY", "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL",
             "PLAYERHOOK_CAN_SEND_MAIL", "ALLSPELLHOOK_ON_SPELL_CHECK_CAST", "PLAYERHOOK_ON_F14_CAN_GUILD_INVITE",
-            "PLAYERHOOK_ON_LOGIN"]))
+            "PLAYERHOOK_ON_LOGIN", "PLAYERHOOK_ON_CREATE", "PLAYERHOOK_ON_DELETE",
+            "GROUPHOOK_ON_ADD_MEMBER", "GROUPHOOK_ON_DISBAND"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
             "OnPlayerCanInitTrade", "OnPlayerCanUseChat", "OnUpdate", "OnPlayerBeforeUpdate",
             "OnPlayerCanJoinLfg", "OnPlayerLogout", "OnPlayerCanJoinInBattlegroundQueue",
             "OnPlayerCanBattleFieldPort", "OnBattlegroundAddPlayer", "OnBattlegroundRemovePlayerAtLeave",
-            "OnBattlegroundDestroy", "OnPlayerCanSendMail", "OnSpellCheckCast", "OnPlayerCanGuildInvite", "OnPlayerLogin"]))
+            "OnBattlegroundDestroy", "OnPlayerCanSendMail", "OnSpellCheckCast", "OnPlayerCanGuildInvite", "OnPlayerLogin",
+            "OnPlayerCreate", "OnPlayerDelete", "OnAddMember", "OnDisband"]))
         # The guild hook is overridden only inside the patched-Core guard.
         self.assertEqual(re.findall(r"\bbool (OnPlayerCanGuildInvite)\(Player\* inviter, Player\* invitee\) override", self.src),
                          ["OnPlayerCanGuildInvite"])
@@ -268,6 +270,50 @@ class HooksAndAuthority(unittest.TestCase):
         policy = strip_comments(read(POLICY))
         self.assertIn("return optionEnabled && anyStillVanillaHuman && anyRestrictedBot;", policy)
         self.assertIn("return QueueFacts{BotIsRestrictedRandomBot(asBot), HumanStillVanilla(asHuman)};", policy)
+
+    def test_f2_role_check_member_refresh(self):
+        add = self.body("void OnAddMember(Group* group, ObjectGuid guid) override", "\n        }\n")
+        # Gate first: option, world thread; no Player is read before it.
+        self.assertRegex(add, r"^\s*\{\s*if \(!OptionOn\(\) \|\| !group \|\| !guid \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return;")
+        gate = add.index("WorldThread().IsCurrent()")
+        tracked = add.index("QueueFacts().TracksGroup(groupGuid)")
+        state = add.index("sLFGMgr->GetState(group->GetGUID()) == lfg::LFG_STATE_ROLECHECK")
+        refresh = add.index("Policy::RoleCheckMemberRefresh(true, true, tracked, inRoleCheck)")
+        find = add.index("ObjectAccessor::FindPlayer(guid)")
+        write = add.index("QueueFacts().RefreshGroupMember(groupGuid, guid.GetRawValue(), facts);")
+        self.assertTrue(gate < tracked < state < refresh < find < write)
+        self.assertIn("Policy::MakeQueueFacts(ReadHuman(member), ReadBot(member))", add)
+        # Only an already-tracked party, never a new record.
+        self.assertNotIn("RecordGroup", add)
+        self.assertEqual(add.count("std::lock_guard<std::mutex> lock(QueueFactsLock());"), 2)
+        disband = self.body("void OnDisband(Group* group) override", "\n        }\n")
+        self.assertNotIn("OptionOn", disband)  # cleanup also when OFF
+        self.assertIn("QueueFacts().EraseGroup(group->GetGUID().GetRawValue());", disband)
+        for token in ("ObjectAccessor", "ReadHuman", "ReadBot", "Player"):
+            self.assertNotIn(token, disband, token)
+        self.assertIn("new F14SocialIsolationGroupScript();", self.src)
+        self.assertIn("{GROUPHOOK_ON_ADD_MEMBER, GROUPHOOK_ON_DISBAND}", self.src)
+        policy = strip_comments(read(POLICY))
+        self.assertIn("return optionEnabled && worldThread && tracked && inRoleCheck;", policy)
+        refresh_fn = policy.split("bool RefreshGroupMember(", 1)[1].split("\n        }\n", 1)[0]
+        self.assertIn("if (party == _groups.end())\n                return false;", refresh_fn)
+        self.assertLess(refresh_fn.index("return false;\n            if (std::find"), refresh_fn.index("_facts[member] = facts;"))
+        # The LFG worker veto still reads values only.
+        veto = self.body("bool CanCreateLfgProposal(lfg::Lfg5Guids const& proposal) override", "\n        }\n")
+        self.assertNotIn("sLFGMgr", veto)
+
+    def test_f3_create_delete_forget_offline_mail(self):
+        create = self.body("void OnPlayerCreate(Player* player) override", "\n        }\n")
+        delete = self.body("void OnPlayerDelete(ObjectGuid guid, uint32 ) override", "\n        }\n")
+        self.assertIn("Confirmed().Forget(player->GetGUID().GetRawValue());", create)
+        self.assertIn("Confirmed().Forget(guid.GetRawValue());", delete)
+        for body in (create, delete):
+            self.assertNotIn("OptionOn", body)          # cleanup with the option OFF too
+            self.assertNotIn("Remember", body)          # never classifies anyone
+            for token in ("ReadBot", "ReadHuman", "getRace", "GetRace", "Query", "Database"):
+                self.assertNotIn(token, body, token)
+            self.assertIn("std::lock_guard<std::mutex> lock(ConfirmedLock());", body)
+        self.assertEqual(self.src.count("Confirmed().Remember("), 1)  # only the logout capture
 
     def body(self, signature, end="\n    }\n"):
         return self.src.split(signature, 1)[1].split(end, 1)[0]

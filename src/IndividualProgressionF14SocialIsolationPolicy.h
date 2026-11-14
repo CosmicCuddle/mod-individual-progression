@@ -302,6 +302,26 @@ namespace IndividualProgressionF14SocialIsolationPolicy
                     ++it;
             }
         }
+        // F-2: a member added to a party that IP already tracks while Core's
+        // role check is still running. Core queues the party afterwards
+        // with its stored role-check set, so the record made at join would
+        // miss this member. Appends the member (once) and records its facts.
+        // An untracked party is never created here. Returns true if applied.
+        bool RefreshGroupMember(std::uint64_t groupGuid, std::uint64_t member, QueueFacts facts)
+        {
+            if (!groupGuid || !member)
+                return false;
+            auto const party = _groups.find(groupGuid);
+            if (party == _groups.end())
+                return false;
+            if (std::find(party->second.begin(), party->second.end(), member) == party->second.end())
+                party->second.push_back(member);
+            _facts[member] = facts;
+            return true;
+        }
+        bool TracksGroup(std::uint64_t groupGuid) const { return _groups.count(groupGuid) != 0; }
+        // Group disbanded: its GUID is never reused, so the record can go.
+        void EraseGroup(std::uint64_t groupGuid) { _groups.erase(groupGuid); }
         std::size_t Size() const { return _facts.size(); }
         std::size_t Groups() const { return _groups.size(); }
 
@@ -367,6 +387,15 @@ namespace IndividualProgressionF14SocialIsolationPolicy
     // server run (recorded at its logout). A bot not seen since the last
     // restart is unknown and never restricted. No reply: an offline bot has
     // no live object to answer with.
+    // F-2 gate: refresh only on the world thread, only while the option is
+    // on, only a party IP already tracks, and only during Core's role check
+    // (a QUEUED party is removed from the queue by Core on any add).
+    constexpr bool RoleCheckMemberRefresh(bool optionEnabled, bool worldThread, bool tracked,
+                                          bool inRoleCheck)
+    {
+        return optionEnabled && worldThread && tracked && inRoleCheck;
+    }
+
     constexpr bool OfflineMailRefused(bool optionEnabled, bool senderStillVanillaHuman,
                                       bool receiverConfirmedRestrictedBot)
     {
