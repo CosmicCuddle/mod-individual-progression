@@ -60,7 +60,14 @@ bool PlayerbotAI::SayToGuild(std::string const& msg)
 - **Map-worker adds** (the level-up re-roll) are removed at the next world update.
 - The guild stays isolated, but the randomizer keeps retrying and logging.
 
-### Minimum change (Playerbots)
+### Owner decision (14 Nov 2026): no broad Playerbots change
+> "No they can still be assigned just not blood elf or draenei if they are in vanilla i think"
+
+- Bots **may** still be assigned to guilds that have real players.
+- Only a verified Blood Elf/Draenei RandomBot must not end up beside a still-Vanilla player. The IP Core #28 consumer already enforces this: it refuses before persistence on the world thread, re-checks map-worker adds at the next world update, and removes at the Vanilla player's next login if they were offline.
+- **The broad change below is rejected.** The remaining cost is retries and log lines from `InitGuild` when the randomizer picks such a guild. An optional, narrow Playerbots tweak (just avoid re-logging the same refused guild) is a nicety only, not required.
+
+### Rejected option (kept for the record)
 Treat a guild as unavailable for bot assignment when it has **any** member whose account isn't a RandomBot/AddClass account, not just a non-bot leader.
 
 **Shape:**
