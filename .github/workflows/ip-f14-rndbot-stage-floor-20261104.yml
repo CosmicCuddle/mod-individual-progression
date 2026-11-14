@@ -1,0 +1,271 @@
+# F14 early development: owner-verified racial rndbot floor remains default-OFF.
+# No Worldserver launch, database or host writes; no visibility hook exists yet.
+name: F14 verified RandomBot TBC login floor (OFF, pure/source)
+on:
+  pull_request:
+    branches:
+      - work/cs01-grim-upstream-source-merge-20261104
+    paths:
+      - ".github/workflows/ip-f14-rndbot-stage-floor-20261104.yml"
+      - "src/**"
+      - "conf/individualProgression.conf.dist"
+      - "tests/f14_verified_rndbot_tbc_floor.cpp"
+      - "tests/test_ip_f14_verified_rndbot_tbc_floor.py"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+permissions:
+  contents: read
+
+jobs:
+  source-and-model:
+    name: OFF + positive identity model (${{ matrix.cxx }} ${{ matrix.std }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - name: Checkout exact proposed F14 child
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Audit immutable Grim and Cosmic parent + exact modified-file scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor 7562a526ff3f20a38876e0a4f916593fee773c37 HEAD
+          git merge-base --is-ancestor 42c9a32892740af55a40e076e6381cc879181396 HEAD
+          git diff --name-only 7562a526ff3f20a38876e0a4f916593fee773c37 HEAD | sort > /tmp/f14-actual
+          printf '%s\n' \
+            '.github/workflows/ip-f14-rndbot-stage-floor-20261104.yml' \
+            'conf/individualProgression.conf.dist' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'src/IndividualProgression.cpp' \
+            'src/IndividualProgression.h' \
+            'src/IndividualProgressionF14LoginPolicy.h' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'tests/f14_verified_rndbot_tbc_floor.cpp' \
+            'tests/test_ip_f14_verified_rndbot_tbc_floor.py' | sort > /tmp/f14-allowed
+          diff -u /tmp/f14-allowed /tmp/f14-actual
+          git diff --check 7562a526ff3f20a38876e0a4f916593fee773c37 HEAD
+      - name: Source guards prove OFF and positively verified RandomBots only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_verified_rndbot_tbc_floor.py' -v
+          grep -Fqx 'IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0' conf/individualProgression.conf.dist
+      - name: Compile and execute pure C++ stage floor model (NOT Worldserver)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${{ matrix.cxx }}" "-std=${{ matrix.std }}" -O2 -UNDEBUG -Wall -Wextra -Werror -pedantic \
+            tests/f14_verified_rndbot_tbc_floor.cpp -o /tmp/f14-racial-rndbot-stage-floor
+          /tmp/f14-racial-rndbot-stage-floor
+      - name: Audit limits
+        if: always()
+        run: |
+          echo 'This is model and source CI ONLY; not a native build, gameplay or visibility validation.'
+          echo 'F14 Core visibility refresh remains absent; no server startup, character writes or production change.'
+          echo 'Do NOT turn the F14 stage flag on until WHO/world/creature/loot/observer policy is integrated and owner-approved.'
+
+  f14-native-worldserver-link:
+    name: F14 stage floor OFF + pinned Core/PB/Naxx292/Services16 (NO LAUNCH)
+    needs: source-and-model
+    if: github.event.pull_request.head.ref == 'work/cs01-f14-verified-rndbot-tbc-floor-20261104'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 170
+    steps:
+      - name: Checkout historical fixed Grim Core
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 8daffdabe9202c228e45d833c9a1d399597a15cd
+          path: acore
+          persist-credentials: false
+      - name: Checkout historical pinned Playerbots
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: acore/modules/mod-playerbots
+          persist-credentials: false
+      - name: Checkout exact current Grim + Cosmic candidate PR source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: acore/modules/mod-individual-progression
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Checkout untouched Naxx first test candidate #292
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/Mod-Naxxramas-Core
+          ref: 51d0611476358286505aed3ca806ea250f644f66
+          path: acore/modules/mod-naxxramas-core
+          persist-credentials: false
+      - name: Checkout untouched Character Services first test #16
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-character-services
+          ref: b5d372eda5cd08b6a650c78a5faeb01ee1c3702d
+          path: acore/modules/mod-character-services
+          persist-credentials: false
+
+      - name: Verify branch, exact pins and Cosmic+Grim custom preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          core=acore
+          ip=acore/modules/mod-individual-progression
+          cs=acore/modules/mod-character-services
+          test "$(git -C "$core" rev-parse HEAD)" = 8daffdabe9202c228e45d833c9a1d399597a15cd
+          test "$(git -C "$core/modules/mod-playerbots" rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          test "$(git -C "$ip" rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git -C "$ip" merge-base --is-ancestor 26d5b7a1de30ad92a595aaf251fc14754cf54f32 HEAD
+          test "$(git -C "$core/modules/mod-naxxramas-core" rev-parse HEAD)" = 51d0611476358286505aed3ca806ea250f644f66
+          test "$(git -C "$cs" rev-parse HEAD)" = b5d372eda5cd08b6a650c78a5faeb01ee1c3702d
+          grep -Fqx 'IndividualProgression.AutoAttune = 0' "$ip/conf/individualProgression.conf.dist"
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' "$ip/conf/individualProgression.conf.dist"
+          grep -Fqx 'IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0' "$ip/conf/individualProgression.conf.dist"
+          grep -Fqx 'IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0' "$ip/conf/individualProgression.conf.dist"
+          grep -Fqx 'IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0' "$ip/conf/individualProgression.conf.dist"
+          grep -Fq 'bool f14ForceVerifiedRandomBotTbcFloorOnLogin = false;' "$ip/src/IndividualProgression.h"
+          grep -Fq 'requires Core visibility refresh integration; forcing OFF' "$ip/src/IndividualProgression.cpp"
+          grep -Fqx 'CharacterServices.ExpansionUnlock.Enable = 0' "$cs/conf/character_services.conf.dist"
+          grep -Fq 'bool AutoAttune = false;' "$ip/src/IndividualProgression.h"
+          grep -Fq 'GrantAttunements(Player* player, ProgressionState state)' "$ip/src/IndividualProgression.cpp"
+          grep -Fq 'sIndividualProgression->GrantAttunements(player, newState)' "$ip/src/IndividualProgression.cpp"
+          grep -Fq 'if (!sIndividualProgression->isNormalAccount(player)) // bot or exluded account' "$ip/src/IndividualProgressionPlayer.cpp"
+          ! grep -Fq 'ForceUpdateProgressionState(player, static_cast<ProgressionState>(18))' "$ip/src/IndividualProgressionPlayer.cpp"
+          grep -Fq 'RememberF14VerifiedRandomBotGroupIdentity' "$ip/src/IndividualProgressionPlayer.cpp"
+          grep -Fq 'NeedsPaidGrantAudit(' "$ip/src/cs_individualProgression.cpp"
+          grep -Fq 'ShouldSkipF14VerifiedRandomBotGroupDowngrade(' "$ip/src/IndividualProgression.cpp"
+          grep -Fq 'PurchaseExpansion(Player* player' "$ip/src/IndividualProgression.h"
+          grep -Fq 'GetAccountEffectiveProgression(uint32 accountId)' "$ip/src/IndividualProgressionExpansion.cpp"
+          grep -Fq 'AccountProgressionForTierService(' "$cs/src/CharacterServices.cpp"
+          grep -Fq 'AddSC_boss_chromaggus_60_2_A();' "$ip/src/IndividualProgression_loader.cpp"
+          test -s "$ip/src/vanillaScripts/boss_chromaggus.cpp"
+          grep -Fq 'spell_bwl_chromaggus_time_lapse' "$ip/data/sql/world/base/dungeon_blackwing_lair.sql"
+          test -s "$ip/docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+          test -s "$ip/docs/UPSTREAM_GRIM_20261104_INTEGRATION_MATRIX.md"
+          echo 'PASS: proposed upstream/source integration retains Cosmic custom policy and defaults OFF'
+
+      - name: Run focused F14 OFF / GM / hunter / group source tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ip=acore/modules/mod-individual-progression
+          # New additive contract specifically for the Grim+Cosmic source merge;
+          # leave the older frozen original-PR provenance tests intact.
+          # The original #59 exact-source-preservation test is immutable on
+          # parent #59, but intentionally modified login source lives here.
+          # Use this narrow F14 add-on's own guarded source regression.
+          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_verified_rndbot_tbc_floor.py' -v
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -O2 -UNDEBUG "$ip/tests/f14_verified_rndbot_tbc_floor.cpp" -o /tmp/ip-f14-racial-floor
+          /tmp/ip-f14-racial-floor
+          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_gm_command_null_safety.py' -v
+          python3 -B -m unittest discover -s "$ip/tests" -p 'test_ip_f14_group_floor_source.py' -v
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -O2 "$ip/tests/f14_group_sync_floor.cpp" -o /tmp/ip-grim-f14-floor
+          /tmp/ip-grim-f14-floor | tee /tmp/ip-grim-f14-floor.out
+          grep -Fq 'F14 GROUP FLOOR MODEL 1805/1805 passed' /tmp/ip-grim-f14-floor.out
+
+      - name: Apply exact two-file Core paid-row safety patch on disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          core=acore
+          ip=$core/modules/mod-individual-progression
+          target=src/server/game/Entities/Player/PlayerSettings.cpp
+          player=src/server/game/Entities/Player/Player.h
+          patch=modules/mod-individual-progression/tests/core_patches/preserve_paid_receipt_row.patch
+          test "$(git -C "$core" rev-parse "HEAD:$target")" = f1eb86367ce69111867ef7187125f5fe456c5367
+          test "$(git -C "$core" rev-parse "HEAD:$player")" = 5a29ac7b40ade7a11f1fcf36623dc7530ea39595
+          test -s "$core/$patch"
+          git -C "$core" apply --check "$patch"
+          git -C "$core" apply "$patch"
+          git -C "$core" diff --check
+          git -C "$core" diff --name-only | sort > /tmp/actual-core.txt
+          printf '%s\n' "$player" "$target" | sort > /tmp/expected-core.txt
+          diff -u /tmp/expected-core.txt /tmp/actual-core.txt
+          grep -Fq 'SerializeSettingsData(parsed) == data' "$core/$target"
+          grep -Fq 'if (!PlayerSettingsStore::IsCanonicalPaidReceiptRow(source, data))' "$core/$target"
+          grep -Fq 'if (unsafePaidRow)' "$core/$target"
+          grep -Fq 'm_preserveMalformedPaidSettingsRow' "$core/$target"
+          grep -Fq 'bool m_preserveMalformedPaidSettingsRow = false;' "$core/$player"
+          grep -Fq 'ReceiptPolicy::DecodeRaw' "$ip/src/IndividualProgressionExpansion.cpp"
+          grep -Fq 'player->IsBeingTeleportedFar()' "$ip/src/IndividualProgressionExpansion.cpp"
+          echo 'PASS: exact Core two-file raw-row guard applied only in disposable runner'
+
+      - name: Apply exactly two pinned Playerbots compatibility edits ON CI RUNNER ONLY
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('acore/modules/mod-playerbots')
+          edits={
+            'src/Db/PlayerbotsDatabase.h': (
+              'MySQLConnection* CreateAsyncConnection(ProducerConsumerQueue<SQLOperation*>* queue,',
+              'MySQLConnection* CreateConnection(ProducerConsumerQueue<SQLOperation*>* queue,'),
+            'src/Util/LocaleColumns.h':(
+              'if (!IsLocaleRegistered(locale))','if (!localeNames[locale])')
+          }
+          for name,(old,new) in edits.items():
+            f=root/name
+            s=f.read_text()
+            assert s.count(old)==1 and new not in s,name
+            f.write_text(s.replace(old,new))
+          PY
+          git -C acore/modules/mod-playerbots diff --check
+          git -C acore/modules/mod-playerbots diff --name-only | sort > /tmp/actual.txt
+          printf '%s\n' 'src/Db/PlayerbotsDatabase.h' 'src/Util/LocaleColumns.h' | sort > /tmp/allowed.txt
+          diff -u /tmp/allowed.txt /tmp/actual.txt
+      - name: Install compile dependencies on disposable runner only
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git cmake ninja-build g++ make pkg-config file \
+            libmysqlclient-dev libssl-dev libbz2-dev \
+            libreadline-dev libncurses-dev libboost-all-dev
+      - name: Generate pinned static module compile database (NO SERVER START)
+        run: |
+          cmake -S acore -B acore-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_CXX_FLAGS="-DCOSMIC_IP_F14_REQUIRE_PLAYERBOTS" \
+            -DMODULES=static -DSCRIPTS=static \
+            -DAPPS_BUILD=world-only -DTOOLS_BUILD=none \
+            -DUSE_COREPCH=ON -DUSE_SCRIPTPCH=ON
+      - name: Assert all three actual module C++ compilation units are in graph
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          cc=json.loads(Path('acore-build/compile_commands.json').read_text())
+          for module,file in [
+            ('mod-individual-progression','IndividualProgressionExpansion.cpp'),
+            ('mod-character-services','CharacterServices.cpp'),
+            ('mod-naxxramas-core','Systems/MasterLootQuestGive.cpp')
+          ]:
+            hits=[entry for entry in cc
+                  if entry.get('file','').replace('\\','/').endswith('/'+module+'/src/'+file)]
+            assert len(hits)==1,(module,file,len(hits))
+            print('PASS: real compilation unit present',module,file)
+          PY
+      - name: Compile AND link actual combined Worldserver (do not execute)
+        run: cmake --build acore-build --target worldserver --parallel 2
+      - name: Verify finished binary without launching it
+        run: |
+          test -s acore-build/src/server/apps/worldserver
+          test -x acore-build/src/server/apps/worldserver
+          echo 'PASS: protected Grim IP with default-OFF F14 verified racial RandomBot TBC floor and scoped raw-row Core patch + pinned PB/Naxx292/Services16 linked'
+          echo 'No owner host, accounts, DB, NPC, gold, config, enablement or live archive touched'
+      - name: Safety and confidence boundary
+        if: always()
+        run: |
+          echo 'This is development-only pinned historical Core + PB compile/link.'
+          echo 'Even native PASS does not certify newer Grim Core, SQL migrations or in-game behavior.'
+          echo 'Do not merge/deploy to owner host without approval; AutoAttune and paid/F14 features OFF.'

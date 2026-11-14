@@ -1,0 +1,252 @@
+# F14 safer social isolation for verified BE/Draenei RandomBots (default OFF).
+# Child of IP #172 (aed05a92). MILESTONE-ONLY: manual dispatch, so ordinary
+# pushes spend no Actions quota. No worldserver launch, DB, host or deploy.
+name: F14 social isolation (OFF, milestone, NO HOST)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    name: "Social isolation policy + source contracts (${{ matrix.cxx }} ${{ matrix.std }})"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: "Verify #172 ancestry and EXACT fifteen-path scope"
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=aed05a92f262362608f5d643c8570b504189aae0
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            '.github/workflows/f14-social-isolation.yml' \
+            'conf/individualProgression.conf.dist' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/F14_SOCIAL_ISOLATION_2026-11-13.md' \
+            'docs/F14_SOCIAL_ISOLATION_PLAYERBOTS_DISPATCH_DESIGN_2026-11-13.md' \
+            'docs/F14_SOCIAL_ISOLATION_RUNTIME_TEST_PLAN_2026-11-13.md' \
+            'src/IndividualProgression.cpp' \
+            'src/IndividualProgression.h' \
+            'src/IndividualProgressionF14SocialIsolationPolicy.h' \
+            'src/IndividualProgressionF14SocialIsolationScript.cpp' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'tests/core_patches/apply_f14_guild_invite_hook.py' \
+            'tests/f14_social_isolation_policy_test.cpp' \
+            'tests/test_f14_guild_invite_hook_patch.py' \
+            'tests/test_f14_social_isolation_source.py' | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          git diff --check "$parent" HEAD
+          git diff -U0 "$parent" HEAD -- docs/CUSTOM_MODIFICATIONS_REGISTER.md \
+            | grep -E '^-' | grep -Ev '^--- ' > /tmp/register-removed || true
+          test ! -s /tmp/register-removed
+      - name: Source contracts
+        shell: bash
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_f14_social_isolation_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_f14_guild_invite_hook_patch.py' -v
+      - name: "Native policy tests (${{ matrix.cxx }} ${{ matrix.std }}, with and without NDEBUG)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ndebug in "" "-DNDEBUG"; do
+            ${{ matrix.cxx }} -std=${{ matrix.std }} -pthread -Wall -Wextra -Werror -pedantic -O2 $ndebug \
+              -Isrc tests/f14_social_isolation_policy_test.cpp -o /tmp/f14-social
+            /tmp/f14-social | tee /tmp/out.txt
+            grep -Eq '^F14 SOCIAL ISOLATION POLICY ([0-9]+)/\1 passed' /tmp/out.txt
+          done
+
+  core25-anchors:
+    name: "Core25 395b68ee social-hook anchors (read-only)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Core25 (sparse, read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/azerothcore-wotlk
+          ref: 395b68ee4ce425826c2a79c0ddf3ade3c67c8160
+          path: core
+          persist-credentials: false
+          sparse-checkout: |
+            src/server/game
+            src/server/shared
+      - name: Checkout this module (for the Core patch script)
+        uses: actions/checkout@v4
+        with:
+          path: mod
+          persist-credentials: false
+      - name: Verify hook placement, ordering and /who count consistency
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C core rev-parse HEAD)" = 395b68ee4ce425826c2a79c0ddf3ade3c67c8160
+          python3 -I - <<'PY'
+          from pathlib import Path
+          base = Path("core/src/server/game")
+          anchors = [
+              ("Scripting/ScriptDefines/PlayerScript.h", 149, "PLAYERHOOK_CAN_GROUP_INVITE,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 150, "PLAYERHOOK_CAN_GROUP_ACCEPT,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 200, "PLAYERHOOK_CAN_INIT_TRADE,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 207, "PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 548, "virtual bool OnPlayerCanGroupInvite(Player* /*player*/, std::string& /*membername*/)"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 550, "virtual bool OnPlayerCanGroupAccept(Player* /*player*/, Group* /*group*/)"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 674, "virtual bool OnPlayerCanInitTrade(Player* /*player*/, Player* /*target*/)"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 718, "std::string& /*msg*/, Player* /*receiver*/)"),
+              ("Scripting/ScriptDefines/PlayerScript.cpp", 540, "CALL_ENABLED_BOOLEAN_HOOKS(PlayerScript, PLAYERHOOK_CAN_GROUP_INVITE"),
+              ("Entities/Player/Player.cpp", 9684, "void Player::Whisper(std::string_view text, Language language, Player* target"),
+              ("Entities/Player/Player.cpp", 9695, "if (!sScriptMgr->OnPlayerCanUseChat(this, CHAT_MSG_WHISPER, language, _text, target))"),
+              ("Handlers/ChatHandler.cpp", 428, "SendWrongFactionNotice();"),
+              ("Handlers/ChatHandler.cpp", 448, "GetPlayer()->Whisper(msg, Language(lang), receiver);"),
+              ("Handlers/TradeHandler.cpp", 830, "info.Status = TRADE_STATUS_WRONG_FACTION;"),
+              ("Handlers/TradeHandler.cpp", 842, "if (!sScriptMgr->OnPlayerCanInitTrade(_player, pOther))"),
+              ("Handlers/GroupHandler.cpp", 89, "if (!sScriptMgr->OnPlayerCanGroupInvite(invitingPlayer, membername))"),
+              ("Handlers/MiscHandler.cpp", 397, "#if defined(COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT) && COSMIC_F14_WHO_GUID_QUERY_EXPERIMENT >= 1"),
+              ("Handlers/MiscHandler.cpp", 401, "sScriptMgr->ShouldF14ExcludeWhoEntryForViewer(_player, target.GetGuid(), race))"),
+              ("Handlers/MiscHandler.cpp", 407, "if ((matchCount++) >= sWorld->getIntConfig(CONFIG_MAX_WHO_LIST_RETURN))"),
+              ("Scripting/ScriptDefines/WorldObjectScript.h", 62, "WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY,"),
+              ("Scripting/ScriptDefines/WorldObjectScript.h", 159, "virtual bool OnF14ShouldExcludeWhoEntryForViewer("),
+              ("Chat/Chat.h", 48, "static std::size_t BuildChatPacket(WorldPacket& data, ChatMsg chatType, Language language, WorldObject const* sender, WorldObject const* receiver"),
+              # Group-accept member scan (S1): API, in-world lookup and thread context.
+              ("Handlers/GroupHandler.cpp", 257, "if (!sScriptMgr->OnPlayerCanGroupAccept(GetPlayer(), group))"),
+              ("Groups/Group.h", 183, "ObjectGuid  guid;"),
+              ("Groups/Group.h", 252, "MemberSlotList const& GetMemberSlots() const { return m_memberSlots; }"),
+              ("Globals/ObjectAccessor.cpp", 269, "Player* ObjectAccessor::FindPlayer(ObjectGuid const guid)"),
+              ("Globals/ObjectAccessor.cpp", 272, "return player && player->IsInWorld() ? player : nullptr;"),
+              ("Server/Protocol/Opcodes.cpp", 241, "PROCESS_THREADUNSAFE,   &WorldSession::HandleGroupInviteOpcode"),
+              ("Server/Protocol/Opcodes.cpp", 245, "PROCESS_THREADUNSAFE,   &WorldSession::HandleGroupAcceptOpcode"),
+              ("Server/Protocol/Opcodes.cpp", 280, "PROCESS_THREADUNSAFE,   &WorldSession::HandleMessagechatOpcode"),
+              ("Server/Protocol/Opcodes.cpp", 409, "PROCESS_THREADUNSAFE,   &WorldSession::HandleInitiateTradeOpcode"),
+              ("Server/WorldSession.cpp", 76, "if (opHandle->ProcessingPlace == PROCESS_THREADUNSAFE)"),
+              ("Server/WorldSession.cpp", 77, "return false;"),
+              # T1: the world-thread marker hook runs on the world thread, after the map update.
+              ("Scripting/ScriptDefines/WorldScript.h", 34, "WORLDHOOK_ON_UPDATE,"),
+              ("Scripting/ScriptDefines/WorldScript.h", 71, "virtual void OnUpdate(uint32 /*diff*/) { }"),
+              ("World/World.cpp", 1255, "sMapMgr->Update(diff);"),
+              ("World/World.cpp", 1356, "sScriptMgr->OnWorldUpdate(diff);"),
+              # T1 ownership proof: a player update starts with the before-update hook on the
+              # thread updating its map; Playerbots AI runs later in the after-update hook; each
+              # map is scheduled once per tick and the world waits for all before the tick ends.
+              ("Scripting/ScriptDefines/PlayerScript.h", 59, "PLAYERHOOK_ON_BEFORE_UPDATE,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 306, "virtual void OnPlayerBeforeUpdate(Player* /*player*/, uint32 /*p_time*/) { }"),
+              ("Entities/Player/PlayerUpdates.cpp", 60, "sScriptMgr->OnPlayerBeforeUpdate(this, p_time);"),
+              ("Entities/Player/PlayerUpdates.cpp", 427, "sScriptMgr->OnPlayerAfterUpdate(this, p_time);"),
+              ("Maps/Map.cpp", 489, "player->Update(s_diff);"),
+              ("Maps/Map.h", 335, "PlayerList const& GetPlayers() const { return m_mapRefMgr; }"),
+              ("Maps/MapMgr.cpp", 274, "m_updater.schedule_update(*iter->second"),
+              ("Maps/MapMgr.cpp", 280, "m_updater.wait();"),
+              # Dungeon Finder (owner decision): join is world-thread, the proposal veto runs on the
+              # LFG worker thread beside the maps (value-only), and sees every player GUID via roles.
+              ("Server/Protocol/Opcodes.cpp", 991, "PROCESS_THREADUNSAFE,   &WorldSession::HandleLfgJoinOpcode"),
+              ("Handlers/LFGHandler.cpp", 74, "sLFGMgr->JoinLfg(GetPlayer(), uint8(packet.Roles), newDungeons, packet.Comment);"),
+              ("DungeonFinding/LFGMgr.cpp", 614, "if (!sScriptMgr->OnPlayerCanJoinLfg(player, roles, dungeons, comment))"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 198, "PLAYERHOOK_CAN_JOIN_LFG,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 80, "PLAYERHOOK_ON_LOGOUT,"),
+              ("Scripting/ScriptDefines/GlobalScript.h", 51, "GLOBALHOOK_CAN_CREATE_LFG_PROPOSAL,"),
+              ("Scripting/ScriptDefines/GlobalScript.h", 118, "virtual bool CanCreateLfgProposal(lfg::Lfg5Guids const& /*guids*/) { return true; }"),
+              ("DungeonFinding/LFGQueue.cpp", 415, "if (!sScriptMgr->CanCreateLfgProposal(proposal.queues))"),
+              ("DungeonFinding/LFG.h", 125, "std::array<ObjectGuid, 5> guids = { };"),
+              ("DungeonFinding/LFG.h", 126, "LfgRolesMap* roles;"),
+              ("Maps/MapMgr.cpp", 261, "m_updater.schedule_lfg_update(diff);"),
+              # A FULL proposal carries no roles map: strGuids is copied without roles and only the
+              # fewer-players branch attaches them, so parties appear only as group GUIDs.
+              ("DungeonFinding/LFGQueue.cpp", 251, "Lfg5Guids strGuids(checkWith, false);"),
+              ("DungeonFinding/LFG.h", 146, "Lfg5Guids(Lfg5Guids const& x, bool /*copyRoles*/)"),
+              ("DungeonFinding/LFG.h", 149, "roles = nullptr;"),
+              ("DungeonFinding/LFGQueue.cpp", 396, "strGuids.addRoles(proposalRoles);"),
+              ("DungeonFinding/LFGQueue.cpp", 409, "proposal.queues = strGuids;"),
+              # Battlegrounds, owner option (c): (b) queue join and (a) enter battle, both through
+              # world-thread packets for humans; the roster is fed on the human worldport ack.
+              ("Server/Protocol/Opcodes.cpp", 881, "PROCESS_THREADUNSAFE,   &WorldSession::HandleBattlemasterJoinOpcode"),
+              ("Server/Protocol/Opcodes.cpp", 856, "PROCESS_THREADUNSAFE,   &WorldSession::HandleBattleFieldPortOpcode"),
+              ("Server/Protocol/Opcodes.cpp", 351, "PROCESS_THREADUNSAFE,   &WorldSession::HandleMoveWorldportAckOpcode"),
+              ("Handlers/BattleGroundHandler.cpp", 142, "if (!sScriptMgr->OnPlayerCanJoinInBattlegroundQueue(_player, guid, bgTypeId, joinAsGroup, err) && err <= 0)"),
+              ("Handlers/BattleGroundHandler.cpp", 430, "if (!sScriptMgr->OnPlayerCanBattleFieldPort(_player, arenaType, bgTypeId, action))"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 141, "PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE,"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 148, "PLAYERHOOK_CAN_BATTLEFIELD_PORT,"),
+              ("Handlers/MovementHandler.cpp", 178, "bg->AddPlayer(_player);"),
+              ("Battlegrounds/Battleground.cpp", 1243, "sScriptMgr->OnBattlegroundAddPlayer(this, player);"),
+              ("Battlegrounds/Battleground.cpp", 1132, "sScriptMgr->OnBattlegroundRemovePlayerAtLeave(this, player);"),
+              ("Battlegrounds/Battleground.cpp", 229, "sScriptMgr->OnBattlegroundDestroy(this);"),
+              ("Scripting/ScriptDefines/AllBattlegroundScript.h", 30, "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_ADD_PLAYER,"),
+              ("Scripting/ScriptDefines/AllBattlegroundScript.h", 32, "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_REMOVE_PLAYER_AT_LEAVE,"),
+              ("Scripting/ScriptDefines/AllBattlegroundScript.h", 42, "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY,"),
+              ("Entities/Player/Player.cpp", 12571, "if (_BgBattlegroundQueueID[i].invitedToInstance == instanceId)"),
+              ("../shared/SharedDefines.h", 3894, "ERR_BATTLEGROUND_NONE                   = -1,"),
+              # Duel: a global spell check (no spell_script_names row) early in CheckCast, whose
+              # failure stops the cast; casts are processed in the caster's own map update.
+              ("Spells/Spell.cpp", 5907, "sScriptMgr->OnSpellCheckCast(this, strict, res);"),
+              ("Spells/Spell.cpp", 5909, "if (res != SPELL_CAST_OK)"),
+              ("Scripting/ScriptDefines/AllSpellScript.h", 27, "ALLSPELLHOOK_ON_SPELL_CHECK_CAST,"),
+              ("Scripting/ScriptDefines/AllSpellScript.h", 58, "virtual void OnSpellCheckCast(Spell* /*spell*/, bool /*strict*/, SpellCastResult& /*res*/) { }"),
+              ("Server/Protocol/Opcodes.cpp", 433, "PROCESS_THREADSAFE,     &WorldSession::HandleCastSpellOpcode"),
+              ("Spells/Spell.h", 542, "SpellCastTargets m_targets;"),
+              ("Spells/SpellEffects.cpp", 155, "&Spell::EffectDuel,"),
+              ("../shared/SharedDefines.h", 949, "SPELL_FAILED_BAD_TARGETS = 12,"),
+              # Mail: world-thread handler; the same hook also guards returning a mail to its sender.
+              ("Server/Protocol/Opcodes.cpp", 699, "PROCESS_THREADUNSAFE,   &WorldSession::HandleSendMail"),
+              ("Scripting/ScriptDefines/PlayerScript.h", 152, "PLAYERHOOK_CAN_SEND_MAIL,"),
+              ("Handlers/MailHandler.cpp", 289, "if (!items_count && !sScriptMgr->OnPlayerCanSendMail(player, receiverGuid, mailbox, subject, body, money, COD, nullptr))"),
+              ("Handlers/MailHandler.cpp", 460, "if (item && !sScriptMgr->OnPlayerCanSendMail(player, ObjectGuid(HighGuid::Player, m->sender), mailbox"),
+              # Option (d): the per-group matcher veto is consulted at every pool insertion (fill and
+              # new match), queue state is public, and queue updates run in BattlegroundMgr::Update on
+              # the world thread after the map phase.
+              ("Scripting/ScriptDefines/AllBattlegroundScript.h", 45, "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL,"),
+              ("Scripting/ScriptDefines/AllBattlegroundScript.h", 163, "virtual bool CanAddGroupToMatchingPool(BattlegroundQueue* /*queue*/, GroupQueueInfo* /*group*/, uint32 /*poolPlayerCount*/, Battleground"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 454, "if (!sScriptMgr->CanAddGroupToMatchingPool(this, (*Ali_itr), m_SelectionPools[TEAM_ALLIANCE].GetPlayerCount(), bg, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 472, "if (!sScriptMgr->CanAddGroupToMatchingPool(this, (*Horde_itr), m_SelectionPools[TEAM_HORDE].GetPlayerCount(), bg, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 587, "if (!sScriptMgr->CanAddGroupToMatchingPool(this, (*ali_group), 0, nullptr, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 669, "if (sScriptMgr->CanAddGroupToMatchingPool(this, *(itr_team[i]), m_SelectionPools[i].GetPlayerCount(), bgTemplate, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 693, "if (!sScriptMgr->CanAddGroupToMatchingPool(this, *(itr_team[j]), m_SelectionPools[j].GetPlayerCount(), bgTemplate, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.h", 69, "public:"),
+              ("Battlegrounds/BattlegroundQueue.h", 112, "GroupsQueueType m_QueuedGroups[MAX_BATTLEGROUND_BRACKETS][BG_QUEUE_MAX];"),
+              ("Battlegrounds/BattlegroundQueue.h", 124, "GroupsQueueType SelectedGroups;"),
+              ("Battlegrounds/BattlegroundQueue.h", 130, "SelectionPool m_SelectionPools[PVP_TEAMS_COUNT];"),
+              ("Battlegrounds/BattlegroundQueue.h", 135, "private:"),
+              ("Battlegrounds/BattlegroundQueue.h", 36, "GuidSet Players;"),
+              ("Battlegrounds/Battleground.h", 418, "BattlegroundPlayerMap const& GetPlayers() const { return m_Players; }"),
+              ("Battlegrounds/BattlegroundMgr.cpp", 146, "m_BattlegroundQueues[bgQueueTypeId].BattlegroundQueueUpdate(diff, bgTypeId, bracket_id, arenaType, arenaMMRating > 0, arenaMMRating);"),
+              ("World/World.cpp", 1270, "sBattlegroundMgr->Update(diff);"),
+              # Premade order: both premades are checked before either is added, each the first
+              # not-yet-invited group of its premade queue (the peer the hook mirrors).
+              ("Battlegrounds/BattlegroundQueue.h", 57, "BG_QUEUE_PREMADE_ALLIANCE,"),
+              ("Battlegrounds/BattlegroundQueue.h", 58, "BG_QUEUE_PREMADE_HORDE,"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 576, "for (ali_group = m_QueuedGroups[bracket_id][BG_QUEUE_PREMADE_ALLIANCE].begin();"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 577, "if (!(*ali_group)->IsInvitedToBGInstanceGUID)"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 580, "for (horde_group = m_QueuedGroups[bracket_id][BG_QUEUE_PREMADE_HORDE].begin();"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 590, "if (!sScriptMgr->CanAddGroupToMatchingPool(this, (*horde_group), m_SelectionPools[TEAM_ALLIANCE].GetPlayerCount(), nullptr, bracket_id))"),
+              ("Battlegrounds/BattlegroundQueue.cpp", 593, "m_SelectionPools[TEAM_ALLIANCE].AddGroup((*ali_group), MaxPlayersPerTeam);"),
+          ]
+          bad = 0
+          for name, line, text in anchors:
+              got = (base / name).read_text(encoding="utf-8").split("\n")[line - 1]
+              if text not in got:
+                  bad += 1
+                  print(f"FAIL {name}:{line}: expected {text!r}, got {got!r}")
+          if bad:
+              raise SystemExit(f"{bad} Core25 social anchor(s) drifted")
+          print(f"PASS: {len(anchors)} Core25 social-hook anchors; faction checks precede whisper/trade hooks; /who exclusion precedes matchCount; social opcodes are world-thread only; world-update marker hook; T1 per-tick map ownership; Dungeon Finder seam; battleground options (c)+(d); duel and mail")
+          PY
+      - name: Apply the owner-approved guild-invite hook patch to a copy of Core25
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -a core core-patched
+          python3 -I mod/tests/core_patches/apply_f14_guild_invite_hook.py core-patched
+          git -C core-patched diff --numstat | awk '$2 != 0 { exit 1 }'   # purely additive
+          test "$(git -C core-patched diff --name-only | wc -l)" = 4
+          grep -q '#define COSMIC_F14_GUILD_INVITE_HOOK_VERSION 1' core-patched/src/server/game/Scripting/ScriptDefines/PlayerScript.h
+          if python3 -I mod/tests/core_patches/apply_f14_guild_invite_hook.py core-patched; then
+            echo "repeat application must be refused"; exit 1
+          fi

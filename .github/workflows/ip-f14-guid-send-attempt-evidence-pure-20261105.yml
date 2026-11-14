@@ -1,0 +1,87 @@
+# Pure C++ evidence, NO LIVE LISTENERS, client ACK, Worldserver startup.
+name: F14 exact GUID tagged send call to unchanged Claude restore model (PURE OFF)
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-exact-guid-send-attempt-evidence-20261105
+  pull_request:
+    branches:
+      - research/cs01-f14-core-quest-loot-veto-20261105
+    paths:
+      - "src/IndividualProgressionF14GuidSendAttemptEvidence.h"
+      - "tests/f14_guid_send_attempt_evidence.cpp"
+      - "tests/test_ip_f14_guid_send_attempt_evidence_source.py"
+      - ".github/workflows/ip-f14-guid-send-attempt-evidence-pure-20261105.yml"
+      - "docs/F14_GUID_SEND_ATTEMPT_EVIDENCE_2026-11-05.md"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+
+permissions:
+  contents: read
+
+jobs:
+  exact-source-tagged-model:
+    name: Exact six paths plus original #94 protocol and #93/#95 tag source, 8 C++ configs (NO HOST)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout immutable #95 Core GUID send-call patches for read-only provenance
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: 31198448171b8d8a07c432d6361cd57c6c7ba821
+          path: f14-core-send-provenance
+          persist-credentials: false
+      - name: Prove exact six-path diff and unchanged #92 / Claude #94 blobs and flags OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=aa60e5892d98509d6bcbf62b791eb0c759018766
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort > /tmp/f14-actual
+          printf '%s\n' \
+            'src/IndividualProgressionF14GuidSendAttemptEvidence.h' \
+            'tests/f14_guid_send_attempt_evidence.cpp' \
+            'tests/test_ip_f14_guid_send_attempt_evidence_source.py' \
+            '.github/workflows/ip-f14-guid-send-attempt-evidence-pure-20261105.yml' \
+            'docs/F14_GUID_SEND_ATTEMPT_EVIDENCE_2026-11-05.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/f14-expected
+          diff -u /tmp/f14-expected /tmp/f14-actual
+          test -z "$(git diff --name-only "$parent" HEAD -- conf sql data optional)"
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14LifecycleRegistry.h)" = 2d6bf7fb473ae118be35a0c9f98276b8bed1e2e8
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14ViewerRestoreProtocol.h)" = f520356a8152d98580751604f4649fe1b564f072
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14PriorHiddenLedger.h)" = 2250bae56bb09a810d337927f738bd3cbcf5fddd
+          test "$(git -C f14-core-send-provenance rev-parse HEAD)" = 31198448171b8d8a07c432d6361cd57c6c7ba821
+          test "$(git -C f14-core-send-provenance rev-parse HEAD:tests/core_patches/apply_f14_batched_guid_send_attempt.py)" = 170e624a84cb9d271bd80056dfcaa77ecdaa0324
+          test "$(git -C f14-core-send-provenance rev-parse HEAD:tests/core_patches/apply_f14_batched_guid_create_attempt.py)" = dfaf7e6d17a876809570678bbdf6a8891e7441ba
+          grep -Fq 'OnF14VisibilityBatchOutOfRangeAttempt' f14-core-send-provenance/tests/core_patches/apply_f14_batched_guid_send_attempt.py
+          grep -Fq 'OnF14VisibilityBatchCreateAttempt' f14-core-send-provenance/tests/core_patches/apply_f14_batched_guid_create_attempt.py
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_guid_send_attempt_evidence_source.py' -v
+          echo 'PASS: immutable source, exact provenance hooks, no runtime adapter registration or client ACK'
+      - name: Run unchanged Claude pure protocol + new narrow tagged GUID adapter in eight toolchain modes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  -Isrc tests/f14_guid_send_attempt_evidence.cpp -o /tmp/cosmic-f14-tagged-guid-evidence
+                /tmp/cosmic-f14-tagged-guid-evidence
+                "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  -Isrc tests/f14_viewer_restore_protocol.cpp -o /tmp/cosmic-f14-original-claude-model
+                /tmp/cosmic-f14-original-claude-model
+              done
+            done
+          done
+          echo 'PASS: exact GUID-tagged send attempts are NOT client ACK and never clear Claude ledger'

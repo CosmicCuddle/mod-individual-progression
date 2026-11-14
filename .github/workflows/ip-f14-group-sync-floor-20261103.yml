@@ -1,0 +1,57 @@
+name: IP F14 verified RandomBot group downgrade containment (DRAFT, OFF)
+
+on:
+  pull_request:
+    paths:
+      - 'src/IndividualProgression.h'
+      - 'src/IndividualProgression.cpp'
+      - 'src/IndividualProgressionPlayer.cpp'
+      - 'src/IndividualProgressionF14LoginPolicy.h'
+      - 'conf/individualProgression.conf.dist'
+      - 'tests/f14_group_sync_floor.cpp'
+      - 'tests/test_ip_f14_group_floor_source.py'
+      - '.github/workflows/ip-f14-group-sync-floor-20261103.yml'
+  push:
+    paths:
+      - 'src/IndividualProgression.h'
+      - 'src/IndividualProgression.cpp'
+      - 'src/IndividualProgressionPlayer.cpp'
+      - 'src/IndividualProgressionF14LoginPolicy.h'
+      - 'conf/individualProgression.conf.dist'
+      - 'tests/f14_group_sync_floor.cpp'
+      - 'tests/test_ip_f14_group_floor_source.py'
+      - '.github/workflows/ip-f14-group-sync-floor-20261103.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-floor-model:
+    name: F14 no-cross-era group downgrade model and source (NO HOST)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify default-OFF source contracts and positive login identity
+        run: python3 -B -m unittest discover -s tests -p test_ip_f14_group_floor_source.py -v
+      - name: Compile unchanged pure F14 group-floor helper and all level-stage combinations
+        shell: bash
+        run: |
+          set -euo pipefail
+          ${{ matrix.compiler }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 \
+            tests/f14_group_sync_floor.cpp -o /tmp/ip-f14-group-floor
+          /tmp/ip-f14-group-floor | tee /tmp/f14.out
+          grep -qx 'F14 GROUP FLOOR MODEL 1805/1805 passed (identity and game runtime not modeled)' /tmp/f14.out
+      - name: Evidence limits
+        run: |
+          echo 'DRAFT, default OFF. This test does not instantiate Playerbots or Worldserver.'
+          echo 'Native compile/link and actual PB login/group/quest-reset/visibility require separate tests.'
+          echo 'No installed Core, game DB, user configs, accounts, quests, or live server touched.'

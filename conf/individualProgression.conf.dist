@@ -29,6 +29,179 @@ IndividualProgression.Enable = 1
 #
 IndividualProgression.EnforceGroupRules = 0
 
+# IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin
+#
+#        DRAFT PARTIAL SAFEGUARD - NOT COMPLETE F14 ENFORCEMENT.
+#        0 = OFF (default). Exact original bot login stage syncing remains.
+#        1 = Preserve saved stage 8-18 for positively selected HEADLESS
+#            Blood Elf/Draenei RNDbots on Core's IP login callback only.
+#        This option never grants stage 8 to a new character and does NOT
+#        hide rndbots from Vanilla observers, protect GM/group stage writes,
+#        or prevent old stage 0 bot migrations. A matching Playerbots module
+#        must be available at build time. Keep OFF pending owner approval,
+#        full source-matched build, F14 integration and staging tests.
+#
+IndividualProgression.F14.PreserveVerifiedRandomBotStageOnLogin = 0
+
+# IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin
+#
+#        DEVELOPMENT ONLY / NOT AN ACTIVE OR COMPLETE F14 VISIBILITY FEATURE.
+#        When the complete map/WHO/combat visibility bridge is present and
+#        explicitly approved, positively verified headless Blood Elf/Draenei
+#        RandomBots on matching bot accounts may start at raw TBC stage 8,
+#        or stage 13 for level 71+, without reducing any higher earned stage.
+#        Real human characters and unverified/Altbot characters are excluded.
+#        A nonzero ProgressionLimit below the required stage blocks the grant.
+#        No expansion purchase is made. This does NOT itself hide a bot!
+#        Without the required Playerbots API and Core visibility-refresh
+#        build-time marker the option is FORCED OFF even if set to 1.
+#        Group sync and visibility still need separate verified integration.
+#        NEVER ENABLE on live server merely because it compiled.
+#
+#        Default:     0 - Disabled / current owner behavior unchanged
+#
+IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0
+
+
+# IndividualProgression.F14.ExperimentalRndbotPlayerVisibility
+#
+#        DEVELOPMENT ONLY / OFF by default. Player-only F14 observer and
+#        cached /who test hook. Hides only positively VERIFIED current
+#        Blood Elf/Draenei RandomBots from normal Vanilla-stage observers
+#        *if* all required WorldObject/WHO/instant refresh Core hooks exist.
+#        Human, Altbot, GM, excluded-account, unverified and unknown targets
+#        remain visible. Cached WHO never dereferences the target player.
+#        This feature is FORCED OFF if the Playerbots API, Core world/WHO or
+#        versioned immediate refresh bridge is missing. The current Core
+#        prototype does NOT provide that refresh bridge, so this is INACTIVE.
+#        Never enable without owner permission and gameplay regression tests.
+#
+IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0
+
+# IndividualProgression.F14.ExperimentalAttackLifecycleRegistry
+#
+#        DEVELOPMENT ONLY / OFF by default. Bookkeeping of which positively
+#        VERIFIED Blood Elf/Draenei RandomBot login incarnations are attacking
+#        which world creature, retired on creature corpse/respawn/evade and on
+#        bot logout/relogin. It hides NOTHING, sends no visibility refresh,
+#        changes no stage, quest, loot or database data, and never calls
+#        Playerbots from map threads. Humans, Altbots, GMs, pets/minions and
+#        unknown participants only mark a creature uncertain (fail visible).
+#        Any overflow disables the registry until the next config reload.
+#        When ON it also records verified RandomBot login identity by itself;
+#        no other F14 option needs to be ON. FORCED OFF unless the Core
+#        attack/corpse event hook and the Playerbots API are present.
+#        Never enable without owner permission and gameplay regression tests.
+#
+IndividualProgression.F14.ExperimentalAttackLifecycleRegistry = 0
+
+# IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor
+#
+#        INCOMPLETE F14 / DEVELOPMENT PILOT - DEFAULT OFF.
+#        In EnforceGroupRules=0 only, stop the two group-sync writes from
+#        downgrading a positively identified, HEADLESS BE/Draenei RandomBot
+#        below saved stage 8 at any level. A separate Wrath floor 13 is
+#        deliberately NOT forced by this pilot (owner policy pending).
+#        Positive RandomBot identity is collected on login only, never
+#        queried from a group/map worker. Does not affect human characters,
+#        Altbots, excluded accounts, different races or bots not verified.
+#
+#        Does NOT grant/restore stage 8 to new or PB-reset bots; does NOT
+#        enforce expansion-only grouping, hide Vanilla observers, fix /who,
+#        prevent post-login Playerbots Randomize/ResetQuests or alter the
+#        owner's live config. F14 as a whole remains unfinished.
+#        Must remain OFF until specific owner approval, a native Core/PB
+#        build, backup and actual login/group/quest-reset gameplay tests.
+#
+IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0
+
+# IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor
+#
+#        DEVELOPMENT ONLY / OFF by default. Refuses any IP-owned progression
+#        reset (login level write, group sync, .ip set, .ip setbot) that would
+#        push a positively VERIFIED headless Blood Elf/Draenei RandomBot below
+#        an already EARNED TBC stage (8+). The current stage is kept as is.
+#        It never creates or grants a stage and never lowers a higher stage
+#        to 8. ProgressionLimit still applies to new grants; an earned stage
+#        above a later-lowered limit is kept untouched (never deleted). It
+#        never affects humans, Altbots, GMs, excluded or unverified
+#        characters. Playerbots' own ResetQuests is outside IP: NOT covered.
+#        FORCED OFF without the Playerbots API. Owner approval required.
+#
+IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor = 0
+
+# IndividualProgression.F14.RandomBotSocialIsolation
+#
+#        DEVELOPMENT ONLY / OFF by default. While an ordinary human player is
+#        still in Vanilla (stage below 8), a positively VERIFIED headless
+#        Blood Elf/Draenei RandomBot declines that player's whisper, trade and
+#        group invitation (both directions) and, in Core builds with the F14
+#        /who query, is left out of that player's /who list and count. When
+#        the player starts the interaction, the bot answers once with the
+#        whisper below (rate-limited per player and bot). Normal interaction
+#        returns as soon as the player reaches stage 8. Never decided from
+#        race alone: humans, Altbots, SelfBots, GMs and unknown characters
+#        are never affected, and nobody is hidden in the world.
+#        FORCED OFF without the Playerbots API. Owner approval required.
+#
+IndividualProgression.F14.RandomBotSocialIsolation = 0
+
+# IndividualProgression.F14.RandomBotSocialIsolation.Reply
+#
+#        The in-character whisper the bot sends back. Empty = no answer (the
+#        interaction is still declined).
+#
+IndividualProgression.F14.RandomBotSocialIsolation.Reply = "You are not yet ready for the road I walk. Return when your journey has carried you into a later age."
+
+# IndividualProgression.F14.RandomBotSocialIsolation.ReplyCooldownSeconds
+#
+#        Minimum seconds between two answers from the same bot to the same
+#        player. Clamped to 5..3600.
+#
+IndividualProgression.F14.RandomBotSocialIsolation.ReplyCooldownSeconds = 60
+
+# IndividualProgression.PaidExpansion.Enable
+#
+#        DRAFT - paid expansion entitlement. Read at server start only.
+#        Do not set worldserver EnablePlayerSettings = 0 while this is on:
+#        purchases are then refused, and stored purchases are not saved.
+#        0 = OFF (default). Established progression is unchanged.
+#        1 = Earning the final milestone of an era (Kel'Thuzad 40 = stage 7,
+#            Kil'jaeden = stage 13) only makes a character ELIGIBLE. The next
+#            expansion opens after buying it from the expansion vendor, which
+#            must call IndividualProgression's PurchaseExpansion API.
+#            A TBC purchase leaves raw stage 7 unchanged and unlocks quest
+#            10259 (Into the Breach); only its later hand-in advances to 8.
+#            A Wrath purchase grants no raw stage; earned raw stage 13 is
+#            effective stage 12 before purchase and 13 after purchase.
+#            Unpaid stage 13 has a level 70 cap and no Northrend access.
+#            Applies to normal accounts only; bot and excluded
+#            accounts, Death Knight / TBC-race / server start stages and
+#            characters already at stage 14+ keep their access.
+#        Requires worldserver EnablePlayerSettings = 1, otherwise the feature
+#        forces itself OFF and logs an error. Keep OFF pending owner approval,
+#        a matching vendor integration and staging tests.
+#
+IndividualProgression.PaidExpansion.Enable = 0
+
+# IndividualProgression.PaidExpansion.GrandfatherStage13
+#
+#        Owner decision, read at server start only. Decide BEFORE first
+#        enabling PaidExpansion: every character is evaluated once, on its
+#        first login with the feature on, whatever this value is then.
+#        0 = OFF (default). Characters at stage 13 must buy Wrath.
+#        1 = A character already at stage 13 at that first login is recorded
+#            as owning Wrath. Characters who reach stage 13 later, or who
+#            were evaluated while this was 0, still need to buy it.
+#
+IndividualProgression.PaidExpansion.GrandfatherStage13 = 0
+
+# IndividualProgression.PaidExpansion.VendorName
+#
+#        NPC name shown in the yellow login reminder.
+#
+IndividualProgression.PaidExpansion.VendorName = "Chronomancer Vezrath"
+
 # IndividualProgression.VanillaPowerAdjustment
 #
 #        Description: Adjustment to player's attack power before completing Vanilla content and opening the Dark Portal
@@ -159,6 +332,28 @@ IndividualProgression.SerpentshrineCavern.RequireAllBosses = 1
 #
 IndividualProgression.TheEye.RequireAllBosses = 1
 
+# IndividualProgression.AutoAttune
+#
+#        Description: Attunements are not progression, so by default a character at a high progression stage still has to earn them.
+#                     If enabled, a character that is bumped to a stage also gets the raid attunements for the stages it has reached.
+#                     A bump is .ip set, a starting progression option, or an excluded account set to 18 at login.
+#                     Killing bosses, and progression caught up from the achievements of another character, grant nothing.
+#                     Stages above ProgressionLimit are not granted. Bot accounts get nothing.
+#                     Nothing is taken back when progression is lowered, and what the character already has (the bank counts)
+#                     is not given twice. An item goes to the bags, or to the mailbox if they are full. Mail that is not collected
+#                     is deleted when it expires. A quest is marked as done without its own rewards (no XP, gold, reputation, title or items).
+#                     Characters already at a stage when this is switched on get nothing until they are bumped again (.ip set).
+#
+#                     Stage 1  (Molten Core)   Drakefire Amulet (Onyxia's Lair 40, which has no stage of its own; Onyxia is the next raid after Molten Core)
+#                     Stage 6  (AQ)            The Dread Citadel - Naxxramas (Naxxramas 40)
+#                     Stage 9  (TBC Tier 1)    Tempest Key and Trial of the Naaru: Magtheridon (The Eye), The Cudgel of Kar'desh (Serpentshrine Cavern)
+#                     Stage 10 (TBC Tier 2)    The Vials of Eternity (Hyjal Summit), Medallion of Karabor (Black Temple)
+#
+#        Default:     0 - Disabled (attunements are earned in game)
+#                     1 - Enabled
+#
+IndividualProgression.AutoAttune = 0
+
 # IndividualProgression.FishingFix
 #
 #        Description: Before patch 3.1, fishing skill had progression and had to be leveled in low level zones before high level areas could add skill
@@ -271,6 +466,48 @@ IndividualProgression.MaxMonsterSight = 1
 #                     0 - Disabled
 #
 IndividualProgression.QuestMoneyAtLevelCap = 1
+
+# IndividualProgression.ProfessionTierCap
+#
+#        Description: Caps professions, First Aid, Cooking and Fishing at the rank of the character's tier:
+#                     Artisan (300) before progression 8, Master (375) before progression 13, otherwise
+#                     Grand Master (450), as on 1.12, 2.4.3 and 3.3.5a. Trainers show the higher ranks as
+#                     unavailable, which also stops bot maintenance, books that teach them cannot be used,
+#                     and .learn refuses them.
+#                     A character above its cap is taken down at login: the ranks above it are unlearned,
+#                     and its skill is kept up to the cap. Achievements that need a rank above the cap are
+#                     taken back at login as well, also from a character that never had the rank; with
+#                     mod-account-achievements, put them in Account.Achievements.Excluded or they come back.
+#                     Skill above the cap, those achievements and the titles Salty and Chef are lost for good.
+#                     Applies to players and bots alike. Accounts of GM level 2 or higher, with their altbots,
+#                     and excluded accounts have no cap; a changed GM level counts after .reload config.
+#
+#        Default:     0 - Disabled (Cosmic preservation baseline)
+#                     1 - Enabled (requires separate owner approval)
+#
+#        SAFETY: Enabling can permanently remove above-tier profession ranks,
+#        skill progress, achievements and titles during login. Verify backups,
+#        gameplay rules and a disposable-character test before opting in.
+#
+IndividualProgression.ProfessionTierCap = 0
+
+# IndividualProgression.LockLaterExpansionGear
+#
+#        Description: Characters cannot equip weapons and armor from an expansion they have not
+#                     reached. Before progression 8: item id 23728 or higher that requires level
+#                     57 or has item level above 92, except the vanilla rank gear 29594-29617.
+#                     Before progression 13: item id 35570 or higher that requires level 67 or has
+#                     item level above 164, except the TBC gear with those ids.
+#                     Bot accounts use BotAccountsMaxLevel in place of progression, locked as above
+#                     at 60 or lower and at 70 or lower, so the default of 80 does not lock them.
+#                     Not locked: characters above their limit, excluded accounts, and heirlooms and
+#                     other gear below both the level and the item level above. Gear worn at login
+#                     stays on, but it cannot go back on once it is taken off.
+#
+#        Default:     0 - Disabled
+#                     1 - Enabled
+#
+IndividualProgression.LockLaterExpansionGear = 0
 
 # IndividualProgression.RepeatableVanillaQuestsXP
 #
@@ -413,6 +650,16 @@ IndividualProgression.AllowEarlyDungeonSet2 = 0
 #                     1 - Enabled
 #
 IndividualProgression.AllowEarlyScourgeBosses = 0
+
+# IndividualProgression.AllowVanillaRaidAccess
+#
+#        Description: When enabled, this allows players, at level 80, to enter the vanilla version of Onyxia and Naxxramas.
+#                     Excluded accounts already get access to these raids at level 80.
+#
+#        Default:     0 - Disabled
+#                     1 - Enabled
+#
+IndividualProgression.AllowVanillaRaidAccess = 0
 
 # IndividualProgression.TBC.ArenaSeason
 #

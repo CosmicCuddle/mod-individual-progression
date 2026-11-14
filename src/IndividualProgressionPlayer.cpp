@@ -1,4 +1,30 @@
 #include "IndividualProgression.h"
+#include "IndividualProgressionGroupPolicy.h"
+#include "IndividualProgressionF14LoginPolicy.h"
+// Optional Playerbots dependency: the original IP fork can build without it.
+#if __has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
+#include "../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h"
+#define COSMIC_IP_F14_PLAYERBOTS_AVAILABLE 1
+#else
+#define COSMIC_IP_F14_PLAYERBOTS_AVAILABLE 0
+#endif
+
+// Hosted full-build QA requires this integration, unlike the portable default
+// fork which must remain buildable without an installed Playerbots module.
+#if defined(COSMIC_IP_F14_REQUIRE_PLAYERBOTS) && !COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
+#error "F14 login guard: required Playerbots RandomPlayerbotMgr API was not found"
+#endif
+
+static_assert(PROGRESSION_PRE_TBC == IndividualProgressionGroupPolicy::FirstTbcStage,
+              "Individual Progression TBC stage boundary changed");
+static_assert(PROGRESSION_TBC_TIER_5 == IndividualProgressionGroupPolicy::FirstWrathStage,
+              "Individual Progression WotLK stage boundary changed");
+static_assert(PROGRESSION_WOTLK_TIER_5 == IndividualProgressionGroupPolicy::LastSupportedStage,
+              "Individual Progression maximum stage changed");
+static_assert(RACE_BLOODELF == IndividualProgressionGroupPolicy::BloodElfRace &&
+              RACE_DRAENEI == IndividualProgressionGroupPolicy::DraeneiRace,
+              "TBC race identifiers changed");
+
 #include "naxxramas_40.h"
 // #include "Spell.h"
 
@@ -19,45 +45,158 @@ public:
 
     void OnPlayerLogin(Player* player) override
     {
-        if (!sIndividualProgression->enabled)
+        if (!player)
             return;
 
-        if (!player || !player->IsInWorld())
+        // F14 identity invalidation must precede *every* new login,
+        // including login when IP is disabled or the Player is not yet in
+        // world. Otherwise an older verified bot GUID/epoch can survive a
+        // settings change and be mistaken for this new login incarnation.
+        // Forget also expires prior attack-lifecycle evidence. It never
+        // awards stage, paid entitlements or conceals another character.
+        // Capture the opt-in publication lease BEFORE the old identity
+        // is revoked and BEFORE the original Playerbots verification.
+        IndividualProgression::F14ActorPublicationLoginLease const f14SourceLease =
+            sIndividualProgression->CaptureF14ActorPublicationLoginLease();
+        sIndividualProgression->ForgetF14VerifiedRandomBotGroupIdentity(player);
+
+        if (!sIndividualProgression->enabled || !player->IsInWorld())
             return;
+
+        // F14 group/login identity is republished below only after the
+        // original, positively verified Playerbots source check.
+#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
+        // The optional compile-gated actor publisher must be reachable
+        // without enabling unrelated F14 runtime pilots. In ordinary builds
+        // the lease is always disabled, so the old four-option gate is intact.
+        // This remains only a positively verified login-time identity producer;
+        // the Core actor/WHO and creature hide callbacks still return FALSE.
+        if ((f14SourceLease.publicationWasEnabled ||
+             sIndividualProgression->f14ProtectVerifiedRandomBotGroupFloor ||
+             sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+             sIndividualProgression->f14ExperimentalAttackLifecycleRegistry ||
+             sIndividualProgression->f14RandomBotSocialIsolation ||
+             sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor) &&
+            sIndividualProgression->isBotAccount(player) &&
+            (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
+            player->GetSession() && player->GetSession()->IsHeadless())
+        {
+            sIndividualProgression->RememberF14VerifiedRandomBotGroupIdentity(
+                player, sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()),
+                f14SourceLease);
+        }
+#endif
 
         if (!sIndividualProgression->isNormalAccount(player)) // bot or exluded account
         {
+            // Keep bot-specific spell and inventory grants limited to bot
+            // accounts. The historical non-normal branch also includes
+            // excluded HUMAN accounts, which must not receive bot rewards.
             if (sIndividualProgression->isBotAccount(player))
+            {
                 sIndividualProgression->UpdateRNDbotSpells(player); // give class spells to RNDbots that have been removed from trainers by IP.
-            
-            if (player->GetLevel() <= 60)
-                sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(0));
-            else if ((player->GetLevel() > 60) && (player->GetLevel() <= 70))
-                sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(8));
-            else
-                sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(13));
+
+                if (player->getClass() == CLASS_ROGUE)
+                {
+                    uint32 ITEM_THIEVES_TOOLS = 5060;
+                    if (!player->HasItemCount(ITEM_THIEVES_TOOLS, 1))
+                        player->AddItem(ITEM_THIEVES_TOOLS, 1);
+                }
+            }
+
+            // F14: independently default-OFF TBC floor for positively selected
+            // headless BE/Draenei RandomBots. This is NOT a visibility fix.
+            // The Core bridge version must exist at compile time, or the
+            // option is forced OFF during config load. Without a full map/WHO/
+            // combat observer refresh, showing these bots to Vanilla humans
+            // would be wrong; owner must approve actual feature activation.
+            bool appliedVerifiedRandomBotTbcFloor = false;
+#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE && defined(COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION) && COSMIC_F14_VISIBILITY_REFRESH_HOOK_VERSION >= 1
+            if (sIndividualProgression->f14ForceVerifiedRandomBotTbcFloorOnLogin &&
+                sIndividualProgression->isBotAccount(player) &&
+                (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
+                player->GetSession() && player->GetSession()->IsHeadless() &&
+                sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter()))
+            {
+                uint8 const savedStage = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+                if (IndividualProgressionF14LoginPolicy::CanSetVerifiedTbcRaceStage(
+                        savedStage, player->GetLevel(), sIndividualProgression->progressionLimit))
+                {
+                    uint8 const newStage = IndividualProgressionF14LoginPolicy::DesiredVerifiedTbcRaceStage(
+                        savedStage, player->GetLevel());
+                    if (savedStage < newStage)
+                        sIndividualProgression->ForceUpdateProgressionState(
+                            player, static_cast<ProgressionState>(newStage));
+                    appliedVerifiedRandomBotTbcFloor = true;
+                }
+            }
+#endif
+
+            // F14 partial safeguard, OFF by default. Only preserve an already
+            // recorded TBC/WotLK stage for a positively selected headless RNDbot.
+            // This does not initialize stage 8, grant TBC, alter normal players,
+            // or implement the separate pre-map rndbot visibility feature.
+            bool preserveVerifiedRandomBotStage = false;
+#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
+            if (sIndividualProgression->f14PreserveVerifiedRandomBotStageOnLogin &&
+                (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
+                player->GetSession() && player->GetSession()->IsHeadless())
+            {
+                uint8 const savedStage = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+                // F19: never keep a stage below the original level write
+                // (<=60 -> 0, 61-70 -> 8, 71+ -> 13) or above a set limit.
+                if (savedStage >= IndividualProgressionGroupPolicy::FirstTbcStage &&
+                    savedStage <= IndividualProgressionGroupPolicy::LastSupportedStage &&
+                    IndividualProgressionF14LoginPolicy::PreservesAtLeastLevelStage(
+                        savedStage, player->GetLevel(), sIndividualProgression->progressionLimit))
+                {
+                    // This is deliberately the GUID overload: the PlayerbotAI
+                    // may not yet exist during Core's PlayerScript login. It is
+                    // itself backed by the mutable currentBots set, which is
+                    // only safe on the source-verified WorldScript login thread;
+                    // do not call it from other hooks or threads.
+                    preserveVerifiedRandomBotStage =
+                        sRandomPlayerbotMgr.IsRandomBot(player->GetGUID().GetCounter());
+                }
+            }
+
+#endif
+            if (!preserveVerifiedRandomBotStage && !appliedVerifiedRandomBotTbcFloor)
+            {
+                if (player->GetLevel() <= 60)
+                    sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(0));
+                else if ((player->GetLevel() > 60) && (player->GetLevel() <= 70))
+                    sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(8));
+                else
+                    sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(13));
+            }
         }
         else // normal account
         {
             if ((player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) && sIndividualProgression->tbcRacesStartingProgression && !sIndividualProgression->hasPassedProgression(player, static_cast<ProgressionState>(sIndividualProgression->tbcRacesStartingProgression)))
             {
                 sIndividualProgression->UpdateProgressionState(player, static_cast<ProgressionState>(sIndividualProgression->tbcRacesStartingProgression));
+                sIndividualProgression->GrantAttunements(player, static_cast<ProgressionState>(sIndividualProgression->tbcRacesStartingProgression));
             }
 
             if (player->getClass() == CLASS_DEATH_KNIGHT && sIndividualProgression->deathKnightStartingProgression && !sIndividualProgression->hasPassedProgression(player, static_cast<ProgressionState>(sIndividualProgression->deathKnightStartingProgression)))
             {
                 sIndividualProgression->UpdateProgressionState(player, static_cast<ProgressionState>(sIndividualProgression->deathKnightStartingProgression));
+                sIndividualProgression->GrantAttunements(player, static_cast<ProgressionState>(sIndividualProgression->deathKnightStartingProgression));
             }
 
             if (sIndividualProgression->startingProgression && !sIndividualProgression->hasPassedProgression(player, static_cast<ProgressionState>(sIndividualProgression->startingProgression)))
             {
                 sIndividualProgression->UpdateProgressionState(player, static_cast<ProgressionState>(sIndividualProgression->startingProgression));
+                sIndividualProgression->GrantAttunements(player, static_cast<ProgressionState>(sIndividualProgression->startingProgression));
             }
 
             sIndividualProgression->checkIPProgression(player);
         }
 
         sIndividualProgression->CheckAdjustments(player);
+        sIndividualProgression->CapProfessionSkills(player);
+        sIndividualProgression->CapProfessionAchievements(player);
 
         if (sIndividualProgression->enabled)
         {
@@ -68,12 +207,50 @@ public:
         }
     }
 
+    // Release only the F14 group identity cache; paid entitlement cache is
+    // managed separately and must not be affected by this pilot.
+    void OnPlayerLogout(Player* player) override
+    {
+        sIndividualProgression->ForgetF14VerifiedRandomBotGroupIdentity(player);
+    }
+
     void OnPlayerGetTrainerSpellState(Player const* player, uint32 /*trainerId*/, uint32 spellId, Trainer::SpellState& state) override
     {
         if (!player || !player->IsInWorld())
             return;
 
         sIndividualProgression->TrainerRNDbotSpellsUnlock(player, spellId, state);
+
+        // The trainer takes the money before the spell is learned, so a rank above the cap must be
+        // refused here and not only in OnPlayerCanLearnSpell. hasPassedProgression only reads quest status.
+        if (state == Trainer::SpellState::Available && sIndividualProgression->IsProfessionRankAboveCap(const_cast<Player*>(player), spellId))
+            state = Trainer::SpellState::Unavailable;
+    }
+
+    bool OnPlayerCanLearnSpell(Player* player, uint32 spellId) override
+    {
+        return !sIndividualProgression->IsProfessionRankAboveCap(player, spellId);
+    }
+
+    // A book casts the rank, and that steps the skill without learnSpell, so it is refused before the cast.
+    bool OnPlayerCanUseItem(Player* player, ItemTemplate const* proto, InventoryResult& result) override
+    {
+        // This hook runs for ordinary items too; disabled tier caps should
+        // not scan every item spell or dereference a missing ItemTemplate.
+        if (!player || !proto || !sIndividualProgression->enabled ||
+            !sIndividualProgression->ProfessionTierCap)
+            return true;
+
+        for (auto const& spell : proto->Spells)
+        {
+            if (spell.SpellId > 0 && sIndividualProgression->IsProfessionRankAboveCap(player, spell.SpellId))
+            {
+                result = EQUIP_ERR_CANT_EQUIP_SKILL;
+                return false;
+            }
+        }
+
+        return true;
     }
 
     void OnPlayerEquip(Player* player, Item* /*it*/, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
@@ -177,7 +354,7 @@ public:
 
         if (!sIndividualProgression->enabled || player->IsGameMaster() || !sIndividualProgression->isNormalAccount(player))
             return true;
-
+       
         if (mapid == MAP_BLACKWING_LAIR && !sIndividualProgression->hasPassedProgression(player, PROGRESSION_ONYXIA))
         {
             ChatHandler(player->GetSession()).PSendSysMessage("Progression Level Required = |cff00ffff{}|r", PROGRESSION_ONYXIA);
@@ -185,19 +362,40 @@ public:
         }
         if (mapid == MAP_ONYXIAS_LAIR)
         {
-            if (player->GetLevel() <= 70) // vanilla version
+            if (player->GetLevel() <= 70)
             {
-                if (player->GetLevel() < 50)
-                    return false;
-                if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5)) // death knights
-                    return false;
                 if (!player->HasItemCount(ITEM_DRAKEFIRE_AMULET))
                     return false;
-            }
- 			else // WotLK
-            {
-                if (player->GetLevel() != 80)
+
+                if (player->GetLevel() < 50)
                     return false;
+
+                if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_WOTLK_TIER_5))
+                    return true;
+                else if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5)) // Death Knights
+                    return false;
+            }
+            else // WotLK, level 71+
+            {
+                if (player->GetLevel() < 80) // level 71-79
+                    return false;
+
+                if (player->GetLevel() == 80)
+                {
+                    if (!sIndividualProgression->AllowVanillaRaidAccess)
+                    {
+                        if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_WOTLK_TIER_5))
+                            return false;
+
+                        if (player->GetDifficulty(true) == RAID_DIFFICULTY_10MAN_HEROIC)
+                            return false;
+                    }
+                    else
+                    {
+                        if (player->GetDifficulty(true) == RAID_DIFFICULTY_10MAN_HEROIC && !player->HasItemCount(ITEM_DRAKEFIRE_AMULET))
+                            return false;
+                    }
+                }
             }
         }
         if (mapid == MAP_ZUL_GURUB)
@@ -226,7 +424,7 @@ public:
             if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_PRE_TBC))
             {
                 uint32 accountId = player->GetSession()->GetAccountId();
-                uint8 highestProgression = sIndividualProgression->GetAccountProgression(accountId);
+                uint8 highestProgression = sIndividualProgression->GetAccountEffectiveProgression(accountId);
 
                 if ((highestProgression < sIndividualProgression->tbcRacesProgressionLevel) && (player->getRace() != RACE_DRAENEI && player->getRace() != RACE_BLOODELF))
                 {
@@ -398,8 +596,41 @@ public:
             if (instanceTemplate->Parent == MAP_NORTHREND && mapid != MAP_NAXXRAMAS && !sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5))
                 return false;
 
-            if (instanceTemplate->Parent == MAP_NORTHREND && mapid == MAP_NAXXRAMAS && player->GetLevel() <= 70 && (!sIndividualProgression->isAttuned(player) ||  sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5) ))
-                return false;
+            if (instanceTemplate->Parent == MAP_NORTHREND && mapid == MAP_NAXXRAMAS)
+            {
+                if (player->GetLevel() <= 70)
+                {
+                    if (!sIndividualProgression->isAttuned(player))
+                        return false;
+
+                    if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_WOTLK_TIER_5))
+                        return true;
+                    else if (sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5)) // Death Knights
+                        return false;
+                }
+                else // WotLK, level 71+
+                {
+                    if (player->GetLevel() < 80) // level 71-79
+                        return false;
+
+                    if (player->GetLevel() == 80)
+                    {
+                        if (!sIndividualProgression->AllowVanillaRaidAccess)
+                        {
+                            if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_WOTLK_TIER_5))
+                                return false;
+
+                            if (player->GetDifficulty(true) == RAID_DIFFICULTY_10MAN_HEROIC)
+                                return false;
+                        }
+                        else
+                        {
+                            if (player->GetDifficulty(true) == RAID_DIFFICULTY_10MAN_HEROIC && !sIndividualProgression->isAttuned(player))
+                                return false;
+                        }
+                    }
+                }
+            }
         }
 
         return true;
@@ -483,113 +714,41 @@ public:
         if (!player || !player->IsInWorld())
             return false;
 
-        if (!sIndividualProgression->enabled || sIndividualProgression->isBotAccount(player))
+        // Preserve the owner's existing 0=OFF behaviour and disabled-IP path.
+        if (!sIndividualProgression->enabled || !sIndividualProgression->enforceGroupRules)
             return true;
 
-        Player* otherPlayer = ObjectAccessor::FindPlayerByName(membername, false);
-        uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(player);
-        uint8 otherPlayerState = sIndividualProgression->GetPlayerProgressionFromQuests(otherPlayer);
+        Player* invitee = ObjectAccessor::FindPlayerByName(membername, false);
+        if (!invitee || !invitee->IsInWorld())
+            return false; // Cannot establish the target's effective expansion safely.
 
-        if (sIndividualProgression->enforceGroupRules) // enforceGroupRules enabled
+        // Paid expansion (default OFF): eras compare by effective stage, so an
+        // unpaid stage-13 character groups as TBC. Identical to raw when OFF.
+        uint8 const targetState = sIndividualProgression->GetEffectiveProgression(invitee);
+        int32 const limit = sIndividualProgression->progressionLimit;
+
+        // Validate all stored group members, not just those online, to prevent
+        // adding a new member to an unknown or mixed-expansion group.
+        if (Group* group = player->GetGroup())
         {
-            if (sIndividualProgression->isNormalAccount(player))
+            // Offline members have no verified IP tier in this callback:
+            // fail closed instead of silently omitting them from era checks.
+            for (auto const& slot : group->GetMemberSlots())
             {
-                if (sIndividualProgression->isBotAccount(otherPlayer))
-                {
-                    if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_PRE_TBC)) // player is in vanilla
-                    {
-                        if (otherPlayer->GetLevel() <= 60)
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too high.|r");
-                            return false;
-                        }
-                    }
-                    else if (!sIndividualProgression->hasPassedProgression(player, PROGRESSION_TBC_TIER_5)) // player is in TBC
-                    {
-                        if ((otherPlayer->GetLevel() > 60) && (otherPlayer->GetLevel() <= 70))
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too low or too high.|r");
-                            return false;
-                        }
-                    }
-                    else // player is in WotLK
-                    {
-                        if (otherPlayer->GetLevel() > 70)
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too low.|r");
-                            return false;
-                        }
-                    }
-                }
-                else // player or ALTbot
-                {
-                    return (currentState == otherPlayerState);
-                }
-            }
-            else // if (sIndividualProgression->isExcludedAccount(player))
-            {
-                if (!sIndividualProgression->isNormalAccount(otherPlayer)) // other player is either excluded or a RNDbot
-                {
-                    if (player->GetLevel() <= 60) // player is in vanilla
-                    {
-                        if (otherPlayer->GetLevel() <= 60)
-                        {
-                            return true;
-                        }
-                        else // excluded accounts in vanilla cannot group with TBC or WotLK accounts when enforceGroupRules is enabled, to avoid bypassing progression requirements
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too high.|r");
-                            return false;
-                        }
-                    }
-                    else if (player->GetLevel() <= 70) // player is in TBC
-                    {
-                        if ((otherPlayer->GetLevel() > 60) && (otherPlayer->GetLevel() <= 70))
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too low or too high.|r");
-                            return false;
-                        }
-                    }
-                    else // player is in WotLK
-                    {
-                        if (otherPlayer->GetLevel() > 70)
-                        {
-                            return true;
-                        }
-                        else
-                        {
-                            ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player's level is too low.|r");
-                            return false;
-                        }
-                    }
-                }
-                else // player or ALTbot
-                {
-                    ChatHandler(player->GetSession()).SendSysMessage("|cff00ff00Enforce Group Rules is enabled: |cffccccccthis player is not a bot or does not have an excluded account.|r");
+                Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
+                if (!member || !member->IsInWorld())
                     return false;
-                }
+
+                uint8 const memberState = sIndividualProgression->GetEffectiveProgression(member);
+                if (!IndividualProgressionGroupPolicy::MayGroup(
+                        memberState, member->getRace(), targetState, invitee->getRace(), limit))
+                    return false;
             }
         }
-        else // enforceGroupRules not enabled
-        {
-            return true;
-        }
+
+        return IndividualProgressionGroupPolicy::MayGroup(
+            sIndividualProgression->GetEffectiveProgression(player),
+            player->getRace(), targetState, invitee->getRace(), limit);
     }
 
     bool OnPlayerCanGroupAccept(Player* player, Group* group) override
@@ -597,63 +756,67 @@ public:
         if (!player || !player->IsInWorld() || !group)
             return false;
 
-        Player* groupLeader = ObjectAccessor::FindPlayerByLowGUID(group->GetLeaderGUID().GetCounter());
-        uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(player);
-        uint8 groupLeaderState = sIndividualProgression->GetPlayerProgressionFromQuests(groupLeader);
-
         if (!sIndividualProgression->enabled)
             return true;
 
-        if (!sIndividualProgression->isNormalAccount(player)) // player is either a RNDbot or has an excluded account
-        {
-            if (sIndividualProgression->enforceGroupRules)
-            {
-                if (groupLeaderState < PROGRESSION_PRE_TBC) // Group leader is in Vanilla
-                {
-                    if (player->GetLevel() <= 60) // invited player is in Vanilla
-                    {
-                        sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(groupLeaderState));
-                        return true;
-                    }
-                    else
-                        return false;
-                }
-                else if (groupLeaderState >= PROGRESSION_PRE_TBC && groupLeaderState < PROGRESSION_TBC_TIER_5) // Group leader is in TBC
-                {
-                    if (player->GetLevel() > 60 && player->GetLevel() <= 70) // invited excluded player is in TBC
-                    {
-                        sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(groupLeaderState));
-                        return true;
-                    }
-                    else
-                        return false;
-                }
-                else // Group leader is in WotLK
-                {
-                    if (player->GetLevel() > 70) // invited excluded player is in WotLK
-                    {
-                        sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(groupLeaderState));
-                        return true;
-                    }
-                    else
-                        return false;
-                }
-            }
-            else // not enforcing Group Rules
-            {
-                if (currentState != groupLeaderState)
-                    sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(groupLeaderState));
+        Player* leader = ObjectAccessor::FindPlayerByLowGUID(group->GetLeaderGUID().GetCounter());
 
-                return true;
-            }
-        }
-        else // normal account
+        // With an unavailable/offline group leader there is NO verified stage.
+        // Never interpret GetPlayerProgressionFromQuests(nullptr) as Vanilla 0:
+        // OFF preserves membership and skips the destructive tier sync;
+        // ON denies a group whose expansion cannot be validated.
+        if (!leader || !leader->IsInWorld())
+            return !sIndividualProgression->enforceGroupRules;
+
+        uint8 const joiningState = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+        uint8 const leaderState = sIndividualProgression->GetPlayerProgressionFromQuests(leader);
+
+        if (sIndividualProgression->enforceGroupRules)
         {
-            if (sIndividualProgression->enforceGroupRules)
-                return (currentState == groupLeaderState);
-            else
-                return true;
+            int32 const limit = sIndividualProgression->progressionLimit;
+            // Paid expansion (default OFF): compare eras by effective stage.
+            uint8 const joiningEra = sIndividualProgression->GetEffectiveProgression(player);
+            uint8 const leaderEra = sIndividualProgression->GetEffectiveProgression(leader);
+            if (!IndividualProgressionGroupPolicy::MayGroup(
+                    joiningEra, player->getRace(), leaderEra, leader->getRace(), limit))
+                return false;
+
+            // Offline members have no verified IP tier in this callback:
+            // fail closed instead of silently omitting them from era checks.
+            for (auto const& slot : group->GetMemberSlots())
+            {
+                Player* member = ObjectAccessor::FindConnectedPlayer(slot.guid);
+                if (!member || !member->IsInWorld())
+                    return false;
+
+                uint8 const memberState = sIndividualProgression->GetEffectiveProgression(member);
+                if (!IndividualProgressionGroupPolicy::MayGroup(
+                        joiningEra, player->getRace(), memberState, member->getRace(), limit))
+                    return false;
+            }
+
+            // Do not mutate hidden progression quests while accepting an
+            // invitation. The Core can still fail to create/add the group
+            // AFTER this hook. GroupScript::OnAddMember performs the permitted
+            // same-expansion bot sync only after membership is established.
+            // Mandatory F14 rndbot tier-8 floor remains separate/unimplemented.
+            return true;
         }
+
+        // Preserve the existing OFF pathway: bots/excluded accounts sync to
+        // the leader's exact tier when accepting; human accounts do not.
+        // F14 will separately harden the RNDBOT TBC-race minimum for all paths.
+        // F14 pilot: leave historic OFF grouping semantics unchanged while
+        // refusing only a *downgrade* below a login-verified TBC-race bot floor.
+        // No stage write here; return true still accepts the group.
+        if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState &&
+            sIndividualProgression->ShouldSkipF14VerifiedRandomBotGroupDowngrade(player, leaderState))
+            return true;
+        if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState)
+            sIndividualProgression->ForceUpdateProgressionState(
+                player, static_cast<ProgressionState>(leaderState));
+
+        return true;
     }
 
     void OnPlayerCreatureKill(Player* killer, Creature* killed) override
@@ -871,10 +1034,19 @@ public:
         sIndividualProgression->checkIPPhasing(player, newArea);
     }
 
-    bool OnPlayerCanEquipItem(Player* player, uint8 /*slot*/, uint16& /*dest*/, Item* pItem, bool /*swap*/, bool /*not_loading*/) override
+    bool OnPlayerCanEquipItem(Player* player, uint8 /*slot*/, uint16& /*dest*/, Item* pItem, bool /*swap*/, bool not_loading) override
     {
         if (!player || !pItem)
             return false;
+
+        // At login the core mails everything that fails here, so only new gear is stopped.
+        if (not_loading && sIndividualProgression->isLockedExpansionGear(player, pItem->GetTemplate()))
+        {
+            if (!sIndividualProgression->isBotAccount(player))
+                ChatHandler(player->GetSession()).SendSysMessage("You have not reached the expansion this item is from.");
+
+            return false;
+        }
 
         if (pItem->GetTemplate()->RequiredHonorRank == 0)
             return true;
@@ -954,7 +1126,7 @@ public:
         if (sIndividualProgression->isBotAccount(accountId) || sIndividualProgression->isExcludedAccount(accountId))
             return true;
 
-        uint8 highestProgression = sIndividualProgression->GetAccountProgression(accountId);
+        uint8 highestProgression = sIndividualProgression->GetAccountEffectiveProgression(accountId);
         bool allowed = true;
         
         if ((charRace == RACE_DRAENEI || charRace == RACE_BLOODELF) && sIndividualProgression->tbcRacesProgressionLevel != 0)
@@ -989,9 +1161,136 @@ public:
     }
 };
 
+// F14 *player-only* WorldObjectScript observer pilot. Requires the exact
+// optional Core hook and an explicit OFF-by-default IP config opt-in.
+// This is NOT creature combat concealment or immediate visibility refresh; cached WHO is filtered only when explicitly enabled.
+#if defined(COSMIC_F14_OBSERVER_HOOK_VERSION)
+class IndividualProgressionF14ObserverScript : public WorldObjectScript
+{
+public:
+    IndividualProgressionF14ObserverScript()
+#if defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)
+        : WorldObjectScript("IndividualProgression_F14Observer",
+                            {WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER,
+                             WORLDOBJECTHOOK_ON_WHO_LIST_ENTRY_CAN_BE_SEEN_BY_PLAYER}) { }
+#else
+        : WorldObjectScript("IndividualProgression_F14Observer",
+                            {WORLDOBJECTHOOK_ON_WORLD_OBJECT_CAN_BE_SEEN_BY_PLAYER}) { }
+#endif
+
+    bool OnWorldObjectCanBeSeenByPlayer(Player const* observer, WorldObject const* target) override
+    {
+        // Every uncertain, unverified or disabled state is visible.
+        if (!sIndividualProgression->enabled ||
+            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+            !observer || !target || !target->IsPlayer())
+            return true;
+
+        Player const* candidate = target->ToPlayer();
+        if (!candidate || candidate == observer || !candidate->IsInWorld() ||
+            (candidate->getRace() != RACE_DRAENEI && candidate->getRace() != RACE_BLOODELF) ||
+            !candidate->GetSession() || !candidate->GetSession()->IsHeadless() ||
+            !sIndividualProgression->HasF14VerifiedRandomBotIdentity(candidate))
+            return true;
+
+        // No GM, account-excluded human, altbot or unverified observer denial.
+        // Core's own hook additionally bypasses GMs and null-session observers.
+        if (!observer->IsInWorld() || !observer->GetSession() ||
+            observer->GetSession()->IsHeadless())
+            return true;
+        Player* viewer = const_cast<Player*>(observer);
+        if (!sIndividualProgression->isNormalAccount(viewer))
+            return true;
+
+        // Effective stage respects per-character paid expansion entitlements.
+        // A normal observer at stage 8 or higher sees the verified RandomBot.
+        return sIndividualProgression->GetEffectiveProgression(viewer) >= PROGRESSION_PRE_TBC;
+    }
+
+#if defined(COSMIC_F14_WHO_FILTER_HOOK_VERSION)
+    bool OnWhoListEntryCanBeSeenByPlayer(Player const* observer, ObjectGuid const& targetGuid,
+                                          uint8 targetRace) override
+    {
+        // WHO is a cached snapshot. Do NOT fetch or dereference the target Player.
+        // Reuse only login-verified RandomBot GUID identity; default ALLOW.
+        if (!sIndividualProgression->enabled ||
+            !sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
+            !observer || !targetGuid || observer->GetGUID() == targetGuid ||
+            (targetRace != RACE_DRAENEI && targetRace != RACE_BLOODELF) ||
+            !sIndividualProgression->HasF14VerifiedRandomBotGuid(targetGuid))
+            return true;
+
+        // Core's WHO handler also bypasses this hook for GM observers.
+        if (!observer->IsInWorld() || !observer->GetSession() ||
+            observer->GetSession()->IsHeadless())
+            return true;
+        Player* viewer = const_cast<Player*>(observer);
+        if (!sIndividualProgression->isNormalAccount(viewer))
+            return true;
+
+        return sIndividualProgression->GetEffectiveProgression(viewer) >= PROGRESSION_PRE_TBC;
+    }
+#endif
+};
+#endif
+
+// A separate C++ class, never the original false-only adapter, implements
+// the future positive Core6 policy only under an explicit additional build
+// macro; this keeps the old regression and ABI source exactly unchanged.
+#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
+#include "IndividualProgressionF14Core6PositiveRndbotAdapter.h"
+#endif
+
+// Experimental Core6 ABI adapter ONLY. It is not an F14 policy provider.
+// Both newer Core APIs interpret TRUE as HIDE; older IP observer returns TRUE
+// to ALLOW, so never forward the legacy Boolean into these callbacks.
+// The correct unified IP/Playerbots producer and restoration rights are not
+// implemented. This class is entirely absent from ordinary builds.
+// On explicit compile-only opt-in, both callbacks STILL always return FALSE.
+#if defined(COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT >= 1
+class IndividualProgressionF14Core6NegativeActorWhoAdapter final : public WorldObjectScript
+{
+public:
+    IndividualProgressionF14Core6NegativeActorWhoAdapter()
+        : WorldObjectScript("IndividualProgression_F14Core6NegativeActorWho",
+            {WORLDOBJECTHOOK_ON_F14_VIEWER_PLAYER_SUPPRESSION_QUERY,
+             WORLDOBJECTHOOK_ON_F14_WHO_GUID_EXCLUSION_QUERY}) { }
+
+    // New Core6 actor client CREATE/OUT query: TRUE would hide a Player.
+    // NO positive identity publication, current-epoch, human rights or
+    // previously-hidden restoration proof is supplied yet. Fail visible.
+    bool OnF14ShouldSuppressPlayerForViewer(
+        Player const* /*viewer*/, Player const* /*actor*/) override
+    {
+        return false;
+    }
+
+    // New Core5 cached WHO query: TRUE would EXCLUDE a WHO row.
+    // Older IP OnWhoListEntryCanBeSeenByPlayer uses TRUE=ALLOW and is
+    // NOT compatible. The cache itself cannot verify target epoch, account,
+    // genuine RandomBot origin or active lifetime; fail visible.
+    bool OnF14ShouldExcludeWhoEntryForViewer(
+        Player const* /*viewer*/, ObjectGuid const& /*targetGuid*/,
+        uint32 /*cachedRace*/) override
+    {
+        return false;
+    }
+};
+#endif
+
 void AddSC_mod_individual_progression_player()
 {
     new IndividualPlayerProgression();
     new IndividualPlayerProgression_GroupScript();
     new IndividualPlayerProgression_AccountScript();
+#if defined(COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT) && COSMIC_IP_F14_CORE6_ACTOR_WHO_NEGATIVE_ADAPTER_EXPERIMENT >= 1
+#if defined(COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT) && COSMIC_IP_F14_CORE6_POSITIVE_RNDBOT_VIEWER_POLICY_EXPERIMENT >= 1
+    new IndividualProgressionF14Core6PositiveRndbotAdapter();
+#else
+    new IndividualProgressionF14Core6NegativeActorWhoAdapter();
+#endif
+#endif
+#if defined(COSMIC_F14_OBSERVER_HOOK_VERSION)
+    new IndividualProgressionF14ObserverScript();
+#endif
 }

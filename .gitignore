@@ -47,3 +47,9 @@ local.properties
 .loadpath
 .project
 .cproject
+
+#
+# Python bytecode (local test runs)
+#
+__pycache__/
+*.py[cod]

@@ -1,0 +1,38 @@
+name: F14 combat script name-collision correction
+on:
+  push:
+    branches:
+      - fix/cs01-ip161-f14-combat-script-name-collision-20261112
+  pull_request:
+    paths:
+      - src/IndividualProgressionF14CurrentCoreLifecycle.cpp
+      - tests/test_f14_combat_script_name_collision_source.py
+      - docs/CUSTOM_MODIFICATIONS_REGISTER.md
+      - .github/workflows/f14-combat-script-name-collision.yml
+jobs:
+  exact-and-pure:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact three-identifier correction
+        run: python3 tests/test_f14_combat_script_name_collision_source.py
+      - name: Re-run inherited pure F14 models and default-off TU
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in normal ndebug; do
+            extra=()
+            if [ "$mode" = ndebug ]; then extra+=(-DNDEBUG); fi
+            for test in f14_current_pass_identity_test f14_current_combat_ownership_test f14_current_viewer_session_test f14_departure_storage_bridge_test f14_owned_restore_shards_test; do
+              ${{ matrix.compiler }} -std=${{ matrix.standard }} -Wall -Wextra -Werror -pthread "${extra[@]}" -Isrc "tests/$test.cpp" -o "/tmp/$test"
+              "/tmp/$test"
+            done
+            ${{ matrix.compiler }} -std=${{ matrix.standard }} -Wall -Wextra -Werror "${extra[@]}" -c src/IndividualProgressionF14CurrentCoreLifecycle.cpp -o /tmp/f14-current-off.o
+          done

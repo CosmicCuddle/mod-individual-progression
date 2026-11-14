@@ -1,0 +1,41 @@
+name: IP strict paid receipt ledger model (OFF, NO HOST)
+
+on:
+  pull_request:
+    paths:
+      - 'src/IndividualProgressionReceiptPolicy.h'
+      - 'tests/receipt_ledger_policy.cpp'
+      - '.github/workflows/ip-receipt-ledger-policy-20261102.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  strict-receipt-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and execute receipt checks under GCC/Clang C++17/20 including NDEBUG
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              for mode in normal ndebug; do
+                if [ "$mode" = ndebug ]; then
+                  flag=-DNDEBUG
+                else
+                  flag=-UNDEBUG
+                fi
+                "$compiler" -std="$standard" -O2 -Wall -Wextra -Werror -pedantic "$flag" \
+                  tests/receipt_ledger_policy.cpp -o /tmp/ip-receipt-model
+                /tmp/ip-receipt-model | tee /tmp/ip-receipt-model.log
+                grep -Eq '^RECEIPT POLICY CHECKS [0-9]+ passed$' /tmp/ip-receipt-model.log
+              done
+            done
+          done
+      - name: Safety boundary
+        run: |
+          echo 'Pure policy only: no native Worldserver, character DB, real money or deployment.'

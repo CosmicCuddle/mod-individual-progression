@@ -1,0 +1,31 @@
+name: F14 owned restore shard model
+on:
+  push:
+    branches:
+      - feature/cs01-ip149-f14-owned-retention-model-20261112
+  pull_request:
+    paths:
+      - src/IndividualProgressionF14OwnedRestoreShards.h
+      - tests/f14_owned_restore_shards_test.cpp
+      - .github/workflows/f14-owned-restore-shards-model.yml
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        standard: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run owned payload and original accounting tests
+        run: |
+          set -euo pipefail
+          for mode in normal ndebug; do
+            extra=()
+            if [ "$mode" = ndebug ]; then extra+=(-DNDEBUG); fi
+            for test in f14_owned_restore_shards_test f14_reservation_gate_test; do
+              ${{ matrix.compiler }} -std=${{ matrix.standard }} -Wall -Wextra -Werror -pthread "${extra[@]}" -Isrc "tests/$test.cpp" -o "/tmp/$test"
+              "/tmp/$test"
+            done
+          done

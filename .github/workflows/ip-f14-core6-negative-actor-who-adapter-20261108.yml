@@ -1,0 +1,52 @@
+name: CosmicCuddle F14 IP Core6 negative actor WHO ABI adapter OFF
+on:
+  push:
+    branches:
+      - feature/cs01-ip-core6-actor-who-negative-adapter-off-20261108
+  pull_request:
+    branches:
+      - research/cs01-f14-unified-actor-who-publication-contract-20261108
+permissions:
+  contents: read
+jobs:
+  default-off-legacy-allow-vs-new-exclude-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact IP127 child
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact parent and only five scoped files
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=40665dffc717d32666da38c89e8d692be57e5138
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            '.github/workflows/ip-f14-core6-negative-actor-who-adapter-20261108.yml' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'tests/test_ip_f14_core6_negative_actor_who_adapter_source.py' \
+            'docs/F14-CORE6-NEGATIVE-ACTOR-WHO-ADAPTER-20261108.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$base" HEAD -- sql/ conf/ data/)"
+      - name: Check exact Core6 callback signatures and intentional false-only safety
+        run: |
+          python3 -B -m unittest discover -s tests -p test_ip_f14_core6_negative_actor_who_adapter_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_grim_player_who_observer_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_actor_who_unified_publication_source.py -v
+      - name: Preserve C++ pure current identity publication 128 masks
+        run: |
+          g++ -std=c++17 -O1 -Wall -Wextra -Werror -pedantic -Isrc tests/f14_actor_who_unified_publication.cpp -o /tmp/ip-actor-who
+          /tmp/ip-actor-who
+      - name: State confidence boundary
+        if: always()
+        run: |
+          echo 'Source-only test; does NOT compile ABI adapter inside actual Worldserver.'
+          echo 'Requires separate Core6+PB10+IP+Naxx+Services native compile/link with compile macro ON.'
+          echo 'Both callbacks hardcoded false: NO suppression, hide, stage grant, DB, client or owner host change.'

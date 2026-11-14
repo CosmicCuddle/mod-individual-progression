@@ -1,0 +1,103 @@
+# Isolated source-only F14 negative viewer session/GM proof; all hide OFF.
+name: F14 nonheadless human viewer prequery veto source (OFF)
+
+on:
+  push:
+    branches:
+      - research/cs01-f14-human-viewer-prequery-veto-off-20261106
+  pull_request:
+    branches:
+      - research/cs01-f14-prequery-map-frame-hard-veto-off-20261106
+    paths:
+      - 'tests/core_patches/apply_f14_human_viewer_prequery_veto.py'
+      - 'tests/test_ip_f14_human_viewer_prequery_veto.py'
+      - 'tests/f14_human_viewer_prequery_veto_model.cpp'
+      - '.github/workflows/ip-f14-human-viewer-prequery-source-20261106.yml'
+      - 'docs/F14_HUMAN_VIEWER_PREQUERY_VETO_2026-11-06.md'
+      - 'docs/CUSTOM_MODIFICATIONS_REGISTER.md'
+
+permissions:
+  contents: read
+
+jobs:
+  viewer-prequery-contract:
+    name: "F14-only negative headless/GM viewer veto, exact pinned source and 8192-case model"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact isolated IP source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exactly six paths, original runtime and OFF policies unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=7cf5c48898077236891d7f57f4732865636cefaf
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            'tests/core_patches/apply_f14_human_viewer_prequery_veto.py' \
+            'tests/test_ip_f14_human_viewer_prequery_veto.py' \
+            'tests/f14_human_viewer_prequery_veto_model.cpp' \
+            '.github/workflows/ip-f14-human-viewer-prequery-source-20261106.yml' \
+            'docs/F14_HUMAN_VIEWER_PREQUERY_VETO_2026-11-06.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src conf sql data optional)"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' src
+          echo 'PASS: no source change, no positive hide, no paid/F14 ON'
+      - name: Checkout EXACT pinned Grim Core, source only, no compile or launch
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: pinned-core
+          sparse-checkout: |
+            src/server/game/Entities/Player/Player.h
+            src/server/game/Entities/Player/PlayerUpdates.cpp
+            src/server/game/Server/WorldSession.h
+            src/server/game/Maps/Map.h
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Checkout EXACT historical Playerbots for identity audit, source only
+        uses: actions/checkout@v4
+        with:
+          repository: mod-playerbots/mod-playerbots
+          ref: e88cc4099e69f35126b28942a412ca702d20453b
+          path: pinned-playerbots
+          sparse-checkout: |
+            src/Bot/RandomPlayerbotMgr.cpp
+            src/Bot/PlayerbotAI.cpp
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Assert pinned version and run fail-atomic two-path plus real source tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C pinned-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          test "$(git -C pinned-playerbots rev-parse HEAD)" = e88cc4099e69f35126b28942a412ca702d20453b
+          F14_PINNED_CORE_ROOT="$PWD/pinned-core" \
+          F14_PINNED_PLAYERBOTS_ROOT="$PWD/pinned-playerbots" \
+            python3 -B -m unittest discover -s tests -p 'test_ip_f14_human_viewer_prequery_veto.py' -v
+      - name: Exhaustive default-OFF + hypothetical-TRUE 8192-case negative model in EIGHT variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  tests/f14_human_viewer_prequery_veto_model.cpp -o /tmp/f14-human-viewer
+                /tmp/f14-human-viewer
+              done
+            done
+          done
+          echo 'PASS: 8192 assertion-active negative states in EACH of 8 compiler variants; NO concealment'

@@ -1,0 +1,1077 @@
+/*
+ * CosmicCuddle IP F14 — attack/corpse lifecycle event consumer (DEFAULT OFF).
+ *
+ * Observes the optional Core prototype hooks (COSMIC_F14_ATTACK_EVENT_HOOK_VERSION)
+ * plus the existing AllCreatureScript::OnCreatureRemoveWorld hook, and keeps
+ * the pure IndividualProgressionF14LifecycleRegistry up to date.
+ *
+ * Stage 2: existing UnitScript damage / periodic / heal / combat / evade
+ * hooks are INVALIDATION evidence only, and a bounded threat + combat +
+ * attacker + tap snapshot is recorded as NON-AUTHORITATIVE conservative
+ * evidence. It can only add uncertainty; it never sets any participant or
+ * rights proof, and nothing consumes it for visibility.
+ *
+ * Bookkeeping ONLY by default. A separately compiled, experimental Core
+ * post-event request bridge can request a bounded visibility PASS when a
+ * previously tracked creature changes state. It NEVER denies visibility,
+ * sends packets directly, writes stage/SQL/settings or calls Playerbots. Actor
+ * identity comes from the login-thread cache (GetF14VerifiedRandomBotLoginEpoch),
+ * read under this file's registry mutex, so a logout racing an attack can
+ * never resurrect an expired epoch.
+ *
+ * Pointer rule: every Unit or Creature pointer from a callback is turned into value
+ * tokens before return and never stored. The only per-creature state is a
+ * token stamped in the Creature's own CustomData, which dies with the object.
+ *
+ * Lock order: registry mutex -> F14 identity shared lock (inside the getter).
+ * The logout path releases the identity lock BEFORE calling
+ * ExpireF14LifecycleActor, so the order can never invert.
+ */
+#include "IndividualProgression.h"
+#include "IndividualProgressionF14LifecycleRegistry.h"
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+#include "IndividualProgressionF14LogoutRefreshQueue.h"
+#include <atomic>
+#endif
+#include "AllCreatureScript.h"
+#include "Creature.h"
+#include "DataMap.h"
+#include "Log.h"
+#include "Player.h"
+#include "ScriptMgr.h"
+#if defined(COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER) && COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER >= 1
+#include "AllMapScript.h"
+#include "Map.h" // #108 disposable Core frame diagnostic; not exclusive map ownership
+#include <atomic>
+#endif
+#if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
+#include "WorldObjectScript.h"
+#include "WorldSession.h"
+#include "Map.h" // Disposable Core-only F14 Map::Update invocation diagnostic
+#include "IndividualProgressionF14HumanViewerEpoch.h"
+#include "IndividualProgressionF14SuppressionDecisionIdentity.h"
+#include <atomic>
+#endif
+#include "TemporarySummon.h"
+#include <array>
+#include <mutex>
+
+namespace
+{
+    namespace Registry = IndividualProgressionF14LifecycleRegistry;
+    namespace Policy = IndividualProgressionF14MultiAttackerPolicy;
+
+    std::mutex& LifecycleLock()
+    {
+        static std::mutex lock;
+        return lock;
+    }
+
+    Registry::Registry& LifecycleRegistry()
+    {
+        static Registry::Registry registry;
+        return registry;
+    }
+
+    bool& PoisonLogged()
+    {
+        static bool logged = false;
+        return logged;
+    }
+
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    using LogoutQueue = IndividualProgressionF14LogoutRefreshQueue::Queue<>;
+
+    // Both queue operations and registry writes use LifecycleLock().
+    // Atomic flag makes extra Unit::Update work negligible unless a
+    // verified owner logs out OR a previously tracked NPC's rights change.
+    LogoutQueue& PendingLogoutRefresh()
+    {
+        static LogoutQueue pending;
+        return pending;
+    }
+
+    std::atomic<bool>& HasPendingLogoutRefresh()
+    {
+        static std::atomic<bool> pending{false};
+        return pending;
+    }
+
+    bool& LogoutRefreshOverflowLogged()
+    {
+        static bool logged = false;
+        return logged;
+    }
+#endif
+
+    // Must be called with LifecycleLock() held. Queue failure is independent
+    // of registry poison and can originate from human damage/HoT/assist fanout.
+    void LogPoisonOnce()
+    {
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        if (PendingLogoutRefresh().IsPoisoned() && !LogoutRefreshOverflowLogged())
+        {
+            LogoutRefreshOverflowLogged() = true;
+            LOG_ERROR("module", "IndividualProgression F14 experimental map-thread refresh queue exhausted; no further requests accepted, concealment must remain disabled");
+        }
+#endif
+        Registry::Registry const& registry = LifecycleRegistry();
+        if (!registry.IsPoisoned() || PoisonLogged())
+            return;
+        PoisonLogged() = true;
+        LOG_ERROR("module", "IndividualProgression F14 lifecycle registry disabled (reason {}); all creatures stay visible until config reload",
+            static_cast<uint32>(registry.GetPoisonReason()));
+    }
+}
+
+void IndividualProgression::ResetF14LifecycleRegistry()
+{
+    std::lock_guard<std::mutex> guard(LifecycleLock());
+    LifecycleRegistry().Reset();
+    PoisonLogged() = false;
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    PendingLogoutRefresh().Reset();
+    HasPendingLogoutRefresh().store(false, std::memory_order_release);
+    LogoutRefreshOverflowLogged() = false;
+#endif
+}
+
+void IndividualProgression::ExpireF14LifecycleActor(std::uint64_t loginEpoch)
+{
+    // Runs even when the option is OFF: harmless on an empty registry and
+    // guarantees an epoch recorded before a toggle can never outlive logout.
+    if (!loginEpoch)
+        return;
+    std::lock_guard<std::mutex> guard(LifecycleLock());
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    // Logout can run independently of Core AttackStop. Queue ONLY copied
+    // creature keys and stamp values, never Creature*/Map*/Player*. The
+    // target itself consumes the request on its next owning-map update.
+    auto& pending = PendingLogoutRefresh();
+    std::size_t const affected = LifecycleRegistry().ExpireActor(
+        loginEpoch, [&pending](Registry::CreatureKey const& key, std::uint64_t stamp)
+        {
+            pending.Remember(key, stamp);
+        });
+    HasPendingLogoutRefresh().store(pending.HasPending(), std::memory_order_release);
+    LogPoisonOnce();
+#else
+    std::size_t const affected = LifecycleRegistry().ExpireActor(loginEpoch);
+#endif
+    if (affected)
+        LOG_DEBUG("module", "IndividualProgression F14 lifecycle: login epoch {} expired from {} creature roster(s)", loginEpoch, affected);
+}
+
+IndividualProgression::F14LifecycleStatus IndividualProgression::GetF14LifecycleStatus()
+{
+    std::lock_guard<std::mutex> guard(LifecycleLock());
+    Registry::Registry const& registry = LifecycleRegistry();
+    F14LifecycleStatus status;
+    status.enabled = f14ExperimentalAttackLifecycleRegistry;
+    status.poisoned = registry.IsPoisoned();
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    // A poisoned refresh queue cannot satisfy future viewer restores even if
+    // the combat registry itself is healthy. Surface this as unhealthy.
+    status.poisoned = status.poisoned || PendingLogoutRefresh().IsPoisoned();
+#endif
+    status.trackedCreatures = registry.Size();
+    status.capacity = registry.Capacity();
+    Registry::Counters const& c = registry.GetCounters();
+    status.verifiedBegins = c.verifiedBegins;
+    status.verifiedEnds = c.verifiedEnds;
+    status.unverifiedMarks = c.unverifiedMarks;
+    status.expiryFanout = c.expiryFanout;
+    status.retired = c.corpseRetired + c.respawnRetired + c.evadeRetired + c.removedRetired +
+                     c.leftCombatRetired + c.staleKeyReplaced;
+    status.evidenceInvalidations = c.evidenceInvalidations + c.assistInvalidations;
+    status.snapshotsApplied = c.snapshotsApplied;
+    status.snapshotsOnlyVerifiedBots = c.snapshotsOnlyVerifiedBots;
+    return status;
+}
+
+#if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION) && COSMIC_F14_ATTACK_EVENT_HOOK_VERSION >= 1
+namespace
+{
+    constexpr char const* StampKey = "IndividualProgression.F14.LifecycleIncarnation";
+
+    struct F14CreatureIncarnation : public DataMap::Base
+    {
+        std::uint64_t token = 0;
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        // The one-shot request survives token=0 after corpse/last attack.
+        bool everTracked = false;
+        bool refreshPending = false;
+#endif
+    };
+
+    // A non-pet, non-player-controlled creature in the world. Pets, guardians,
+    // totems and charmed units of players are participants, never entries.
+    Creature* AsWorldCreature(Unit* unit)
+    {
+        if (!unit || !unit->IsInWorld())
+            return nullptr;
+        Creature* creature = unit->ToCreature();
+        if (!creature || creature->IsPet() || creature->IsTotem() ||
+            creature->IsControlledByPlayer() || creature->GetCharmerOrOwnerPlayerOrPlayerItself())
+            return nullptr;
+        return creature;
+    }
+
+    Registry::CreatureKey KeyOf(Creature const* creature)
+    {
+        Registry::CreatureKey key;
+        key.mapId = creature->GetMapId();
+        key.instanceId = creature->GetInstanceId();
+        key.guidRaw = creature->GetGUID().GetRawValue();
+        return key;
+    }
+
+    std::uint64_t StampOf(Creature* creature)
+    {
+        if (F14CreatureIncarnation* stamp = creature->CustomData.Get<F14CreatureIncarnation>(StampKey))
+            return stamp->token;
+        return 0;
+    }
+
+    void SetStamp(Creature* creature, std::uint64_t token)
+    {
+        if (token == StampOf(creature))
+            return;
+        F14CreatureIncarnation* state = creature->CustomData.GetDefault<F14CreatureIncarnation>(StampKey);
+        state->token = token;
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        if (token)
+        {
+            state->everTracked = true;
+            state->refreshPending = true;
+        }
+#endif
+    }
+
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    // Caller holds LifecycleLock(); no allocation for an unknown creature.
+    void MarkPendingRefresh(Creature* creature)
+    {
+        if (!creature)
+            return;
+        if (F14CreatureIncarnation* state = creature->CustomData.Get<F14CreatureIncarnation>(StampKey))
+            if (state->everTracked)
+                state->refreshPending = true;
+    }
+#endif
+
+    // Verified current RandomBot login epoch, or 0. Players only: a pet,
+    // minion or charmed unit is NEVER a first-party bot token (see
+    // MinionOwnerEpochOf for separate, weaker minion evidence). Must be
+    // called with LifecycleLock() held.
+    std::uint64_t ActorTokenOf(Unit const* unit)
+    {
+        if (!unit || !unit->IsPlayer())
+            return 0;
+        return sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(unit->GetGUID());
+    }
+
+    // Stage 3: value-only minion lineage. Returns the OWNER's current
+    // verified login epoch for a pet/guardian/totem/summon only when every
+    // GUID in its lineage agrees with one player owner; otherwise 0
+    // (unknown => visible). No owner/charmer/summoner pointer is ever
+    // dereferenced and Playerbots is never consulted. LifecycleLock() held.
+    std::uint64_t MinionOwnerEpochOf(Unit const* unit)
+    {
+        if (!unit || unit->IsPlayer())
+            return 0;
+        Creature const* minion = unit->ToCreature();
+        if (!minion)
+            return 0;
+        Registry::MinionLineage lineage;
+        lineage.minionType = minion->IsPet() || minion->IsGuardian() || minion->IsTotem() || minion->IsSummon();
+        lineage.vehicleOrPossessed = minion->IsVehicle() || minion->isPossessed();
+        ObjectGuid const owner = minion->GetOwnerGUID();
+        lineage.owner = owner.GetRawValue();
+        lineage.ownerIsPlayer = owner.IsPlayer();
+        lineage.charmer = minion->GetCharmerGUID().GetRawValue();
+        lineage.creator = minion->GetCreatorGUID().GetRawValue();
+        lineage.summon = minion->IsSummon();
+        if (TempSummon const* summon = minion->ToTempSummon())
+        {
+            lineage.summonDataAvailable = true;
+            lineage.summoner = summon->GetSummonerGUID().GetRawValue();
+        }
+        if (!Registry::LineageMatchesSingleOwner(lineage))
+            return 0;
+        return Registry::MinionOwnerEvidence(lineage,
+            sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(owner));
+    }
+
+    // One visited entry: a first-party verified bot, else a verified-owner
+    // minion, else unknown. Returns false when the caller must break.
+    bool VisitUnit(Registry::SnapshotCollector& collector, Unit const* unit, bool attacking)
+    {
+        if (std::uint64_t const bot = ActorTokenOf(unit))
+            return attacking ? collector.AddAttacker(bot) : collector.AddParticipant(bot);
+        if (std::uint64_t const owner = MinionOwnerEpochOf(unit))
+            return collector.AddMinion(owner);
+        return collector.AddParticipant(0);
+    }
+
+    bool LifecycleEnabled()
+    {
+        return sIndividualProgression->enabled && sIndividualProgression->f14ExperimentalAttackLifecycleRegistry;
+    }
+
+    // Conservative first-pilot creature TYPE scope (hostility is NOT checked
+    // here and never claimed). Anything rare, elite, boss,
+    // scripted (ScriptName or AIName such as SmartAI/escort), summoned,
+    // vehicle, charmed, pet/guardian/totem, trigger, guard, civilian or
+    // carrying any NPC flag (quest giver, vendor, ...) fails visible.
+    bool IsPlainUnscriptedNonEliteNpc(Creature const* creature)
+    {
+        CreatureTemplate const* tmpl = creature->GetCreatureTemplate();
+        return tmpl && tmpl->rank == CREATURE_ELITE_NORMAL &&
+               !creature->isWorldBoss() && !creature->IsDungeonBoss() &&
+               !creature->IsSummon() && !creature->IsVehicle() && !creature->IsCharmed() &&
+               !creature->IsPet() && !creature->IsGuardian() && !creature->IsTotem() &&
+               !creature->IsTrigger() && !creature->IsGuard() && !creature->IsCivilian() &&
+               creature->GetScriptId() == 0 && creature->GetAIName().empty() &&
+               creature->GetNpcFlags() == UNIT_NPC_FLAG_NONE;
+    }
+
+    // Bounded, allocation-free, NON-AUTHORITATIVE participant snapshot of a
+    // tracked creature, taken on its map thread under LifecycleLock(). Every
+    // unit is reduced to a token immediately; nothing is retained. Only
+    // called from an event whose source is already rostered (see
+    // OnParticipantEvidence). It is not a census of every participant or
+    // right; it can only add uncertainty in the registry.
+    Registry::ParticipantSnapshot CollectSnapshot(Creature* creature)
+    {
+        bool const alive = creature->IsAlive();
+        bool const inCombat = creature->IsInCombat();
+        // Type-scope exclusion only; hostility is NOT verified here.
+        bool const plainScope = IsPlainUnscriptedNonEliteNpc(creature);
+
+        // Tap: nobody, or one verified bot. Any loot group fails visible
+        // (group membership is not proven here).
+        ObjectGuid const tapper = creature->GetLootRecipientGUID();
+        bool const tapOk = creature->GetLootRecipientGroupGUID() == 0 &&
+            (!tapper || (tapper.IsPlayer() &&
+                         sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(tapper) != 0));
+
+        // Enumerate with a fixed TOTAL visit budget (duplicates included)
+        // and break each loop immediately when the collector says stop, so
+        // the global LifecycleLock is never held for an unbounded scan.
+        Registry::SnapshotCollector collector;
+        // API unavailability or a creature not in its map => unknown => visible.
+        if (!creature->IsInWorld() || !creature->FindMap() ||
+            !creature->GetThreatMgr().CanHaveThreatList() ||
+            !creature->GetCombatManager().GetPvPCombatRefs().empty())
+            collector.Fail();
+
+        // Every threat-list victim, offline references included.
+        if (!collector.Stopped())
+            for (ThreatReference const* ref : creature->GetThreatMgr().GetUnsortedThreatList())
+                if (!VisitUnit(collector, ref ? ref->GetVictim() : nullptr, false))
+                    break;
+        // Every PvE combat reference (threat implies combat, not vice versa).
+        if (!collector.Stopped())
+            for (auto const& pair : creature->GetCombatManager().GetPvECombatRefs())
+                if (!VisitUnit(collector, pair.second ? pair.second->GetOther(creature) : nullptr, false))
+                    break;
+        // Current attackers: participants AND attacker set (minions are
+        // recorded only as minion-owner evidence, never as attackers).
+        if (!collector.Stopped())
+            for (Unit* attacker : creature->getAttackers())
+                if (!VisitUnit(collector, attacker, true))
+                    break;
+
+        Registry::ParticipantSnapshot snap = collector.Take();
+        snap.alive = alive;
+        snap.inCombat = inCombat;
+        snap.plainUnscriptedNonEliteNpcScope = plainScope;
+        snap.tapHolderNoneOrVerifiedBot = tapOk;
+        return snap;
+    }
+
+    // Damage / periodic tick / heal touching units. Pointers are used only
+    // for this synchronous call. Returns quickly for untracked creatures
+    // (the stamp lives in the creature's own CustomData on its map thread).
+    void HandleParticipantEvent(Unit* source, Unit* target, bool mayBeAssist)
+    {
+        if (!LifecycleEnabled() || !target)
+            return;
+
+        if (Creature* tracked = AsWorldCreature(target))
+        {
+            if (!StampOf(tracked))
+                return;
+            std::lock_guard<std::mutex> guard(LifecycleLock());
+            Registry::Registry& registry = LifecycleRegistry();
+            std::uint64_t const stamp = StampOf(tracked);
+            Registry::CreatureKey const key = KeyOf(tracked);
+            // Creatures, pets, minions, totems, environment (null) and
+            // unverified players are all unverified sources.
+            std::uint64_t const sourceToken = AsWorldCreature(source) ? 0 : ActorTokenOf(source);
+            bool evidenceChanged = registry.OnParticipantEvidence(key, stamp, sourceToken);
+            if (!evidenceChanged && registry.NeedsSnapshot(key, stamp))
+            {
+                registry.ApplyParticipantSnapshot(key, stamp, CollectSnapshot(tracked));
+                evidenceChanged = true; // a new conservative snapshot can revoke old rights.
+            }
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+            // Real-player damage/DoT/heal and unexpected owners invalidate
+            // previous observer facts. Request one future owning-map pass,
+            // NEVER a visibility update inside this damage/heal callback.
+            if (evidenceChanged)
+            {
+                LogoutQueue& pending = PendingLogoutRefresh();
+                pending.Remember(key, stamp);
+                HasPendingLogoutRefresh().store(pending.HasPending(), std::memory_order_release);
+            }
+#endif
+            LogPoisonOnce();
+            return;
+        }
+
+        // A heal/HoT on a player gives the healer threat on that player's
+        // creatures with no creature-side event: invalidate those rosters.
+        if (mayBeAssist && target->IsPlayer() && source && source != target &&
+            (source->IsPlayer() || source->IsControlledByPlayer()))
+        {
+            std::lock_guard<std::mutex> guard(LifecycleLock());
+            std::uint64_t const receiver = ActorTokenOf(target);
+            if (receiver)
+            {
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                // Healing a verified bot may create new threat/assist rights
+                // for an unseen human without touching the creature itself.
+                // Fan out value-only affected creature identities under lock.
+                LogoutQueue& pending = PendingLogoutRefresh();
+                LifecycleRegistry().OnAssistOfActor(receiver, ActorTokenOf(source),
+                    [&pending](Registry::CreatureKey const& key, std::uint64_t stamp)
+                    {
+                        pending.Remember(key, stamp);
+                    });
+                HasPendingLogoutRefresh().store(pending.HasPending(), std::memory_order_release);
+#else
+                LifecycleRegistry().OnAssistOfActor(receiver, ActorTokenOf(source));
+#endif
+            }
+            LogPoisonOnce();
+        }
+    }
+
+    // Combat end / evade of a tracked creature retires its incarnation.
+    // Runs whenever a stamp exists, even with the option or IP disabled.
+    void RetireOnCombatEnd(Unit* unit)
+    {
+        Creature* creature = AsWorldCreature(unit);
+        if (!creature || !StampOf(creature))
+            return;
+        std::lock_guard<std::mutex> guard(LifecycleLock());
+        std::uint64_t const stamp = StampOf(creature);
+        if (!stamp)
+            return;
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        MarkPendingRefresh(creature);
+#endif
+        LifecycleRegistry().OnCreatureLeftCombat(KeyOf(creature), stamp);
+        SetStamp(creature, 0);
+        LogPoisonOnce();
+    }
+}
+
+class IndividualProgressionF14LifecycleScript : public UnitScript
+{
+public:
+    IndividualProgressionF14LifecycleScript()
+        : UnitScript("IndividualProgression_F14Lifecycle", true,
+                     {UNITHOOK_ON_F14_ATTACK_TARGET_TRANSITION,
+                      UNITHOOK_ON_F14_CREATURE_CORPSE_READY,
+                      UNITHOOK_ON_F14_CREATURE_RESPAWNED,
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                      UNITHOOK_ON_F14_CREATURE_VISIBILITY_REFRESH_REQUEST,
+                      UNITHOOK_ON_UNIT_UPDATE,
+#endif
+                      UNITHOOK_ON_DAMAGE,
+                      UNITHOOK_MODIFY_PERIODIC_DAMAGE_AURAS_TICK,
+                      UNITHOOK_ON_HEAL,
+                      UNITHOOK_ON_UNIT_ENTER_COMBAT,
+                      UNITHOOK_ON_UNIT_EXIT_COMBAT,
+                      UNITHOOK_ON_UNIT_ENTER_EVADE_MODE}) { }
+
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    // Map-thread handoff of logged-out owner / changed threat-rights evidence. The queue stores no
+    // pointers; a different object with a recycled creature GUID cannot
+    // consume an expired incarnation stamp. Always drop the lock BEFORE
+    // asking Core to refresh links or walking any nearby viewers.
+    void OnUnitUpdate(Unit* unit, uint32 /*diff*/) override
+    {
+        if (!HasPendingLogoutRefresh().load(std::memory_order_acquire))
+            return;
+        Creature* creature = AsWorldCreature(unit);
+        if (!creature)
+            return;
+        bool matched = false;
+        {
+            std::lock_guard<std::mutex> guard(LifecycleLock());
+            LogoutQueue& pending = PendingLogoutRefresh();
+            matched = pending.Take(KeyOf(creature), StampOf(creature));
+            HasPendingLogoutRefresh().store(pending.HasPending(), std::memory_order_release);
+            if (matched)
+                MarkPendingRefresh(creature);
+        }
+        if (matched && creature->IsInWorld() &&
+            sScriptMgr->ShouldF14RefreshCreatureVisibility(creature))
+            creature->UpdateObjectVisibility(true);
+    }
+#endif
+
+    // Invalidation evidence only. Values are never modified, and no single
+    // hook is ever treated as proof of a complete participant roster.
+    void OnDamage(Unit* attacker, Unit* victim, uint32& /*damage*/) override
+    {
+        HandleParticipantEvent(attacker, victim, false);
+    }
+
+    // Called for periodic damage AND periodic heal ticks.
+    void ModifyPeriodicDamageAurasTick(Unit* target, Unit* caster, uint32& /*amount*/, SpellInfo const* /*spellInfo*/) override
+    {
+        HandleParticipantEvent(caster, target, true);
+    }
+
+    void OnHeal(Unit* healer, Unit* receiver, uint32& /*gain*/) override
+    {
+        HandleParticipantEvent(healer, receiver, true);
+    }
+
+    // A tracked creature engaging a target: unverified targets are new
+    // participants (same rule as its own target change).
+    void OnUnitEnterCombat(Unit* unit, Unit* victim) override
+    {
+        if (!LifecycleEnabled())
+            return;
+        Creature* creature = AsWorldCreature(unit);
+        if (!creature || !StampOf(creature))
+            return;
+        std::lock_guard<std::mutex> guard(LifecycleLock());
+        if (std::uint64_t const stamp = StampOf(creature))
+            LifecycleRegistry().OnCreatureTargetChange(KeyOf(creature), stamp, ActorTokenOf(victim) != 0);
+        LogPoisonOnce();
+    }
+
+    void OnUnitExitCombat(Unit* unit) override
+    {
+        RetireOnCombatEnd(unit);
+    }
+
+    void OnUnitEnterEvadeMode(Unit* unit, uint8 /*evadeReason*/) override
+    {
+        RetireOnCombatEnd(unit);
+    }
+
+    // Synchronous, inside Unit::Attack / Unit::AttackStop on the owning map
+    // update. Pointers are valid only for this call and are never stored.
+    void OnF14AttackTargetTransition(Unit* attacker, Unit* oldVictim, Unit* newVictim) override
+    {
+        if (!LifecycleEnabled() || !attacker || oldVictim == newVictim)
+            return;
+
+        Creature* oldCreature = AsWorldCreature(oldVictim);
+        Creature* newCreature = AsWorldCreature(newVictim);
+        Creature* selfCreature = AsWorldCreature(attacker);
+        if (!oldCreature && !newCreature && !selfCreature)
+            return;
+
+        std::lock_guard<std::mutex> guard(LifecycleLock());
+        Registry::Registry& registry = LifecycleRegistry();
+
+        // A tracked creature choosing (or dropping) its own victim.
+        if (selfCreature)
+        {
+            std::uint64_t const stamp = StampOf(selfCreature);
+            if (stamp)
+            {
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                MarkPendingRefresh(selfCreature);
+#endif
+                if (!newVictim)
+                {
+                    if (registry.OnCreatureStoppedAttacking(KeyOf(selfCreature), stamp))
+                        SetStamp(selfCreature, 0);
+                }
+                else
+                    registry.OnCreatureTargetChange(KeyOf(selfCreature), stamp, ActorTokenOf(newVictim) != 0);
+            }
+        }
+
+        // A world creature attacking another creature is an unverified
+        // participant of that creature; only a player can be verified.
+        std::uint64_t const actor = selfCreature ? 0 : ActorTokenOf(attacker);
+
+        if (oldCreature)
+        {
+            if (std::uint64_t const stamp = StampOf(oldCreature))
+            {
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                MarkPendingRefresh(oldCreature);
+#endif
+                registry.OnParticipantEnd(KeyOf(oldCreature), stamp, actor);
+            }
+        }
+
+        if (newCreature)
+        {
+            std::uint64_t const stamp = StampOf(newCreature);
+            if (actor || stamp)
+            {
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                MarkPendingRefresh(newCreature);
+#endif
+                // Complete current attacker set of the creature (Core already
+                // linked this attacker before the hook fired). Fixed-size and
+                // allocation-free under the mutex: one slot beyond the policy
+                // limit is enough for the registry to mark overflow uncertain.
+                std::array<std::uint64_t, Policy::MaxTrackedAttackers + 1> others{};
+                std::size_t otherCount = 0;
+                for (Unit* other : newCreature->getAttackers())
+                {
+                    if (!other || other == attacker)
+                        continue;
+                    if (otherCount == others.size())
+                        break; // > MaxTrackedAttackers: registry fails visible
+                    others[otherCount++] = ActorTokenOf(other);
+                }
+
+                Registry::BeginResult const result = registry.OnParticipantBegin(
+                    KeyOf(newCreature), stamp, actor, others.data(), otherCount);
+                SetStamp(newCreature, result.stamp);
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+                MarkPendingRefresh(newCreature);
+#endif
+                if (result.created)
+                    LOG_DEBUG("module", "IndividualProgression F14 lifecycle: tracking creature {} (incarnation {})",
+                        newCreature->GetGUID().ToString(), result.stamp);
+            }
+        }
+
+        LogPoisonOnce();
+    }
+
+    void OnF14CreatureCorpseReady(Creature* creature) override
+    {
+        RetireIncarnation(creature, false);
+    }
+
+    void OnF14CreatureRespawned(Creature* creature) override
+    {
+        RetireIncarnation(creature, true);
+    }
+
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+    // Called after lifecycle bookkeeping; only requests a Core visibility
+    // PASS, never denial. The request stays valid after stamp retirement.
+    bool OnF14ShouldRefreshCreatureVisibility(Creature const* creature) override
+    {
+        if (!creature || !creature->IsInWorld() || creature->IsPet())
+            return false;
+        // Release the mutex BEFORE Core performs UpdateObjectVisibility.
+        std::lock_guard<std::mutex> guard(LifecycleLock());
+        F14CreatureIncarnation* state = creature->CustomData.Get<F14CreatureIncarnation>(StampKey);
+        if (!state || !state->everTracked || !state->refreshPending)
+            return false;
+        state->refreshPending = false;
+        return true;
+    }
+#endif
+
+private:
+    static void RetireIncarnation(Creature* creature, bool respawn)
+    {
+        // Runs even when the option or IP itself is OFF so a stamp can never
+        // survive death or respawn into a later enabled period.
+        if (!creature)
+            return;
+        std::lock_guard<std::mutex> guard(LifecycleLock());
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        // Respawn may follow a corpse callback which retired token=0.
+        // Remember prior tracking independently of CURRENT hide eligibility.
+        MarkPendingRefresh(creature);
+#endif
+        std::uint64_t const stamp = StampOf(creature);
+        if (!stamp)
+            return;
+        LifecycleRegistry().OnCreatureCorpseOrRespawn(KeyOf(creature), stamp, respawn);
+        SetStamp(creature, 0);
+        LogPoisonOnce();
+    }
+};
+
+// Existing Core hook (Creature::RemoveFromWorld calls it first, while the
+// creature still has its map, instance id and GUID): despawn, grid or
+// instance unload and RemoveFromMap retire the incarnation before the
+// object can be destroyed or its GUID reused. No hiding, packets or stages.
+class IndividualProgressionF14LifecycleRemovalScript : public AllCreatureScript
+{
+public:
+    IndividualProgressionF14LifecycleRemovalScript()
+        : AllCreatureScript("IndividualProgression_F14LifecycleRemoval") { }
+
+    void OnCreatureRemoveWorld(Creature* creature) override
+    {
+        // Runs even when the option or IP itself is OFF; only stamped
+        // creatures matter.
+        if (!creature)
+            return;
+        std::lock_guard<std::mutex> guard(LifecycleLock());
+#if defined(COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT) && COSMIC_IP_F14_POSTEVENT_REFRESH_EXPERIMENT >= 1
+        // Map removal cannot deliver a WorldObject visibility pass.
+        // Retire the copied value-only request without keeping any pointers.
+        PendingLogoutRefresh().Discard(KeyOf(creature));
+        HasPendingLogoutRefresh().store(
+            PendingLogoutRefresh().HasPending(), std::memory_order_release);
+#endif
+        std::uint64_t const stamp = StampOf(creature);
+        if (!stamp)
+            return;
+        LifecycleRegistry().OnCreatureRemovedFromWorld(KeyOf(creature), stamp);
+        SetStamp(creature, 0);
+        LogPoisonOnce();
+    }
+};
+// This is real Core -> IP event wiring, but STRICTLY OBSERVER-ONLY.
+// It is compiled and registered only on an explicitly opted-in CI build
+// with the #93 OUT + #95 CREATE source-attributed Core hook prototypes.
+// The default build has neither hook dependency nor runtime registration.
+//
+// Neither callback can identify the retired creature incarnation for an
+// OUT event. Only count the source-attributed call attempts, NEVER pass
+// fabricated session/incarnation authority into Claude's #94 protocol.
+// The original #103 pure bridge remains UNWIRED until full identity and
+// map-owner proof exist. No packet, suppression, client ACK or ledger clear.
+#if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
+namespace
+{
+    namespace ViewerEpoch = IndividualProgressionF14HumanViewerEpoch;
+    constexpr char const* ViewerEpochStampKey = "IndividualProgression.F14.HumanViewerLoginEpoch";
+
+    struct HumanViewerSessionStamp final : public DataMap::Base
+    {
+        ViewerEpoch::Stamp stamp{};
+    };
+
+    ViewerEpoch::Issuer& ViewerLoginEpochIssuer()
+    {
+        static ViewerEpoch::Issuer issuer;
+        return issuer;
+    }
+
+    // Read current Player-object-stored provenance; never infer a login
+    // epoch from a GUID alone or from the bot-only actor epoch registry.
+    // This fact is NOT an owning-map proof or prior-hidden creature proof.
+    std::uint64_t CurrentHumanViewerEpoch(Player const* viewer)
+    {
+        if (!viewer || !viewer->IsInWorld() || !viewer->GetSession() ||
+            viewer->GetSession()->IsHeadless() || !viewer->GetGUID().IsPlayer() ||
+            !sIndividualProgression->isNormalAccount(const_cast<Player*>(viewer)))
+            return 0;
+        HumanViewerSessionStamp const* state =
+            viewer->CustomData.Get<HumanViewerSessionStamp>(ViewerEpochStampKey);
+        return state && state->stamp.Matches(viewer->GetGUID().GetRawValue(),
+                                            state->stamp.loginEpoch)
+            ? state->stamp.loginEpoch : 0;
+    }
+}
+
+// All humans (not bots or Altbots) get a fresh non-reused epoch at login.
+// This separate opt-in PlayerScript runs independently of the original
+// IndividualPlayerProgression enabled flag; no unrelated gameplay changes.
+class IndividualProgressionF14HumanViewerEpochScript final : public PlayerScript
+{
+public:
+    IndividualProgressionF14HumanViewerEpochScript()
+        : PlayerScript("IndividualProgression_F14HumanViewerEpoch") { }
+
+    void OnPlayerLogin(Player* player) override
+    {
+        if (!player)
+            return;
+        // Existing stamp, if any, is revoked before examining new identity.
+        if (HumanViewerSessionStamp* old =
+                player->CustomData.Get<HumanViewerSessionStamp>(ViewerEpochStampKey))
+            old->stamp.Clear();
+        if (!player->GetSession() || player->GetSession()->IsHeadless() ||
+            !player->GetGUID().IsPlayer() ||
+            !sIndividualProgression->isNormalAccount(player))
+            return;
+
+        std::uint64_t const epoch = ViewerLoginEpochIssuer().Issue();
+        if (!epoch)
+        {
+            LOG_ERROR("module", "IP F14 observer viewer epoch issuer exhausted; GUID events cannot be accepted");
+            return;
+        }
+        HumanViewerSessionStamp* current =
+            player->CustomData.GetDefault<HumanViewerSessionStamp>(ViewerEpochStampKey);
+        current->stamp.Bind(player->GetGUID().GetRawValue(), epoch);
+    }
+
+    // Core LogoutPlayer invokes this before loot/death/map teardown,
+    // including redirecting logout where OnPlayerLogout is skipped.
+    // Revoke only observer identity; no restoration debt is retired here.
+    void OnPlayerBeforeLogout(Player* player) override
+    {
+        RevokeViewerStamp(player);
+    }
+
+    void OnPlayerLogout(Player* player) override
+    {
+        RevokeViewerStamp(player);
+    }
+
+#if defined(COSMIC_F14_SESSION_REBIND_EXPERIMENT) && COSMIC_F14_SESSION_REBIND_EXPERIMENT >= 1
+    void OnF14PlayerSessionRebound(Player* player) override
+    {
+        // Legacy diagnostic epoch must not cross an authenticated-client
+        // reconnect either. OnPlayerLogin rechecks human/account/session
+        // eligibility and issues a fresh non-reused epoch.
+        RevokeViewerStamp(player);
+        OnPlayerLogin(player);
+    }
+#endif
+
+private:
+    static void RevokeViewerStamp(Player* player)
+    {
+        if (player)
+            if (HumanViewerSessionStamp* state =
+                    player->CustomData.Get<HumanViewerSessionStamp>(ViewerEpochStampKey))
+                state->stamp.Clear();
+    }
+};
+
+class IndividualProgressionF14TaggedGuidObserverScript final : public WorldObjectScript
+{
+public:
+    IndividualProgressionF14TaggedGuidObserverScript()
+        : WorldObjectScript("IndividualProgression_F14TaggedGuidObserver",
+            {WORLDOBJECTHOOK_ON_F14_BATCH_OUT_OF_RANGE_ATTEMPT,
+             WORLDOBJECTHOOK_ON_F14_BATCH_CREATE_ATTRIBUTION_QUERY,
+             WORLDOBJECTHOOK_ON_F14_BATCH_CREATE_ATTEMPT,
+             WORLDOBJECTHOOK_ON_F14_VIEWER_CREATURE_BEFORE_SUPPRESSION,
+             WORLDOBJECTHOOK_ON_F14_VIEWER_CREATURE_SUPPRESSION_DECIDED}) { }
+
+    // Negative-only: this script NEVER nominates a CREATE for F14.
+    // In particular, a generic Core CREATE is not prior-hidden proof.
+    bool OnF14ShouldAttributeCreatureCreateAttempt(
+        Player const* /*viewer*/, WorldObject const* /*creature*/) override
+    {
+        return false;
+    }
+
+    // Called ONLY for the Core's explicitly F14-attributed positive
+    // suppression decision, never for generic Core visibility transitions.
+    // The current source still has NO positive F14 hide script, so this is
+    // dormant even in a disposable build with observer diagnostics enabled.
+    // WorldObjects are used synchronously and NEVER retained after callback.
+    // Precisely source-attributed positive F14 intent. In the Core overlay
+    // this happens BEFORE its viewer link update or packet construction.
+    // This diagnostic is dormant: the positive hide callback defaults FALSE.
+    void OnF14BeforeCreatureSuppression(Player const* viewer,
+        WorldObject const* target, bool /*wasLinked*/, bool /*batched*/) override
+    {
+        InspectCurrentSourceIdentity(viewer, target, true);
+    }
+
+    // Original #106 AFTER-decision observer retained for contrast only.
+    void OnF14CreatureSuppressionDecision(Player const* viewer,
+        WorldObject const* target, bool /*wasLinked*/, bool /*batched*/) override
+    {
+        InspectCurrentSourceIdentity(viewer, target, false);
+    }
+
+    void OnF14VisibilityBatchOutOfRangeAttempt(
+        Player const* viewer, ObjectGuid const& creatureGuid) override
+    {
+        RecordServerCall(viewer, creatureGuid, _outAttempts, _invalidAttempts,
+                         "OUT-OF-RANGE");
+    }
+
+    void OnF14VisibilityBatchCreateAttempt(
+        Player const* viewer, ObjectGuid const& creatureGuid) override
+    {
+        RecordServerCall(viewer, creatureGuid, _createAttempts, _invalidAttempts,
+                         "CREATE");
+    }
+
+private:
+    // Sample current pointers synchronously; do not persist per-pair identity
+    // or claim these facts establish owning-map thread or client display.
+    void InspectCurrentSourceIdentity(Player const* viewer,
+        WorldObject const* target, bool beforeViewerLinkMutation)
+    {
+        namespace Decision = IndividualProgressionF14SuppressionDecisionIdentity;
+        Decision::Facts facts{};
+        facts.explicitlySourceAttributedF14Decision = true;
+
+        if (viewer)
+        {
+            facts.viewerInWorld = viewer->IsInWorld();
+            facts.viewerFullGuid = viewer->GetGUID().GetRawValue();
+            facts.viewerLoginEpoch = CurrentHumanViewerEpoch(viewer);
+            facts.currentViewerIsHumanNormalAccount = facts.viewerLoginEpoch != 0;
+            facts.viewerMapId = viewer->GetMapId();
+            facts.viewerInstanceId = viewer->GetInstanceId();
+        }
+
+        Creature const* creature = target ? target->ToCreature() : nullptr;
+        if (creature)
+        {
+            facts.creatureInWorld = creature->IsInWorld();
+            facts.creatureIsWorldNpc = !creature->IsPet() && !creature->IsTotem() &&
+                !creature->IsControlledByPlayer();
+            facts.creatureFullGuid = creature->GetGUID().GetRawValue();
+            facts.creatureMapId = creature->GetMapId();
+            facts.creatureInstanceId = creature->GetInstanceId();
+        }
+
+        facts.sameLiveCoreMapPointer = viewer && creature &&
+            viewer->IsInWorld() && creature->IsInWorld() &&
+            viewer->GetMap() && viewer->GetMap() == creature->GetMap();
+
+        // #108 isolated disposable Core frame proof: a matching Map pointer
+        // alone is insufficient. Visibility can also originate outside
+        // Map::Update (e.g. player map entry). This checks ONLY the current
+        // synchronous Map::Update invocation, not exclusive thread ownership.
+        // On missing proof, count once and retain default-visible behavior.
+        if (facts.sameLiveCoreMapPointer &&
+            !viewer->GetMap()->IsWithinF14MapUpdateInvocation())
+        {
+            std::atomic<std::uint64_t>& rejected =
+                beforeViewerLinkMutation ? _rejectedBeforeViewerLinkSnapshots : _rejectedDecisionSnapshots;
+            if (rejected.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_ERROR("module", "IP F14 diagnostic source not within current Map::Update invocation; concealment OFF");
+            return;
+        }
+
+        // Try instead of blocking in a Core visibility script; a concurrent
+        // or recursive lifecycle operation cannot deadlock this diagnostic.
+        // Matching map pointer does NOT independently prove map-owner thread.
+        if (facts.sameLiveCoreMapPointer)
+        {
+            std::unique_lock<std::mutex> guard(LifecycleLock(), std::try_to_lock);
+            if (guard.owns_lock())
+            {
+                facts.creatureIncarnationStamp = StampOf(const_cast<Creature*>(creature));
+                Registry::Entry entry{};
+                if (LifecycleRegistry().Lookup(facts.creatureIncarnationStamp, entry))
+                {
+                    facts.registryNotPoisonedAndMatched = true;
+                    facts.registryCreatureFullGuid = entry.key.guidRaw;
+                    facts.registryIncarnationStamp = entry.token;
+                    facts.registryMapId = entry.key.mapId;
+                    facts.registryInstanceId = entry.key.instanceId;
+                }
+            }
+        }
+
+        // This classification is only a per-call diagnostic: no per-pair
+        // record, protocol state, original Claude ledger or network effect.
+        std::atomic<std::uint64_t>& successes =
+            beforeViewerLinkMutation ? _beforeViewerLinkSnapshots : _sourceDecisionSnapshots;
+        std::atomic<std::uint64_t>& rejected =
+            beforeViewerLinkMutation ? _rejectedBeforeViewerLinkSnapshots : _rejectedDecisionSnapshots;
+        if (Decision::Validate(facts) ==
+            Decision::Result::CurrentSourceDecisionIdentitySnapshotOnly)
+        {
+            if (successes.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_INFO("module", "IP F14 first matching {} current source identity snapshot observed; NOT historic hidden-pair, owner thread or client proof",
+                    beforeViewerLinkMutation ? "pre-link" : "post-link");
+        }
+        else if (rejected.fetch_add(1, std::memory_order_relaxed) == 0)
+            LOG_ERROR("module", "IP F14 {} current source identity snapshot rejected; hiding stays OFF",
+                beforeViewerLinkMutation ? "pre-link" : "post-link");
+    }
+
+
+    // Per-script aggregate counters only: no GUID, Player*, Map* or login
+    // epoch is retained. These are send-CALL observations, not client ACKs.
+    std::atomic<std::uint64_t> _outAttempts{0};
+    std::atomic<std::uint64_t> _createAttempts{0};
+    std::atomic<std::uint64_t> _invalidAttempts{0};
+    std::atomic<std::uint64_t> _sourceDecisionSnapshots{0};
+    std::atomic<std::uint64_t> _rejectedDecisionSnapshots{0};
+    std::atomic<std::uint64_t> _beforeViewerLinkSnapshots{0};
+    std::atomic<std::uint64_t> _rejectedBeforeViewerLinkSnapshots{0};
+
+    static void RecordServerCall(Player const* viewer, ObjectGuid const& guid,
+        std::atomic<std::uint64_t>& count,
+        std::atomic<std::uint64_t>& invalidCount,
+        char const* direction)
+    {
+        if (!viewer || !viewer->IsInWorld() || !viewer->GetMap() ||
+            guid.IsEmpty() || !guid.IsCreature() ||
+            CurrentHumanViewerEpoch(viewer) == 0)
+        {
+            if (invalidCount.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_ERROR("module", "IP F14 observer rejected invalid GUID send-call metadata; all concealment stays OFF");
+            return;
+        }
+
+        // First occurrence only; no chatty per-GUID logging or player data.
+        if (count.fetch_add(1, std::memory_order_relaxed) == 0)
+            LOG_INFO("module", "IP F14 observer saw its first tagged {} server send-call; this is NOT client receipt or restoration", direction);
+    }
+};
+
+#endif
+#endif
+
+// Optional source-only/CI map-frame observer. Never registered by stock
+// builds; no new Core hook, no player/creature lookup, no per-GUID log, no
+// F14 policy, packet, ledger, settings or even a visibility recheck.
+// This proves only that an existing AllMapScript hook can inspect the
+// exact active Map::Update frame in a pinned disposable Core build.
+// It does NOT prove exclusive map ownership or authorise delayed removal.
+#if defined(COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER) && COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER >= 1
+class IndividualProgressionF14MapUpdateFrameObserver final : public AllMapScript
+{
+public:
+    IndividualProgressionF14MapUpdateFrameObserver()
+        : AllMapScript("IndividualProgression_F14MapUpdateFrameObserver",
+                       {ALLMAPHOOK_ON_MAP_UPDATE}) { }
+
+    void OnMapUpdate(Map* map, uint32 /*diff*/) override
+    {
+        if (!map || !map->IsWithinF14MapUpdateInvocation())
+        {
+            if (_rejected.fetch_add(1, std::memory_order_relaxed) == 0)
+                LOG_ERROR("module", "IP F14 map-frame observer saw no current Map::Update invocation; no restoration or hiding authorised");
+            return;
+        }
+
+        if (_observed.fetch_add(1, std::memory_order_relaxed) == 0)
+            LOG_INFO("module", "IP F14 map-frame observer saw an existing map update callback; this is NOT exclusive owning-map, delayed-removal or client proof");
+    }
+
+private:
+    std::atomic<std::uint64_t> _observed{0};
+    std::atomic<std::uint64_t> _rejected{0};
+};
+#endif
+
+void AddSC_mod_individual_progression_f14_current_core_lifecycle();
+
+void AddSC_mod_individual_progression_f14_lifecycle()
+{
+    AddSC_mod_individual_progression_f14_current_core_lifecycle();
+#if defined(COSMIC_F14_ATTACK_EVENT_HOOK_VERSION) && COSMIC_F14_ATTACK_EVENT_HOOK_VERSION >= 1
+    new IndividualProgressionF14LifecycleScript();
+    new IndividualProgressionF14LifecycleRemovalScript();
+#if defined(COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT) && COSMIC_IP_F14_TAGGED_GUID_OBSERVER_EXPERIMENT >= 1
+    new IndividualProgressionF14HumanViewerEpochScript();
+    new IndividualProgressionF14TaggedGuidObserverScript();
+#endif
+#endif
+#if defined(COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER) && COSMIC_IP_F14_MAP_UPDATE_FRAME_OBSERVER >= 1
+    new IndividualProgressionF14MapUpdateFrameObserver();
+#endif
+}

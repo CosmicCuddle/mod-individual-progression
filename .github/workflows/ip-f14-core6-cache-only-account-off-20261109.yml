@@ -1,0 +1,98 @@
+name: IP F14 Core6 viewer cache-only account, no Auth DB on WHO/map (OFF)
+
+on:
+  push:
+    branches:
+      - fix/cs01-ip139-f14-viewer-cached-account-no-auth-db-20261109
+  pull_request:
+    branches:
+      - fix/cs01-ip138-f14-gm-account-viewer-exclusion-20261109
+
+permissions:
+  contents: read
+
+jobs:
+  cache-only-account-source-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact IP139 parent and isolated cache-only child
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Exact eight paths, original IP139 Player script/config/SQL intact
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=e9ed33511a66bfe3207c7badfc4905c58b6c6f65
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort >/tmp/actual-ip
+          printf '%s\n' \
+            '.github/workflows/ip-f14-core6-cache-only-account-off-20261109.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/F14_CORE6_VIEWER_CACHED_ACCOUNT_NO_AUTH_DB_20261109.md' \
+            'src/IndividualProgression.cpp' \
+            'src/IndividualProgression.h' \
+            'src/IndividualProgressionF14Core6PositiveRndbotAdapter.h' \
+            'tests/test_ip_f14_cached_account_reader_native.py' \
+            'tests/test_ip_f14_core6_positive_rndbot_adapter_source.py' \
+            | sort >/tmp/expected-ip
+          diff -u /tmp/expected-ip /tmp/actual-ip
+          test -z "$(git diff --name-only "$base" HEAD -- conf data sql src/IndividualProgressionPlayer.cpp src/IndividualProgressionExpansion.cpp)"
+          test "$(git rev-parse HEAD:src/IndividualProgressionPlayer.cpp)" = \
+               "$(git rev-parse "$base":src/IndividualProgressionPlayer.cpp)"
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14Core6PositiveRndbotViewerPolicy.h)" = \
+               "$(git rev-parse "$base":src/IndividualProgressionF14Core6PositiveRndbotViewerPolicy.h)"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0' conf/individualProgression.conf.dist
+
+      - name: Original opt-in source tests and OLD DB-miss path regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests \
+            -p test_ip_f14_core6_positive_rndbot_adapter_source.py -v
+
+      - name: Execute real C++ cache method with GCC and Clang under all standard/build variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests \
+            -p test_ip_f14_cached_account_reader_native.py -v
+
+      - name: Original pure actor/WHO policy and inherited IP stage/login guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          for cc in g++ clang++; do
+            for std in c++17 c++20; do
+              for mode in normal ndebug; do
+                flags=()
+                if [[ "$mode" == ndebug ]]; then flags=(-DNDEBUG); fi
+                "$cc" -std="$std" -O2 -Wall -Wextra -Werror -pedantic \
+                  "${flags[@]}" tests/f14_core6_positive_rndbot_viewer_policy.cpp \
+                  -o /tmp/f14-cache-only-actor-policy
+                /tmp/f14-cache-only-actor-policy
+              done
+            done
+          done
+          for test in \
+            test_ip_f14_stage8_invalid_cap_native.py \
+            test_ip_f14_optin_publication_login_predicate.py \
+            test_ip_f14_actor_publication_reload_generation_source.py \
+            test_ip_f14_group_floor_source.py; do
+            python3 -B -m unittest discover -s tests -p "$test" -v
+          done
+
+      - name: Limit of evidence
+        if: always()
+        run: |
+          echo 'Source and native standalone actual-method C++ tests only, no real Worldserver or client.'
+          echo 'No Auth DB is queried from the new positive viewer account reader.'
+          echo 'Missing/nonhuman/GM cached account is UNKNOWN/FALSE and remains VISIBLE.'
+          echo 'Original IP Player script, Core6 negative ABI, payment, SQL and config untouched.'
+          echo 'Do not activate F14; Core immediate refresh, NPC restore, E1, S5/S6 still blocked.'

@@ -1,0 +1,75 @@
+# Default-OFF F14 Core6 observer: raw quest stage versus paid effective stage.
+# Strict child of IP140; no owner host, runtime feature, SQL/DB/DBC/client changes.
+name: F14 Core6 viewer raw-stage no Auth DB (OFF, pure source/native)
+on:
+  pull_request:
+    branches:
+      - fix/cs01-ip139-f14-viewer-cached-account-no-auth-db-20261109
+    paths:
+      - "src/IndividualProgressionF14Core6PositiveRndbotAdapter.h"
+      - "tests/test_ip_f14_core6_positive_rndbot_adapter_source.py"
+      - "tests/test_ip_f14_raw_stage_equivalence_native.py"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+      - ".github/workflows/ip-f14-viewer-raw-stage-no-authdb-20261110.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  paid-equivalence:
+    name: Real pure paid policy and viewer source no-Auth-DB proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify strict IP140 child scope and OFF gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=428c3c46e225095cbebd3a08022be504d8fbfb10
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            '.github/workflows/ip-f14-viewer-raw-stage-no-authdb-20261110.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'src/IndividualProgressionF14Core6PositiveRndbotAdapter.h' \
+            'tests/test_ip_f14_core6_positive_rndbot_adapter_source.py' \
+            'tests/test_ip_f14_raw_stage_equivalence_native.py' | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          git diff --check "$parent" HEAD
+          git diff -U0 "$parent" HEAD -- docs/CUSTOM_MODIFICATIONS_REGISTER.md \
+            | grep -E '^-' | grep -Ev '^--- ' > /tmp/register-removed || true
+          test ! -s /tmp/register-removed
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path("src/IndividualProgressionF14Core6PositiveRndbotAdapter.h").read_text()
+          assert "GetPlayerProgressionFromQuests(ordinaryViewer)" in s
+          assert "GetEffectiveProgression(ordinaryViewer)" not in s
+          assert "TryReadF14CachedNormalHumanAccount(" in s
+          assert "AccountMgr::IsPlayerAccount" in s
+          assert "if (rawStage >= CosmicIPF14Core6PositiveRndbot::FirstTbcStage)" in s
+          c = Path("conf/individualProgression.conf.dist").read_text()
+          assert "IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0" in c
+          PY
+      - name: Existing IP140 default-OFF/Core6 positive policy source tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_core6_positive_rndbot_adapter_source.py' -v
+      - name: Actual policy-header native equivalence GCC Clang C++17 C++20 normal NDEBUG
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_raw_stage_equivalence_native.py' -v
+      - name: Preserve original IP140 cache reader native safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_cached_account_reader_native.py' -v
+          echo 'PASS: SOURCE+PURE NATIVE ONLY, NO Core runtime or IP paid/F14 enablement'

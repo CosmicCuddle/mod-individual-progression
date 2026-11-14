@@ -1,0 +1,57 @@
+name: F14 IP132 inherited actor source atomic-gate successor (test-only)
+on:
+  push:
+    branches:
+      - fix/cs01-ip132-inherited-test-atomic-condition-20261108
+  pull_request:
+    branches:
+      - fix/cs01-f14-atomic-publication-reload-revoke-20261108
+permissions:
+  contents: read
+jobs:
+  inherited-actor-atomic-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact review-only head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Confirm frozen IP132 parent and exact two-path test-only scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=ff39e5ee74d3aa8b2809065d2dbaa1038e2e401e
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            'tests/test_ip_f14_current_actor_publication_source.py' \
+            '.github/workflows/ip132-inherited-actor-atomic-source-contract-20261108.yml' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$base" HEAD -- src/ sql/ data/ conf/)"
+      - name: New atomic reload and inherited F14 negative source contracts
+        run: |
+          set -euo pipefail
+          for pattern in \
+            test_ip_f14_atomic_publication_reload_source.py \
+            test_ip_f14_disabled_login_revoke_source.py \
+            test_ip_f14_current_actor_publication_source.py \
+            test_ip_f14_core6_negative_actor_who_adapter_source.py \
+            test_ip_f14_actor_who_unified_publication_source.py \
+            test_ip_f14_grim_player_who_observer_source.py; do
+            python3 -B -m unittest discover -s tests -p "$pattern" -v
+          done
+      - name: Original pure native C++ actor WHO parity remains false-only
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O1 -Wall -Wextra -Werror -pedantic -Isrc tests/f14_actor_who_unified_publication.cpp -o /tmp/f14-parity
+          /tmp/f14-parity
+      - name: Evidence boundary
+        if: always()
+        run: |
+          echo 'Test-only child of frozen DRAFT IP132; zero runtime source edits.'
+          echo 'No Worldserver build, hiding, WHO listener, client ACK, SQL, host or gameplay proof.'
+          echo 'F14 and paid positive features remain OFF; owner merge/deploy approval unchanged.'

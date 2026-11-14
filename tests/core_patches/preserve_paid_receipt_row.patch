@@ -1,0 +1,121 @@
+diff --git a/src/server/game/Entities/Player/PlayerSettings.cpp b/src/server/game/Entities/Player/PlayerSettings.cpp
+--- a/src/server/game/Entities/Player/PlayerSettings.cpp
++++ b/src/server/game/Entities/Player/PlayerSettings.cpp
+@@ -55,10 +55,22 @@
+         return data.str();
+     }
+ 
++    // Avoid Core parser dropping malformed values and shifting slots into
++    // apparently valid paid entitlements after the next normal character save.
++    // Every unrelated settings source keeps the old permissive behaviour.
++    static bool IsCanonicalPaidReceiptRow(std::string const& source, std::string const& data)
++    {
++        if (source != "ip_paid_expansion")
++            return true;
++        PlayerSettingVector const parsed = ParseSettingsData(data);
++        return !parsed.empty() && SerializeSettingsData(parsed) == data;
++    }
++
+     // helper: load a single source row for a player and parse to vector
++    static PlayerSettingVector LoadPlayerSettings(ObjectGuid::LowType playerLowGuid, std::string const& source, bool& unsafePaidRow)
+-    static PlayerSettingVector LoadPlayerSettings(ObjectGuid::LowType playerLowGuid, std::string const& source)
+     {
+         PlayerSettingVector result;
++        unsafePaidRow = false;
+ 
+         CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_SEL_CHAR_SETTINGS);
+         stmt->SetData(0, playerLowGuid);
+@@ -74,6 +86,13 @@
+                 continue;
+ 
+             std::string data = fields[1].Get<std::string>();
++            if (!IsCanonicalPaidReceiptRow(rowSource, data))
++            {
++                unsafePaidRow = true;
++                LOG_ERROR("entities.player", "Refusing offline settings update to malformed paid receipt row for character {}",
++                    playerLowGuid);
++                return result;
++            }
+             return ParseSettingsData(data);
+         } while (dbRes->NextRow());
+ 
+@@ -85,7 +104,10 @@
+         if (!sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED))
+             return;
+ 
++        bool unsafePaidRow = false;
++        PlayerSettingVector settings = LoadPlayerSettings(playerLowGuid, source, unsafePaidRow);
++        if (unsafePaidRow)
++            return; // The original untrusted row must be preserved.
+-        PlayerSettingVector settings = LoadPlayerSettings(playerLowGuid, source);
+         size_t const requiredSize = static_cast<size_t>(index) + 1;
+         if (settings.size() < requiredSize)
+             settings.resize(requiredSize); // zero-initialized PlayerSetting::value
+@@ -110,6 +132,7 @@
+ void Player::_LoadCharacterSettings(PreparedQueryResult result)
+ {
+     m_charSettingsMap.clear();
++    m_preserveMalformedPaidSettingsRow = false;
+ 
+     if (!sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED))
+         return;
+@@ -123,6 +146,17 @@
+         std::string source = fields[0].Get<std::string>();
+         std::string data = fields[1].Get<std::string>();
+ 
++        if (!PlayerSettingsStore::IsCanonicalPaidReceiptRow(source, data))
++        {
++            // Protect the missing cache entry from implicit GetPlayerSetting
++            // creation, explicit UpdatePlayerSetting and ordinary autosaves.
++            // No raw character/account settings are written to logs.
++            m_preserveMalformedPaidSettingsRow = true;
++            LOG_ERROR("entities.player", "Preserving malformed paid receipt row for character {}; repair required",
++                GetGUID().GetCounter());
++            continue;
++        }
++
+         PlayerSettingVector settings = PlayerSettingsStore::ParseSettingsData(data);
+         m_charSettingsMap.emplace(std::move(source), std::move(settings));
+ 
+@@ -131,6 +165,10 @@
+ 
+ PlayerSetting Player::GetPlayerSetting(std::string const& source, uint32 index)
+ {
++    // Normally this read auto-creates a missing source via UpdatePlayerSetting.
++    // Do not replace an intentionally skipped malformed paid DB row.
++    if (m_preserveMalformedPaidSettingsRow && source == "ip_paid_expansion")
++        return PlayerSetting(0);
+     auto it = m_charSettingsMap.find(source);
+     if (it == m_charSettingsMap.end() || static_cast<size_t>(index) >= it->second.size())
+     {
+@@ -148,6 +186,8 @@
+ 
+     for (auto const& [source, settings] : m_charSettingsMap)
+     {
++        if (m_preserveMalformedPaidSettingsRow && source == "ip_paid_expansion")
++            continue;
+         if (settings.empty())
+             continue;
+ 
+@@ -158,6 +198,8 @@
+ 
+ void Player::UpdatePlayerSetting(std::string const& source, uint32 index, uint32 value)
+ {
++    if (m_preserveMalformedPaidSettingsRow && source == "ip_paid_expansion")
++        return; // Never replace the damaged raw source, even on direct writes.
+     auto it = m_charSettingsMap.find(source);
+     size_t const requiredSize = static_cast<size_t>(index) + 1;
+ 
+diff --git a/src/server/game/Entities/Player/Player.h b/src/server/game/Entities/Player/Player.h
+--- a/src/server/game/Entities/Player/Player.h
++++ b/src/server/game/Entities/Player/Player.h
+@@ -3076,6 +3076,9 @@
+     bool _wasOutdoor;
+ 
+     PlayerSettingMap m_charSettingsMap;
++    // A paid-expansion RAW settings row was malformed at login. Block even
++    // implicit GetPlayerSetting zero-initialisation until a reviewed repair.
++    bool m_preserveMalformedPaidSettingsRow = false;
+ 
+     Seconds m_creationTime;
+ 

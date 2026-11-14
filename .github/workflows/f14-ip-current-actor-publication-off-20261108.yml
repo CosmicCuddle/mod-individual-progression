@@ -1,0 +1,55 @@
+name: CosmicCuddle F14 IP current actor publication source OFF
+on:
+  push:
+    branches:
+      - feature/cs01-f14-current-verified-actor-publication-off-20261108
+  pull_request:
+    branches:
+      - feature/cs01-ip-core6-actor-who-negative-adapter-off-20261108
+permissions:
+  contents: read
+jobs:
+  current-login-publication-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact IP128 child
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact parent and only six scoped files; no SQL/DB/config changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=2ef6154536e0c8febcd745a3bd928f3b4a73009a
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort > /tmp/actual
+          printf '%s\n' \
+            'src/IndividualProgression.h' \
+            'src/IndividualProgression.cpp' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'tests/test_ip_f14_current_actor_publication_source.py' \
+            'docs/F14-CURRENT-VERIFIED-ACTOR-PUBLICATION-OFF-20261108.md' \
+            '.github/workflows/f14-ip-current-actor-publication-off-20261108.yml' | sort > /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$base" HEAD -- sql/ conf/ data/)"
+      - name: Check source verified login birth publication and atomic revoke
+        run: |
+          python3 -B -m unittest discover -s tests -p test_ip_f14_current_actor_publication_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_core6_negative_actor_who_adapter_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_actor_who_unified_publication_source.py -v
+          python3 -B -m unittest discover -s tests -p test_ip_f14_grim_player_who_observer_source.py -v
+      - name: Native C++ shared identity synthetic parity retained
+        run: |
+          g++ -std=c++17 -O1 -Wall -Wextra -Werror -pedantic -Isrc tests/f14_actor_who_unified_publication.cpp -o /tmp/f14-identity-parity
+          /tmp/f14-identity-parity
+      - name: Evidence limitations
+        if: always()
+        run: |
+          echo 'This is source/model-only. No actual Worldserver, DB, client, current session or map update is executed.'
+          echo 'The new publication is compile-time OFF by default and does not supply a true/positive hiding decision.'
+          echo 'Copied snapshots can become stale after unlocking: never use alone for client suppression or stage grant.'
+          echo 'No owner host, character SQL, config, source integration or deployment.'

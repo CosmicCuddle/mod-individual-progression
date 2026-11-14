@@ -1,0 +1,82 @@
+name: F14 IP134 nested login lease compiler regression (no hiding)
+
+on:
+  push:
+    branches:
+      - fix/cs01-ip134-nested-lease-default-arg-native-20261108
+  pull_request:
+    branches:
+      - fix/cs01-f14-publication-reload-generation-20261108
+
+permissions:
+  contents: read
+
+jobs:
+  scoped-native-declaration-gate:
+    name: "F14 IP134 nested lease real-header RED/GREEN + inherited OFF guards"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate and immutable ancestry
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify child-only four-path scope and defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=3a0d5e6fea676ac22601f82648de72ce20fa5e1b
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            'src/IndividualProgression.h' \
+            'tests/test_ip_f14_nested_lease_header_compile.py' \
+            '.github/workflows/ip-f14-nested-lease-native-guard-20261108.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$base" HEAD -- conf sql data)"
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          ! grep -R -E '^[[:space:]]*#define COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT' src/
+          echo 'PASS only compiler regression fix, no F14 or paid switch changes'
+      - name: Old parent fails and actual new header compiles under GCC and Clang
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_nested_lease_header_compile.py' -v
+      - name: Preserve all inherited F14 login, reload and Core6 false-only source tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            test_ip_f14_actor_publication_reload_generation_source.py \
+            test_ip_f14_atomic_publication_reload_source.py \
+            test_ip_f14_current_actor_publication_source.py \
+            test_ip_f14_disabled_login_revoke_source.py \
+            test_ip_f14_group_floor_source.py \
+            test_ip_f14_core6_negative_actor_who_adapter_source.py; do
+            python3 -B -m unittest discover -s tests -p "$name" -v
+          done
+      - name: Preserve original pure C++ reload interleaving model
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for std in c++17 c++20; do
+              for mode in normal ndebug; do
+                flags=()
+                if [[ "$mode" == ndebug ]]; then flags=(-DNDEBUG); fi
+                "$compiler" -std="$std" -pthread -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  tests/f14_actor_publication_reload_generation_model.cpp -o /tmp/f14-reload-generation-model
+                /tmp/f14-reload-generation-model
+              done
+            done
+          done
+      - name: Evidence boundary
+        if: always()
+        run: |
+          echo 'Extracted real header C++ syntax and pure model; not actual five-owner Worldserver compilation.'
+          echo 'No F14 hide, stage8 grant, paid purchase, client, database, owner host or production action.'

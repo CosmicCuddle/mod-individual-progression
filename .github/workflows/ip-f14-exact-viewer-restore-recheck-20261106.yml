@@ -1,0 +1,58 @@
+name: F14 exact old-viewer restoration recheck pure selector OFF
+on:
+  push:
+    branches: [research/cs01-f14-exact-viewer-restore-recheck-plan-off-20261106]
+  pull_request:
+    branches: [research/cs01-f14-corpse-ready-immediate-handoff-audit-off-20261106]
+permissions:
+  contents: read
+jobs:
+  restore-recheck-pure-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact review source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Guard exactly five changed paths and unmodified parent runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=6c56f4691b193285dd7d31431c0e72d57a98a3ba
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            'src/IndividualProgressionF14ExactViewerRestoreRecheckPlan.h' \
+            'tests/f14_exact_viewer_restore_recheck_plan.cpp' \
+            '.github/workflows/ip-f14-exact-viewer-restore-recheck-20261106.yml' \
+            'docs/F14_EXACT_VIEWER_RESTORE_RECHECK_2026-11-06.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src/IndividualProgressionF14ViewerRestoreProtocol.h src/IndividualProgressionF14PriorHiddenLedger.h src/IndividualProgressionF14GuidSendAttemptEvidence.h src/IndividualProgressionF14LifecycleScript.cpp src/IndividualProgressionPlayer.cpp conf sql data)"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' src
+          grep -Fq 'HasClientAcknowledgement() { return false; }' src/IndividualProgressionF14ExactViewerRestoreRecheckPlan.h
+          grep -Fq 'MayClearOriginalRestorationDebt() { return false; }' src/IndividualProgressionF14ExactViewerRestoreRecheckPlan.h
+          grep -Fq 'EnablesPositiveHide() { return false; }' src/IndividualProgressionF14ExactViewerRestoreRecheckPlan.h
+          echo 'PASS: original Claude protocol and runtime unchanged; no positive hide, no ACK/debt clear'
+      - name: Compile and run 65536 prior-viewer recovery facts in eight compiler configurations
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for std in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$std" -Isrc -O2 -Wall -Wextra -Werror -pedantic "${flags[@]}" \
+                  tests/f14_exact_viewer_restore_recheck_plan.cpp -o /tmp/f14-exact-viewer-restore-plan
+                /tmp/f14-exact-viewer-restore-plan
+              done
+            done
+          done
+          echo 'PASS: 65536 exact viewer/creature recovery facts × eight modes; original restore obligation persists, no active positive hide'

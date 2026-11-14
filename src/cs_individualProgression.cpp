@@ -2,6 +2,8 @@
 #include "ScriptMgr.h"
 #include "Tokenize.h"
 #include "IndividualProgression.h"
+#include "IndividualProgressionGmCommandAccessPolicy.h"
+#include "Log.h"
 #include "naxxramas_40.h"
 
 using namespace Acore::ChatCommands;
@@ -49,7 +51,7 @@ public:
     {
         static ChatCommandTable ipTable =
         {
-            { "get",    HandleGetIndividualProgressionCommand,    SEC_GAMEMASTER,    Console::Yes },
+            { "get",    HandleGetIndividualProgressionCommand,    SEC_PLAYER,        Console::Yes },
             { "set",    HandleSetIndividualProgressionCommand,    SEC_GAMEMASTER,    Console::Yes },
             { "pet",    HandlePetIndividualProgressionCommand,    SEC_GAMEMASTER,    Console::Yes },
             { "tele",   HandleTeleIndividualProgressionCommand,   SEC_GAMEMASTER,    Console::Yes },
@@ -102,26 +104,56 @@ public:
 
     static bool HandleGetIndividualProgressionCommand(ChatHandler* handler, Optional<PlayerIdentifier> player)
     {
-        if (!player)
-            player = PlayerIdentifier::FromTargetOrSelf(handler);
+        using namespace IndividualProgressionGmCommandAccessPolicy;
 
-        if (!player)
+        WorldSession* session = handler->GetSession();
+        Player* issuer = session ? session->GetPlayer() : nullptr;
+        bool const gmOrHigher = session && session->GetSecurity() >= SEC_GAMEMASTER;
+        bool const namedSelf = issuer && player && player->GetConnectedPlayer() == issuer;
+        Lookup const access = DecideGetTarget(session != nullptr, gmOrHigher,
+                                              static_cast<bool>(player), namedSelf);
+        if (access == Lookup::Refuse)
         {
-            handler->SendSysMessage("Player not found.");
+            handler->SendSysMessage("You can only view your own progression.");
             return false;
         }
 
-        std::string playername = player->GetName();
-        Player* target = player->GetConnectedPlayer();
-        if (!target)
+        Player* target = nullptr;
+        if (access == Lookup::UseSelf)
         {
-            handler->PSendSysMessage("Player |cff00ffff{}|r is not online.", playername);
+            // Do not honor a selected other player when an ordinary player
+            // invokes .ip get without a name. Only the session owner is read.
+            target = issuer;
+        }
+        else
+        {
+            // Preserve the historical GM/console named/selected-target route.
+            if (!player)
+                player = PlayerIdentifier::FromTargetOrSelf(handler);
+            if (!player)
+            {
+                handler->SendSysMessage("Player not found.");
+                return false;
+            }
+            target = player->GetConnectedPlayer();
+        }
+
+        if (!target || !target->IsInWorld())
+        {
+            handler->SendSysMessage("Player not found or not online.");
             return false;
         }
 
+        std::string playername = target->GetName();
         uint32 progressionLevel = sIndividualProgression->GetPlayerProgressionFromQuests(target);
-
+        // Keep the established raw-stage line word-for-word when paid mode is OFF.
         handler->PSendSysMessage("Progression Level for |cff00ffff{}|r = |cff00ffff{}|r", playername, progressionLevel);
+
+        // Access display is informative only, never a stage/entitlement grant.
+        if (sIndividualProgression->IsPaidExpansionActive() &&
+            sIndividualProgression->isNormalAccount(target))
+            handler->PSendSysMessage("Earned progression stage: {} | Current access stage: {}",
+                progressionLevel, sIndividualProgression->GetEffectiveProgression(target));
         return true;
     }
 
@@ -136,11 +168,46 @@ public:
             return false;
         }
 
-        player = PlayerIdentifier::FromTargetOrSelf(handler);
+        // An explicit online target/name must take precedence over the
+        // command issuer's selected target. Console has no player session.
+        if (!player)
+            player = PlayerIdentifier::FromTargetOrSelf(handler);
+
+        if (!player)
+        {
+            handler->SendSysMessage("Player not found. Specify an online player or target.");
+            return false;
+        }
+
         Player* target = player->GetConnectedPlayer();
+        if (!target || !target->IsInWorld())
+        {
+            handler->PSendSysMessage("Player |cff00ffff{}|r is not online.", player->GetName());
+            return false;
+        }
+
         std::string playername = target->GetName();
         uint8 currentState = sIndividualProgression->GetPlayerProgressionFromQuests(target);
         uint32 currentArea = target->GetAreaId();
+        // Audit manual GM progression grants in paid mode, without ever
+        // creating a purchase flag or changing GM recovery privileges.
+        bool const paidAudit = sIndividualProgression->IsPaidExpansionActive() &&
+                               sIndividualProgression->isNormalAccount(target);
+        bool const beforeTbc = paidAudit && sIndividualProgression->HasExpansionEntitlement(
+            target, IndividualProgressionExpansionPolicy::Era::Tbc);
+        bool const beforeWrath = paidAudit && sIndividualProgression->HasExpansionEntitlement(
+            target, IndividualProgressionExpansionPolicy::Era::Wrath);
+
+        // F14 stage-8 floor durability (default OFF): refuse BEFORE any
+        // achievement cleanup or marker reset, so nothing is half-applied.
+        if (progressionLevel <= PROGRESSION_WOTLK_TIER_5 &&
+            sIndividualProgression->BlocksF14VerifiedStageFloorDowngrade(target, static_cast<uint8>(progressionLevel)))
+        {
+            handler->PSendSysMessage("Refused: |cff00ffff{}|r is a verified RandomBot with earned TBC stage {}; "
+                "IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor blocks lowering it below 8.",
+                playername, currentState);
+            return false;
+        }
 
         if (progressionLevel < currentState)
         {
@@ -150,17 +217,47 @@ public:
         sIndividualProgression->ForceUpdateProgressionState(target, static_cast<ProgressionState>(progressionLevel));
         sIndividualProgression->checkIPPhasing(target, currentArea);
 
+        if (paidAudit)
+        {
+            bool const afterTbc = sIndividualProgression->HasExpansionEntitlement(
+                target, IndividualProgressionExpansionPolicy::Era::Tbc);
+            bool const afterWrath = sIndividualProgression->HasExpansionEntitlement(
+                target, IndividualProgressionExpansionPolicy::Era::Wrath);
+            if (IndividualProgressionGmCommandAccessPolicy::NeedsPaidGrantAudit(
+                    true, true, beforeTbc, afterTbc, beforeWrath, afterWrath))
+            {
+                // This override is deliberately not a paid entitlement purchase.
+                handler->SendSysMessage("WARNING: GM progression override granted expansion access without payment. No paid entitlement flag was written.");
+                WorldSession* issuerSession = handler->GetSession();
+                Player* actor = issuerSession ? issuerSession->GetPlayer() : nullptr;
+                std::string const actorName = actor ? actor->GetName() : "console";
+                uint32 const actorAccount = issuerSession ? issuerSession->GetAccountId() : 0u;
+                LOG_INFO("module",
+                    "IP GM override issuer={} account={} target_guid={} raw={}=>{} TBC={}=>{} Wrath={}=>{} paid_marker_unchanged=1",
+                    actorName, actorAccount, target->GetGUID().GetCounter(),
+                    currentState, progressionLevel, beforeTbc, afterTbc, beforeWrath, afterWrath);
+            }
+        }
+
         handler->PSendSysMessage("Updated Progression Level for |cff00ffff{}|r = |cff00ffff{}|r", playername, progressionLevel);
         return true;
     }
 
     static bool HandleSetBotIndividualProgressionCommand(ChatHandler* handler)
     {
-        Player* player = handler->GetSession()->GetPlayer();
-
-        if (!player)
+        // This command is intentionally an in-game group operation even
+        // though its historical registration also permits console parsing.
+        WorldSession* session = handler->GetSession();
+        if (!session)
         {
-            handler->SendSysMessage("Player not found.");
+            handler->SendSysMessage(".ip setbot requires an in-game player session.");
+            return false;
+        }
+
+        Player* player = session->GetPlayer();
+        if (!player || !player->IsInWorld())
+        {
+            handler->SendSysMessage("Player not found or not in world.");
             return false;
         }
 
@@ -176,11 +273,20 @@ public:
             return false;
         }
 
+        uint32 floorSkipped = 0;
         for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
         {
             Player* member = itr->GetSource();
             if (!member || sIndividualProgression->isNormalAccount(member))
                 continue;
+
+            // F14 stage-8 floor durability (default OFF): leave a verified
+            // RandomBot's earned TBC stage untouched instead of lowering it.
+            if (sIndividualProgression->BlocksF14VerifiedStageFloorDowngrade(member, static_cast<uint8>(currentState)))
+            {
+                ++floorSkipped;
+                continue;
+            }
 
             sIndividualProgression->ForceUpdateProgressionState(member, static_cast<ProgressionState>(currentState));
             sIndividualProgression->CheckAdjustments(member);
@@ -188,16 +294,28 @@ public:
         }
 
         handler->PSendSysMessage("Updated Progression Level for all RND bots = |cff00ffff{}|r", currentState);
+        if (floorSkipped)
+            handler->PSendSysMessage("Skipped {} verified RandomBot(s) with an earned TBC stage (F14 stage floor ON).", floorSkipped);
         return true;
     }
 
     static bool HandleSetRepIndividualProgressionCommand(ChatHandler* handler)
     {
-        Player* player = handler->GetSession()->GetPlayer();
-        uint32 accountId = handler->GetSession()->GetAccountId();
-        
-        if (!player || !accountId)
+        WorldSession* session = handler->GetSession();
+        if (!session)
+        {
+            handler->SendSysMessage(".ip setrep requires an in-game player session.");
             return false;
+        }
+
+        Player* player = session->GetPlayer();
+        uint32 accountId = session->GetAccountId();
+
+        if (!player || !player->IsInWorld() || !accountId)
+        {
+            handler->SendSysMessage("Player not found or not in world.");
+            return false;
+        }
 
         Group* group = player->GetGroup();
         
@@ -597,8 +715,24 @@ public:
             return false;
         }
 
-        player = PlayerIdentifier::FromTargetOrSelf(handler);
+        // Preserve an explicit name/GUID; console or missing target must
+        // not dereference an empty identifier or an offline player.
+        if (!player)
+            player = PlayerIdentifier::FromTargetOrSelf(handler);
+
+        if (!player)
+        {
+            handler->SendSysMessage("Player not found. Specify an online player or target.");
+            return false;
+        }
+
         Player* target = player->GetConnectedPlayer();
+        if (!target || !target->IsInWorld())
+        {
+            handler->PSendSysMessage("Player |cff00ffff{}|r is not online.", player->GetName());
+            return false;
+        }
+
         uint32 progressionLevel = sIndividualProgression->GetPlayerProgressionFromQuests(target);
         std::string playername = target->GetName();
 
@@ -664,11 +798,17 @@ public:
 
     static bool HandleAttuneIndividualProgressionCommand(ChatHandler* handler, std::string location)
     {
-        Player* player = handler->GetSession()->GetPlayer();
-
-        if (!player)
+        WorldSession* session = handler->GetSession();
+        if (!session)
         {
-            handler->SendSysMessage("Player not found.");
+            handler->SendSysMessage(".ip attune requires an in-game player session.");
+            return false;
+        }
+
+        Player* player = session->GetPlayer();
+        if (!player || !player->IsInWorld())
+        {
+            handler->SendSysMessage("Player not found or not in world.");
             return false;
         }
 

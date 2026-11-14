@@ -1,0 +1,82 @@
+# Exact #94 Claude protocol blobs copied into actual #92 IP source; NO LIVE.
+# Child of #96, pure model only; not wired into Worldserver or enabled.
+name: F14 exact viewer restoration protocol source integration on real IP (OFF)
+
+on:
+  push:
+    branches:
+      - integration/cs01-f14-pure-viewer-protocol-on-ip92-20261105
+  pull_request:
+    branches:
+      - research/cs01-f14-rights-with-create-attempt-native-20261105
+    paths:
+      - "src/IndividualProgressionF14PriorHiddenLedger.h"
+      - "src/IndividualProgressionF14ViewerRestoreProtocol.h"
+      - "tests/f14_viewer_restore_protocol.cpp"
+      - "tests/test_ip_f14_combined_pure_protocol_source.py"
+      - ".github/workflows/ip-f14-pure-protocol-on-ip92-source-20261105.yml"
+      - "docs/F14_VIEWER_PROTOCOL_INTEGRATION_2026-11-05.md"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+
+permissions:
+  contents: read
+
+jobs:
+  source-protocol:
+    name: Exact #94 source copied + tested against actual #92 newer lifecycle registry (NO HOST)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact seven-path source preservation and F14 disabled guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=869325e7d78391b6924901699093c58487aec2d8
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --name-only "$parent" HEAD | sort > /tmp/f14-actual
+          printf '%s\n' \
+            'src/IndividualProgressionF14PriorHiddenLedger.h' \
+            'src/IndividualProgressionF14ViewerRestoreProtocol.h' \
+            'tests/f14_viewer_restore_protocol.cpp' \
+            'tests/test_ip_f14_combined_pure_protocol_source.py' \
+            '.github/workflows/ip-f14-pure-protocol-on-ip92-source-20261105.yml' \
+            'docs/F14_VIEWER_PROTOCOL_INTEGRATION_2026-11-05.md' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort > /tmp/f14-expected
+          diff -u /tmp/f14-expected /tmp/f14-actual
+          git diff --check "$parent"
+          test -z "$(git diff --name-only "$parent" HEAD -- conf sql data optional)"
+          test -z "$(git diff --name-only "$parent" HEAD -- src/IndividualProgression.cpp src/IndividualProgressionPlayer.cpp src/IndividualProgressionF14LifecycleRegistry.h src/IndividualProgressionF14LifecycleScript.cpp)"
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14LifecycleRegistry.h)" = 2d6bf7fb473ae118be35a0c9f98276b8bed1e2e8
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14PriorHiddenLedger.h)" = 2250bae56bb09a810d337927f738bd3cbcf5fddd
+          test "$(git rev-parse HEAD:src/IndividualProgressionF14ViewerRestoreProtocol.h)" = f520356a8152d98580751604f4649fe1b564f072
+          test "$(git rev-parse HEAD:tests/f14_viewer_restore_protocol.cpp)" = 9bce90ed2c3e0f05dc41583d8e96b4f53f661422
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor = 0' conf/individualProgression.conf.dist
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_combined_pure_protocol_source.py' -v
+          echo 'PASS: original #94 ledger, protocol, and native test blobs; newer registry untouched, no active listener'
+      - name: Original native #94 C++ tests compiled against ACTUAL newer IP #92 registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          for compiler in g++ clang++; do
+            for standard in c++17 c++20; do
+              for ndebug in 0 1; do
+                flags=()
+                if [ "$ndebug" = 1 ]; then flags+=("-DNDEBUG"); fi
+                "$compiler" -std="$standard" -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                  -Isrc tests/f14_viewer_restore_protocol.cpp \
+                  -o /tmp/cosmic-f14-native-pure-model
+                /tmp/cosmic-f14-native-pure-model
+              done
+            done
+          done
+          for file in test_ip_f14_stage_floor_source.py test_ip_f14_lifecycle_source.py \
+                      test_ip_f14_rights_refresh_source.py test_ip_f14_refresh_poison_status_source.py; do
+            python3 -B -m unittest discover -s tests -p "$file" -v
+          done
+          echo 'PASS: pure source-only compatibility. Header NOT included in normal Worldserver build. No client ACK, hide or restored ledger proof.'

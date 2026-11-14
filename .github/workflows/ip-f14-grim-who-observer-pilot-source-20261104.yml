@@ -1,0 +1,80 @@
+# Additive F14 observer/WHO pilot on exact Grim+F14 ancestor.
+# OFF by default; no immediate Core refresh bridge. NO HOST/DB/GAMEPLAY.
+name: F14 Grim WHO/player pilot pure and source (OFF, NO HOST)
+on:
+  pull_request:
+    branches: [work/cs01-grim-f14-model-consolidation-20261104]
+    paths:
+      - ".github/workflows/ip-f14-grim-who-observer-pilot-source-20261104.yml"
+      - ".github/workflows/ip-f14-grim-who-observer-native-20261104.yml"
+      - "src/IndividualProgression.cpp"
+      - "src/IndividualProgression.h"
+      - "src/IndividualProgressionPlayer.cpp"
+      - "conf/individualProgression.conf.dist"
+      - "docs/CUSTOM_MODIFICATIONS_REGISTER.md"
+      - "tests/test_ip_f14_grim_player_who_observer_source.py"
+permissions:
+  contents: read
+
+jobs:
+  matrix-source-and-models:
+    name: World/WHO fail-OFF source x original pure F14 models (${{ matrix.cxx }} ${{ matrix.std }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - name: Checkout exact new child of Grim + verified F14 models
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify upstream ancestry and EXACT eight-file child scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor 95b05996ec44c1f4745f4eba544cf95903e4a75d HEAD
+          git merge-base --is-ancestor 42c9a32892740af55a40e076e6381cc879181396 HEAD
+          git merge-base --is-ancestor 26d5b7a1de30ad92a595aaf251fc14754cf54f32 HEAD
+          git diff --name-only 95b05996ec44c1f4745f4eba544cf95903e4a75d HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            '.github/workflows/ip-f14-grim-who-observer-pilot-source-20261104.yml' \
+            '.github/workflows/ip-f14-grim-who-observer-native-20261104.yml' \
+            'conf/individualProgression.conf.dist' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'src/IndividualProgression.cpp' \
+            'src/IndividualProgression.h' \
+            'src/IndividualProgressionPlayer.cpp' \
+            'tests/test_ip_f14_grim_player_who_observer_source.py' | sort > /tmp/allowed
+          diff -u /tmp/allowed /tmp/actual
+          git diff --check 95b05996ec44c1f4745f4eba544cf95903e4a75d HEAD
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.F14.ForceVerifiedRandomBotTbcFloorOnLogin = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+      - name: Assert actual observer and WHO source cannot activate without the missing refresh bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_grim_player_who_observer_source.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_ip_f14_verified_rndbot_tbc_floor.py' -v
+      - name: Run four exact original F14 safety models, still unwired
+        shell: bash
+        run: |
+          set -euo pipefail
+          for model in f14_multi_attacker_policy f14_actor_creature_index ip_f14_combat_visibility_policy f14_visibility_refresh_policy; do
+            "${{ matrix.cxx }}" "-std=${{ matrix.std }}" -O2 -DNDEBUG \
+              -Wall -Wextra -Werror -pedantic -I. -Isrc \
+              "tests/$model.cpp" -o "/tmp/f14-$model"
+            "/tmp/f14-$model"
+          done
+          echo 'PASS: original model contracts unchanged'
+      - name: Explicit non-gameplay boundary
+        if: always()
+        run: |
+          echo 'No live map observer concealment, immediate refresh, creature attack/corpse, WHO packet or quest/loot test.'
+          echo 'All F14 visibility flags OFF; no Core visibility-refresh marker; no host/worldserver launch.'

@@ -1,0 +1,75 @@
+name: F14 existing immediate corpse-ready refresh handoff source audit OFF
+on:
+  push:
+    branches: [research/cs01-f14-corpse-ready-immediate-handoff-audit-off-20261106]
+  pull_request:
+    branches: [research/cs01-f14-two-corpse-modes-restore-debt-source-off-20261106]
+permissions:
+  contents: read
+jobs:
+  exact-source-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact review branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail if this child touches runtime source, SQL, client, or active config
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=fe73119a1bdf60e1345d8c022b3760243a61ce3b
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent"
+          git diff --name-only "$parent" HEAD | sort > /tmp/actual
+          printf '%s\n' 'tests/test_ip_f14_corpse_ready_immediate_handoff_source.py' '.github/workflows/ip-f14-corpse-ready-immediate-handoff-source-20261106.yml' 'docs/F14_CORPSE_READY_IMMEDIATE_HANDOFF_2026-11-06.md' 'docs/CUSTOM_MODIFICATIONS_REGISTER.md' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- src conf sql data optional)"
+          grep -Fqx 'IndividualProgression.F14.ExperimentalRndbotPlayerVisibility = 0' conf/individualProgression.conf.dist
+          grep -Fqx 'IndividualProgression.PaidExpansion.Enable = 0' conf/individualProgression.conf.dist
+          ! grep -Rqs 'OnF14ShouldSuppressCreatureForViewer(' src
+      - name: Checkout exact pinned Grim Core code, read only
+        uses: actions/checkout@v4
+        with:
+          repository: Grimfeather/azerothcore-wotlk
+          ref: 0d754d1921261dfd939f91060ebc022eae280f71
+          path: pinned-core
+          sparse-checkout: |
+            src/server/game/Entities/Creature/Creature.cpp
+            src/server/game/Entities/Object/Object.cpp
+            src/server/game/Grids/Notifiers/GridNotifiers.cpp
+            src/server/game/Entities/Player/PlayerUpdates.cpp
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Checkout original #56 attack/corpse hook prototype, read only
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: 6cf528c0f1728ed3ec8fdd11e020f07ec23f3af5
+          path: pinned-attack-hook
+          sparse-checkout: |
+            tests/core_patches/f14_attack_corpse_event_bridge_prototype.patch
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Checkout original #77 post-event immediate refresh prototype, read only
+        uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/mod-individual-progression
+          ref: 6182893d18e0ab2bb1d581900910346c1c0819b2
+          path: pinned-refresh-hook
+          sparse-checkout: |
+            tests/core_patches/f14_event_visibility_refresh_request_prototype.patch
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Assert original exact pinned refs then run fail-drift pre-removal tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C pinned-core rev-parse HEAD)" = 0d754d1921261dfd939f91060ebc022eae280f71
+          test "$(git -C pinned-attack-hook rev-parse HEAD)" = 6cf528c0f1728ed3ec8fdd11e020f07ec23f3af5
+          test "$(git -C pinned-refresh-hook rev-parse HEAD)" = 6182893d18e0ab2bb1d581900910346c1c0819b2
+          F14_PINNED_CORE_ROOT="$PWD/pinned-core" F14_PINNED_ATTACK_PATCH_ROOT="$PWD/pinned-attack-hook" F14_PINNED_REFRESH_PATCH_ROOT="$PWD/pinned-refresh-hook" python3 -B -m unittest discover -s tests -p 'test_ip_f14_corpse_ready_immediate_handoff_source.py' -v
+          echo 'PASS source-only: corpse-ready after-event refresh reaches nearby Player direct CREATE/link through Core VisibleChangesNotifier; this is NOT per-viewer prior-hide/rights or client ACK proof'

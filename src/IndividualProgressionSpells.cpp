@@ -1,8 +1,15 @@
 #include "IndividualProgression.h"
+#include "AchievementMgr.h"
 #include "Spell.h"
 #include "DataMap.h"
 #include "EventProcessor.h"
 #include "ObjectAccessor.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
+#include "WorldPacket.h"
+#include <algorithm>
+#include <array>
+#include "CharmInfo.h"
 
 void IndividualProgression::UpdateRNDbotSpells(Player* player)
 {
@@ -53,6 +60,203 @@ void IndividualProgression::TrainerRNDbotSpellsUnlock(Player const* player, uint
         state = Trainer::SpellState::Available;
 }
 
+// The skill lines with ranks past Artisan: the primary professions, First Aid, Cooking and Fishing.
+static constexpr std::array<uint16, 14> professionSkills =
+{
+    SKILL_FIRST_AID, SKILL_BLACKSMITHING, SKILL_LEATHERWORKING, SKILL_ALCHEMY, SKILL_HERBALISM, SKILL_COOKING, SKILL_MINING,
+    SKILL_TAILORING, SKILL_ENGINEERING, SKILL_ENCHANTING, SKILL_FISHING, SKILL_SKINNING, SKILL_INSCRIPTION, SKILL_JEWELCRAFTING
+};
+
+// The skill and max a profession rank spell gives (Grand Master Skinning 50305 gives 450), or nullptr for any other spell.
+static SpellLearnSkillNode const* GetProfessionRankNode(uint32 spellId)
+{
+    SpellLearnSkillNode const* node = sSpellMgr->GetSpellLearnSkill(spellId);
+    if (!node || std::find(professionSkills.begin(), professionSkills.end(), node->skill) == professionSkills.end())
+        return nullptr;
+
+    return node;
+}
+
+static uint16 GetProfessionRank(uint32 spellId)
+{
+    SpellLearnSkillNode const* node = GetProfessionRankNode(spellId);
+    return node ? node->maxvalue : 0;
+}
+
+// The profession cap of the character's tier: Artisan (300) before PROGRESSION_PRE_TBC and Master (375)
+// before PROGRESSION_TBC_TIER_5, as on 1.12 and 2.4.3. 0 means no cap: Grand Master (450) is the 3.3.5a
+// max anyway, and the option off, a GM account, an excluded account or a player not yet in the world have
+// none. It goes by the account and not by .gm on, or the login cap would undo what a GM set.
+uint16 IndividualProgression::GetProfessionSkillCap(Player* player)
+{
+    // A missing session cannot safely identify excluded/GM accounts. Fail
+    // open (no destructive cap) rather than mutate or crash a headless bot.
+    if (!enabled || !ProfessionTierCap || !player || !player->IsInWorld() ||
+        !player->GetSession() || isExcludedAccount(player) || isGMAccount(player))
+        return 0;
+
+    if (!hasPassedProgression(player, PROGRESSION_PRE_TBC))
+        return 300;
+
+    if (!hasPassedProgression(player, PROGRESSION_TBC_TIER_5))
+        return 375;
+
+    return 0;
+}
+
+// Whether a spell teaches a profession rank above the character's cap. A trainer sells a rank as a spell
+// that teaches it (Grand Master Skinning is bought as 50307, which teaches 50305), so the spells it
+// teaches are looked at as well.
+bool IndividualProgression::IsProfessionRankAboveCap(Player* player, uint32 spellId)
+{
+    // Called for ordinary spell learning and item use: avoid SpellMgr work
+    // when this optional upstream feature is disabled (default).
+    if (!enabled || !ProfessionTierCap || !player || !player->IsInWorld() ||
+        !player->GetSession())
+        return false;
+
+    uint16 rank = GetProfessionRank(spellId);
+    if (SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId))
+        for (SpellEffectInfo const& effect : spellInfo->Effects)
+            if (effect.Effect == SPELL_EFFECT_LEARN_SPELL)
+                rank = std::max(rank, GetProfessionRank(effect.TriggerSpell));
+
+    // Most spells are no rank; the cap reads the character's progression quests.
+    if (!rank)
+        return false;
+
+    uint16 const cap = GetProfessionSkillCap(player);
+    return cap && rank > cap;
+}
+
+// Takes a character's professions down to its tier's cap: the ranks above it are unlearned and the skill
+// is kept up to the cap. removeSpell steps the skill back to the rank below, but with the value a new
+// rank starts at (1), so the value is written back afterwards.
+void IndividualProgression::CapProfessionSkills(Player* player)
+{
+    uint16 const cap = GetProfessionSkillCap(player);
+    if (!cap)
+        return;
+
+    struct CappedSkill
+    {
+        uint16 skill, oldValue, oldMax;
+    };
+
+    std::vector<CappedSkill> cappedSkills;
+    for (uint16 skill : professionSkills)
+        if (player->HasSkill(skill) && player->GetPureMaxSkillValue(skill) > cap)
+            cappedSkills.push_back({ skill, player->GetPureSkillValue(skill), player->GetPureMaxSkillValue(skill) });
+
+    if (cappedSkills.empty())
+        return;
+
+    // Only the ranks of the skills written back below: removeSpell drops the value of any other to 1.
+    std::vector<uint32> ranksAboveCap;
+    for (auto const& [spellId, playerSpell] : player->GetSpellMap())
+    {
+        if (playerSpell->State == PLAYERSPELL_REMOVED)
+            continue;
+
+        SpellLearnSkillNode const* node = GetProfessionRankNode(spellId);
+        if (node && node->maxvalue > cap && std::any_of(cappedSkills.begin(), cappedSkills.end(),
+            [node](CappedSkill const& capped) { return capped.skill == node->skill; }))
+            ranksAboveCap.push_back(spellId);
+    }
+
+    for (uint32 spellId : ranksAboveCap)
+        player->removeSpell(spellId, SPEC_MASK_ALL, false);
+
+    for (CappedSkill const& capped : cappedSkills)
+    {
+        uint16 const skill = capped.skill;
+        uint16 const value = std::min(capped.oldValue, cap);
+        player->SetSkill(skill, cap / 75, value, cap);
+        LOG_INFO("module", "IndividualProgression: {} ({}) profession skill {} capped at {}/{} for their tier, was {}/{}",
+            player->GetName(), player->GetGUID().GetCounter(), skill, value, cap, capped.oldValue, capped.oldMax);
+
+        // Learning a rank left the ones below it inactive, and removeSpell does not wake them. The spellbook
+        // was sent before this hook, so the top rank left is activated and sent, or the profession is gone until relog.
+        uint32 topRankId = 0;
+        PlayerSpell* topRank = nullptr;
+        uint16 topRankMax = 0;
+        for (auto const& [spellId, playerSpell] : player->GetSpellMap())
+        {
+            if (playerSpell->State == PLAYERSPELL_REMOVED)
+                continue;
+
+            SpellLearnSkillNode const* node = GetProfessionRankNode(spellId);
+            if (node && node->skill == skill && node->maxvalue <= cap && node->maxvalue > topRankMax)
+            {
+                topRankId = spellId;
+                topRank = playerSpell;
+                topRankMax = node->maxvalue;
+            }
+        }
+
+        if (topRank && !topRank->Active)
+        {
+            topRank->Active = true;
+            player->SendLearnPacket(topRankId, true);
+        }
+    }
+}
+
+// The achievements that need a profession rank past Artisan, with that rank. The last four of the 450s
+// are meta achievements of the Grand Master ones.
+static constexpr std::array<std::pair<uint32, uint16>, 27> professionRankAchievements =
+{{
+    {124, 375}, {129, 375}, {134, 375}, {733, 375},
+    {125, 450}, {130, 450}, {135, 450}, {734, 450}, {735, 450},
+    {1414, 450}, {1415, 450}, {1416, 450}, {1417, 450}, {1418, 450}, {1419, 450}, {1420, 450},
+    {1421, 450}, {1422, 450}, {1423, 450}, {1424, 450}, {1425, 450}, {1426, 450}, {1427, 450},
+    {730, 450}, {1516, 450}, {1563, 450}, {1784, 450}
+}};
+
+// Takes back the achievements of ranks above the character's cap. This does not depend on the skills: a
+// character can hold one without ever having the rank, through mod-account-achievements. AchievementMgr
+// can only reset everything, so the entry is erased from its map directly.
+void IndividualProgression::CapProfessionAchievements(Player* player)
+{
+    uint16 const cap = GetProfessionSkillCap(player);
+    if (!cap)
+        return;
+
+    AchievementMgr* achievementMgr = player->GetAchievementMgr();
+    ObjectGuid::LowType const guid = player->GetGUID().GetCounter();
+    for (auto const& [achievementId, rank] : professionRankAchievements)
+    {
+        if (rank <= cap || !player->HasAchieved(achievementId))
+            continue;
+
+        if (AchievementCriteriaEntryList const* criteria = sAchievementMgr->GetAchievementCriteriaByAchievement(achievementId))
+        {
+            for (AchievementCriteriaEntry const* criterion : *criteria)
+            {
+                achievementMgr->RemoveCriteriaProgress(criterion);
+                CharacterDatabase.Execute("DELETE FROM `character_achievement_progress` WHERE `guid` = {} AND `criteria` = {}", guid, criterion->ID);
+            }
+        }
+
+        const_cast<CompletedAchievementMap&>(achievementMgr->GetCompletedAchievements()).erase(achievementId);
+        RemovePlayerAchievement(guid, achievementId);
+
+        // Salty (1516) and Chef (1563, 1784) come with the achievement.
+        if (AchievementReward const* reward = sAchievementMgr->GetAchievementReward(sAchievementStore.LookupEntry(achievementId)))
+            for (uint32 titleId : reward->titleId)
+                if (CharTitlesEntry const* title = sCharTitlesStore.LookupEntry(titleId))
+                    if (player->HasTitle(title))
+                        player->SetTitle(title, true);
+
+        WorldPacket data(SMSG_ACHIEVEMENT_DELETED, 4);
+        data << uint32(achievementId);
+        player->SendDirectMessage(&data);
+
+        LOG_INFO("module", "IndividualProgression: {} ({}) lost achievement {}, it needs profession rank {} and their tier stops at {}",
+            player->GetName(), guid, achievementId, rank, cap);
+    }
+}
+
 void IndividualProgression::checkHunterPetSpells(Player* player)
 {
     if (!player || !player->IsInWorld() || !VanillaHunterPets)
@@ -68,7 +272,8 @@ void IndividualProgression::checkHunterPetSpells(Player* player)
         return;
 
     Pet* pet = player->GetPet();
-    if (!pet)
+    // The IP rank check must not race with asynchronous pet spell loading.
+    if (!pet || !pet->IsInWorld() || pet->isBeingLoaded())
         return;
 
     Creature* creature = pet->ToCreature();
@@ -100,15 +305,156 @@ void IndividualProgression::checkHunterPetSpells(Player* player)
                 }
             }
 
+            // Only the CURRENT pet's coherent native ON/OFF state may be
+            // transferred to a legal replacement rank of the same chain.
+            // This is not A02 saved-setting restoration or a human-choice receipt.
+            bool preserveAutocast = false;
+            uint32 oldId = 0;
+            uint8 oldSlot = MAX_UNIT_ACTION_BAR_INDEX;
+            ActiveStates oldActive = ACT_DISABLED;
+            SpellInfo const* oldInfo = nullptr;
+            SpellInfo const* keepInfo = nullptr;
+            CharmInfo* charm = pet->GetCharmInfo();
+
+            if (keepId && !pet->HasSpell(keepId) && charm)
+            {
+                keepInfo = sSpellMgr->GetSpellInfo(keepId);
+                if (keepInfo && keepInfo->IsAutocastable())
+                {
+                    uint32 existingRankCount = 0;
+                    for (uint32 id : wipeIds)
+                    {
+                        if (id != keepId && pet->HasSpell(id))
+                        {
+                            ++existingRankCount;
+                            oldId = id;
+                        }
+                    }
+
+                    if (existingRankCount == 1)
+                    {
+                        oldInfo = sSpellMgr->GetSpellInfo(oldId);
+                        auto const oldItr = pet->m_spells.find(oldId);
+                        if (oldInfo && oldInfo->IsAutocastable() &&
+                            keepInfo->IsDifferentRankOf(oldInfo) &&
+                            oldItr != pet->m_spells.end() &&
+                            oldItr->second.state != PETSPELL_REMOVED &&
+                            (oldItr->second.active == ACT_ENABLED ||
+                             oldItr->second.active == ACT_DISABLED))
+                        {
+                            // A stray rank outside IP's wipe list, or a
+                            // previously stranded rank in the autocast list,
+                            // makes the native ON/OFF state ambiguous.
+                            bool ambiguousChain = false;
+                            for (auto const& [spellId, state] : pet->m_spells)
+                            {
+                                if (spellId == oldId || state.state == PETSPELL_REMOVED)
+                                    continue;
+
+                                SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId);
+                                if (info && info->IsDifferentRankOf(oldInfo))
+                                {
+                                    ambiguousChain = true;
+                                    break;
+                                }
+                            }
+
+                            uint32 listedCount = 0;
+                            for (uint32 spellId : pet->m_autospells)
+                            {
+                                if (spellId == oldId)
+                                {
+                                    ++listedCount;
+                                    continue;
+                                }
+
+                                SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId);
+                                if (info && info->IsDifferentRankOf(oldInfo))
+                                    ambiguousChain = true;
+                            }
+
+                            oldActive = oldItr->second.active;
+
+                            // Spell map, autocast list and bar must agree.
+                            // An observed OFF may be the native default.
+                            if (!ambiguousChain &&
+                                listedCount == (oldActive == ACT_ENABLED ? 1u : 0u))
+                            {
+                                uint32 chainSlotCount = 0;
+                                for (uint8 i = 0; i < MAX_UNIT_ACTION_BAR_INDEX; ++i)
+                                {
+                                    auto const* bar = charm->GetActionBarEntry(i);
+                                    if (!bar || !bar->IsActionBarForSpell() || !bar->GetAction())
+                                        continue;
+
+                                    SpellInfo const* barInfo = sSpellMgr->GetSpellInfo(bar->GetAction());
+                                    if (bar->GetAction() == oldId ||
+                                        (barInfo && barInfo->IsDifferentRankOf(oldInfo)))
+                                    {
+                                        ++chainSlotCount;
+                                        if (bar->GetAction() == oldId && bar->GetType() == oldActive)
+                                            oldSlot = i;
+                                    }
+                                }
+
+                                preserveAutocast = chainSlotCount == 1 &&
+                                    oldSlot != MAX_UNIT_ACTION_BAR_INDEX;
+                            }
+                        }
+                    }
+                }
+            }
+
             for (uint32 id : wipeIds)
             {
-                if (id != keepId && pet->HasSpell(id))
-                    pet->unlearnSpell(id, false, true);
+                if (id == keepId || !pet->HasSpell(id))
+                    continue;
+
+                bool const replacingOldRank = preserveAutocast && id == oldId;
+                if (replacingOldRank && oldActive == ACT_ENABLED)
+                    pet->ToggleAutocast(oldInfo, false); // Avoid stale old autocast ID.
+
+                // Keep the validated old bar entry for the core's native
+                // same-chain replacement rather than deleting its slot.
+                pet->unlearnSpell(id, false, !replacingOldRank);
             }
 
             if (keepId && !pet->HasSpell(keepId))
-                pet->learnSpell(keepId);
+            {
+                bool const learned = pet->learnSpell(keepId);
+                if (!preserveAutocast)
+                    return;
 
+                if (!learned)
+                {
+                    // Never leave an unlearned old spell on the pet bar.
+                    charm->RemoveSpellFromActionBar(oldId);
+                    player->PetSpellInitialize();
+                    return;
+                }
+
+                // Do not send an old pet's spell bar to a newly selected pet.
+                if (player->GetPet() != pet || pet->isBeingLoaded())
+                    return;
+
+                auto const* bar = charm->GetActionBarEntry(oldSlot);
+                if (!bar || !bar->IsActionBarForSpell() || bar->GetAction() != keepId)
+                {
+                    // The native bar replacement did not validate. Clear a
+                    // possible ghost old-rank slot and leave the new spell OFF.
+                    if (bar && bar->GetAction() == oldId)
+                        charm->RemoveSpellFromActionBar(oldId);
+                    charm->SetSpellAutocast(keepInfo, false);
+                    player->PetSpellInitialize();
+                    return;
+                }
+
+                bool const enabled = oldActive == ACT_ENABLED;
+                pet->ToggleAutocast(keepInfo, enabled);
+                charm->SetSpellAutocast(keepInfo, enabled);
+                // learnSpell may have sent a packet before final state sync.
+                player->PetSpellInitialize();
+            }
         };
 
     if (familyName == "Wolf")
@@ -1267,18 +1613,54 @@ public:
     }
 };
 
-// Per-pet flag: a DelayedPetSpellCheck is already queued on this pet.
-// Lives in the Pet's CustomData, so it dies with the Pet object and never leaks.
+// Per-pet state: a spell check is queued or deferred until this pet's
+// asynchronous spell load finishes. It dies with the original Pet object.
+static std::string const PENDING_CHECK_KEY = "ipp_PendingPetSpellCheck";
+
 class PendingPetSpellCheck : public DataMap::Base
 {
 public:
     bool pending = false;
+    bool afterLoad = false;
+};
+
+// The delayed event stops retrying after its existing time limit. If spell
+// loading is unusually slow, this Hunter-only hook completes the SAME pet's
+// pending check once the core reports that loading has finished. It does not
+// poll the database, schedule infinite events or copy another pet's settings.
+class IndividualPlayerProgression_HunterPetLoadRecoveryScript : public PlayerScript
+{
+public:
+    IndividualPlayerProgression_HunterPetLoadRecoveryScript()
+        : PlayerScript("IndividualProgression_HunterPetLoadRecoveryScript") { }
+
+    void OnPlayerAfterUpdate(Player* player, uint32 /*diff*/) override
+    {
+        if (!player || !player->IsInWorld() || player->getClass() != CLASS_HUNTER)
+            return;
+
+        Pet* pet = player->GetPet();
+        if (!pet || !pet->IsInWorld() || pet->isBeingLoaded())
+            return;
+
+        // Do not allocate CustomData on every normal Hunter update.
+        PendingPetSpellCheck* pending = pet->CustomData.Get<PendingPetSpellCheck>(PENDING_CHECK_KEY);
+        if (!pending || !pending->pending || !pending->afterLoad)
+            return;
+
+        // Clear first: a second update cannot replay an already completed
+        // reconciliation, and an old Pet's flag never applies to a new Pet.
+        pending->pending = false;
+        pending->afterLoad = false;
+
+        if (sIndividualProgression->enabled && !sIndividualProgression->isBotAccount(player))
+            sIndividualProgression->checkHunterPetSpells(player);
+    }
 };
 
 class IndividualPlayerProgression_PetScript : public PetScript
 {
 private:
-    static constexpr char const* PENDING_CHECK_KEY = "ipp_PendingPetSpellCheck";
 
     static void ScheduleDelayedSpellCheck(Pet* pet)
     {
@@ -1302,7 +1684,7 @@ private:
         pending->pending = true;
 
         pet->m_Events.AddEvent(
-            new DelayedPetSpellCheck(owner->GetGUID()),
+            new DelayedPetSpellCheck(owner->GetGUID(), pet->GetGUID()),
             pet->m_Events.CalculateTime(200));
     }
 
@@ -1332,8 +1714,8 @@ public:
     class DelayedPetSpellCheck : public BasicEvent
     {
     public:
-        explicit DelayedPetSpellCheck(ObjectGuid ownerGuid, uint8 attempts = 0)
-            : _ownerGuid(ownerGuid), _attempts(attempts) {
+        explicit DelayedPetSpellCheck(ObjectGuid ownerGuid, ObjectGuid petGuid, uint8 attempts = 0)
+            : _ownerGuid(ownerGuid), _petGuid(petGuid), _attempts(attempts) {
         }
 
         bool Execute(uint64 /*e_time*/, uint32 /*p_time*/) override
@@ -1345,20 +1727,35 @@ public:
             if (!pet)
                 return true;
 
+            // A Hunter's queued event must never act on a different pet.
+            if (player->getClass() == CLASS_HUNTER && pet->GetGUID() != _petGuid)
+                return true;
+
             // If the LoadPetFromDB async callback hasn't completed yet, poll again.
             // Cap attempts so a stuck loading flag can't recurse forever.
             if (pet->isBeingLoaded() && _attempts < 10)
             {
                 pet->m_Events.AddEvent(
-                    new DelayedPetSpellCheck(_ownerGuid, _attempts + 1),
+                    new DelayedPetSpellCheck(_ownerGuid, _petGuid, _attempts + 1),
                     pet->m_Events.CalculateTime(200));
                 return true;
             }
 
-            // The check runs now - allow the next pet load to queue a fresh one.
-            pet->CustomData.GetDefault<PendingPetSpellCheck>(PENDING_CHECK_KEY)->pending = false;
+            PendingPetSpellCheck* pending = pet->CustomData.GetDefault<PendingPetSpellCheck>(PENDING_CHECK_KEY);
+            if (player->getClass() == CLASS_HUNTER && pet->isBeingLoaded())
+            {
+                // The normal bounded retry window ended during DB loading.
+                // The Hunter-only player-update hook will reconcile this
+                // original Pet once loading finishes. Do not unlearn early.
+                pending->afterLoad = true;
+                return true;
+            }
 
-            if (player->getClass() == CLASS_HUNTER)
+            // The check runs now - allow the next pet load to queue a fresh one.
+            pending->pending = false;
+            pending->afterLoad = false;
+
+            if (player->getClass() == CLASS_HUNTER && sIndividualProgression->enabled)
                 sIndividualProgression->checkHunterPetSpells(player);
             if (player->getClass() == CLASS_WARLOCK)
                 sIndividualProgression->checkWarlockPetSpells(player);
@@ -1368,6 +1765,7 @@ public:
 
     private:
         ObjectGuid _ownerGuid;
+        ObjectGuid _petGuid;
         uint8      _attempts;
     };
 };
@@ -1512,6 +1910,7 @@ public:
 void AddSC_mod_individual_progression_spells()
 {
     new IndividualPlayerProgressionSpells();
+    new IndividualPlayerProgression_HunterPetLoadRecoveryScript();
     new IndividualPlayerProgression_PetScript();
     new IndividualPlayerProgression_UnitScript();
 }

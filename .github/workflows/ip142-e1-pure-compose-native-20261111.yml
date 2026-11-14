@@ -1,0 +1,79 @@
+name: IP145 N1 same-epoch rights and era replay fence (OFF)
+on:
+  push:
+    branches:
+      - fix/cs01-ip145-e1-rights-era-pass-tombstone-20261112
+  pull_request:
+    branches:
+      - integrate/cs01-ip142-e1-pure-correlation-off-20261111
+permissions:
+  contents: read
+jobs:
+  pure-e1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+        std: [c++17, c++20]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact IP142 six-path source union, no existing code/SQL modifications
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=f259c8593f7a8ac5521bee343c40d5a2a35fd76b
+          git merge-base --is-ancestor "$parent" HEAD
+          git diff --check "$parent" HEAD
+          git diff --name-only "$parent" HEAD | sort >/tmp/actual
+          printf '%s\n' \
+            '.github/workflows/ip142-e1-pure-compose-native-20261111.yml' \
+            'docs/CUSTOM_MODIFICATIONS_REGISTER.md' \
+            'docs/F14_SEND_ATTEMPT_CORRELATION_2026-11-08.md' \
+            'src/IndividualProgressionF14SendAttemptCorrelation.h' \
+            'tests/f14_send_attempt_correlation.cpp' \
+            'tests/test_ip142_e1_pure_composition_source.py' | sort >/tmp/expected
+          diff -u /tmp/expected /tmp/actual
+          test -z "$(git diff --name-only "$parent" HEAD -- conf sql data modules)"
+      - name: Pure model + exact unchanged IP142 protocol/cache-only source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s tests -p test_ip142_e1_pure_composition_source.py -v
+      - name: Reproduce executable old-RED rights/era replay with exact parent header
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=65d0110ec7b34a6d284833e235cb0a98f2e50f55
+          mkdir -p /tmp/ip145-old
+          git show "$parent:src/IndividualProgressionF14SendAttemptCorrelation.h" > /tmp/ip145-old/IndividualProgressionF14SendAttemptCorrelation.h
+          ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 -I/tmp/ip145-old -Isrc tests/f14_send_attempt_correlation.cpp -o /tmp/ip145-old-test
+          set +e
+          /tmp/ip145-old-test > /tmp/ip145-old-result
+          status=$?
+          set -e
+          test "$status" = 1
+          grep -Fq 'closed.Nominate(kViewer, kA, kInc, Out::Create, 70, Facts(kViewer, kA, kInc, true)) == C::Result::TokenReorderedOrReused' /tmp/ip145-old-result
+          grep -Fq '!closed.Correlate(Send(kViewer, kA, Out::Create, 70)).Matched()' /tmp/ip145-old-result
+          echo 'PASS old exact header compiled and reproduced stale replay; new full suite must now pass'
+      - name: Compile and run E1, original protocol and adapter pure C++
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mode in normal ndebug; do
+            flags=()
+            if [[ "$mode" == ndebug ]]; then flags=(-DNDEBUG); fi
+            for test in f14_send_attempt_correlation f14_viewer_restore_protocol f14_guid_send_attempt_evidence; do
+              ${{ matrix.cxx }} -std=${{ matrix.std }} -Wall -Wextra -Werror -pedantic -O2 "${flags[@]}" \
+                -Isrc "tests/$test.cpp" -o "/tmp/$test"
+              "/tmp/$test"
+            done
+          done
+      - name: NO runtime E1, client receipt or server release
+        if: always()
+        run: echo 'PURE E1 only. No IP listener, real authenticated epoch, L1 handoff, R2 debt clearance, Worldserver or gameplay.'
