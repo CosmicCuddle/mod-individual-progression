@@ -59,6 +59,19 @@ The purchase never writes quest status, so the quest dirty-list asymmetry from C
 - **Never commissioned or overwritten:** malformed, legacy, wrong-length, non-canonical, unknown-version and inconsistent rows. Core also keeps such a row out of every save.
 - **Residual risk (owner gate):** after a very fast relog, the login read could run before the previous logout save commits. Commissioning would then stage an empty receipt over a just-made purchase. The window is the async commit latency. Owner approval and a DB test are needed before enabling the gate.
 
+### Read-only receipt audit (before any commissioning decision)
+- **`tools/ip_paid_receipt_audit.sql`:** a single `SELECT` with no DDL or DML. Run it with `mysql -B --skip-column-names` against a **backup or replica** of the characters DB.
+  - It lists every character with `row_present`, `HEX(data)` (exact bytes, so trailing spaces survive) and its highest rewarded IP marker.
+- **`tools/ip_paid_receipt_audit.py <tsv> [--json report.json]`:** classifies each row offline, with no DB connection, exactly as the server's strict loader would:
+  - **absent:** a commissioning candidate;
+  - **valid:** an empty, paid or grandfathered receipt;
+  - **malformed, wrong slot count, unknown version or inconsistent:** needs staff repair, and is never commissioned.
+  - It also flags paid flags that are ignored below stage 7.
+- **Parity:** the Python port of `DecodeRaw` is checked against the **real C++ header** by `tests/test_ip_paid_receipt_audit_tool.py`, a differential test over about 30,000 generated and edge-case strings covering all six statuses.
+  - The same file covers fixtures, rejection of bad input, a read-only contract for the SQL, and a check that the tool never connects to a database.
+  - Mutations A1–A7 are all caught.
+- **Out of scope:** account names are in the auth DB, so bot and excluded accounts are listed by account id. Filter them with the configured regexes if needed.
+
 ## B3: account bypass
 - The purchase path is per-character: `CanPurchaseExpansion`, `PurchaseExpansion`, the callback, the entitlement and effective-stage APIs, and `GetPaidPurchaseState` read no account data. Contracts and a model test now pin this.
 - `GetAccountEffectiveProgression` is unchanged. It is used only by the established upstream **Blood Elf/Draenei/Death Knight creation unlock** and the **TBC-race starting-zone teleport**. It never opens an era for an existing character.

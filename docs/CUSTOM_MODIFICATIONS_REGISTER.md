@@ -1337,3 +1337,4 @@ Focused native tests require every completeness family independently, exercise t
 - **Status:** NOT MERGED, NOT DEPLOYED, OFF.
 - **Release gates:** a DB failure test; CS v2 consumer; owner commissioning decision; backup/rollback.
 - **Rollback:** keep the options at 0, or revert.
+- **Receipt audit tool (14 Nov 2026):** `tools/ip_paid_receipt_audit.sql` is a single read-only `SELECT`. `tools/ip_paid_receipt_audit.py` is an offline classifier at C++ `DecodeRaw` parity (differential test). Run it against a backup or replica only. It's a prerequisite for the commissioning decision and changes no runtime.
