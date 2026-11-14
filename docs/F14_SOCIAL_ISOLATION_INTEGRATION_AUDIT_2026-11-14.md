@@ -79,7 +79,6 @@ Each row lists, in order: the initiator, the target, the thread, the Core entry,
 | `BgVanillaRoster` | `OnBattlegroundAddPlayer` (world, ON) | port check | `BgLock` | leave / destroy (regardless of the option) | empty | missed humans are covered by (d) | none |
 | `BgQueuedHumans` | BG queue join (world, ON) | (b) bot join | `BgLock` | live re-check plus prune; logout; BG add | empty | re-checked live | none |
 | `ConfirmedRestrictedBots` | logout (world, ON, verified R) | mail (world) | `ConfirmedLock` | that GUID's next login; **character create or delete** (F-3, also OFF) | empty | over-blocks mail only for that GUID, until create/delete/login | none (cluster GUID reuse is no longer a dependency) |
-| Guild join queue (`PendingReplies<256>` of guild id + joiner) | `GuildScript::OnAddMember` (any thread, option ON) | world update `EnforcePendingGuildJoins` | `GuildJoinsLock` | drained every tick (cleared, no action, when OFF) | empty | everything is looked up again; a gone guild or joiner is skipped | none |
 | `WorldThreadMarker` | `WorldScript::OnUpdate` | all hooks | atomics | — | unset until the first tick (until then everything is allowed) | — | none |
 | `thread_local OwnedMapRecord` | `OnPlayerBeforeUpdate` | same thread | per thread | tick expiry | — | an expired record ⇒ no scope ⇒ allow | none |
 | Reply text | config load/reload | reply send (world) | `_f14SocialIsolationReplyLock` | reload | config | — | none |
@@ -98,7 +97,6 @@ Each row lists, in order: the initiator, the target, the thread, the Core entry,
 **Ungated, and cleanup only:**
 - login `Forget`; character create/delete `Forget` (F-3);
 - logout erase; group disband erase (F-2);
-- draining the guild join queue (it does nothing when OFF);
 - BG leave/destroy removal;
 - the world-tick marker;
 - draining replies already queued.
@@ -258,13 +256,11 @@ So a party that changes while queued always leaves the queue. To requeue it must
 - **Population:** RandomBots only (`RandomBotGuildCount` 20, `RandomBotGuildSizeMax` 15 by default; skipped when `DeleteRandomBotGuilds`).
 - **Could a human end up there?** Only if a human joined that bot guild earlier, by invite from a member. With the guild patch, an invite between a restricted pair is refused. An invite from a non-restricted member (another human or a non-BE/Draenei bot) is allowed.
 - **Effect:** a later direct fill could put a verified Blood Elf/Draenei RandomBot into a guild that already holds a still-Vanilla human. That shares only guild chat and roster. No whisper, trade, group, duel or mail rule is bypassed, because those are decided per pair.
-- **Owner decision (14 Nov 2026):** a restricted RandomBot must not stay in a guild with a still-Vanilla human. When such a human joins, the restricted bots leave (a bot Guild Master too). A restricted bot added to a guild holding an online still-Vanilla human leaves.
-- **Implemented:** `F14SocialIsolationGuildMembershipScript` (`GUILDHOOK_ON_ADD_MEMBER`) queues `(guild id, joiner GUID)` in a bounded queue (256) from any thread. The world update (`EnforcePendingGuildJoins`) looks everything up again and removes through `Guild::DeleteMember(guid, false, true, true)` plus `RemovePlayerGuildEventsAndSignups`, the same calls as Core's `.guild uninvite`.
-- **Residuals:** an offline still-Vanilla human never triggers a removal (unknown never restricts). The Playerbots guild manager may assign a bot to the same guild again at a later randomization; each such add ends in removal (bounded churn). A PB-side assignment filter would be a separate PB-lane item.
+- **Classification:** the owner-approved surface is the guild **invite**. Guild **membership/chat** isn't an approved surface. **No implementation without an explicit owner decision.**
 
 ## Findings needing a decision
 
 - **F-1 (Playerbots):** **closed at PB #21 `c5b9d6c3`+** (preflight). It was an ordinary expansion-grouping admission gap, not social isolation (CS01 6876278508).
 - **F-2 (IP):** **implemented** (section 5).
 - **F-3 (IP):** **implemented** (section 6).
-- **F-4 (guild membership):** **owner-decided and implemented** in IP (section 13).
+- **F-4 (Playerbots guild fill):** classification only (section 13); an owner decision is needed only if guild membership/chat should be isolated.

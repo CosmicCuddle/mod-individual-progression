@@ -1232,103 +1232,6 @@ namespace
     }
 }
 
-namespace
-{
-    // Guild membership (owner decision 14 Nov 2026): the decision rule, the
-    // per-member rule, and the drain's end state over small guilds.
-    void TestGuildMembership()
-    {
-        using A = P::GuildJoinAction;
-        for (int o = 0; o < 2; ++o)
-            for (int h = 0; h < 2; ++h)
-                for (int b = 0; b < 2; ++b)
-                    for (int m = 0; m < 2; ++m)
-                    {
-                        A const a = P::DecideGuildJoin(o, h, b, m);
-                        A const want = !o ? A::None : h ? A::RemoveRestrictedMembers
-                            : (b && m) ? A::RemoveJoiner : A::None;
-                        CHECK(a == want);
-                    }
-        // Per member: live facts while online; the confirmed set while offline.
-        for (int on = 0; on < 2; ++on)
-            for (int r = 0; r < 2; ++r)
-                for (int c = 0; c < 2; ++c)
-                    CHECK(P::GuildMemberRestricted(on, r, c) == (on ? r != 0 : c != 0));
-
-        // Kinds of member: 0 Vanilla human online, 1 TBC human online,
-        // 2 restricted bot online, 3 restricted bot offline+confirmed,
-        // 4 restricted bot offline unknown, 5 Altbot (headless) online,
-        // 6 Vanilla human offline, 7 ordinary bot online.
-        bool const vanilla = P::HumanStillVanilla(VanillaHuman(3));
-        bool const tbcH = P::HumanStillVanilla(VanillaHuman(8));
-        P::Human altbot = VanillaHuman(3);
-        altbot.nonHeadlessSession = false;
-        CHECK(vanilla && !tbcH && !P::HumanStillVanilla(altbot));
-        bool const rBot = P::BotIsRestrictedRandomBot(VerifiedBot());
-        CHECK(rBot && !P::BotIsRestrictedRandomBot(P::Bot{}));
-        struct Kind { bool online, vanillaHuman, restrictedOnline, confirmed; };
-        Kind const kinds[] = {
-            {true, true, false, false}, {true, false, false, false}, {true, false, true, false},
-            {false, false, false, true}, {false, false, false, false}, {true, false, false, false},
-            {false, false, false, false}, {true, false, false, false}};
-        // Exhaustive: joiner kind x every guild of up to 8 other members.
-        for (int j = 0; j < 8; ++j)
-            for (unsigned mask = 0; mask < 256; ++mask)
-            {
-                Kind const joiner = kinds[j];
-                if (!joiner.online)
-                    continue; // an offline joiner is never evaluated
-                bool anyHuman = false;
-                std::vector<int> restricted;
-                for (int k = 0; k < 8; ++k)
-                    if (mask & (1u << k))
-                    {
-                        anyHuman = anyHuman || (kinds[k].online && kinds[k].vanillaHuman);
-                        if (P::GuildMemberRestricted(kinds[k].online, kinds[k].restrictedOnline, kinds[k].confirmed))
-                            restricted.push_back(k);
-                    }
-                A const a = P::DecideGuildJoin(true, joiner.vanillaHuman, joiner.restrictedOnline, anyHuman);
-                // End state: no restricted bot shares the guild with the
-                // joining Vanilla human, and a restricted joiner never stays
-                // beside an online Vanilla human.
-                bool joinerStays = true;
-                std::size_t removed = 0;
-                if (a == A::RemoveRestrictedMembers)
-                    removed = restricted.size();
-                if (a == A::RemoveJoiner)
-                    joinerStays = false;
-                if (joiner.vanillaHuman)
-                {
-                    CHECK(a == A::RemoveRestrictedMembers);
-                    CHECK(removed == restricted.size());
-                    // Kind 4 (offline, never confirmed) is unknown: kept.
-                    bool const unknownKept = (mask & (1u << 4)) == 0 ||
-                        std::find(restricted.begin(), restricted.end(), 4) == restricted.end();
-                    CHECK(unknownKept);
-                }
-                else if (joiner.restrictedOnline)
-                {
-                    CHECK(joinerStays == !anyHuman);
-                    CHECK(removed == 0);
-                }
-                else
-                {
-                    CHECK(a == A::None); // TBC humans, Altbots, ordinary bots: stock
-                }
-                // OFF: nothing, ever.
-                CHECK(P::DecideGuildJoin(false, joiner.vanillaHuman, joiner.restrictedOnline, anyHuman) == A::None);
-            }
-        // The join queue: bounded, FIFO, values only.
-        P::PendingReplies<2> joins;
-        CHECK(!joins.Push(0, 5) && !joins.Push(5, 0) && joins.Size() == 0); // no id: ignored
-        CHECK(joins.Push(7, 100) && joins.Push(7, 101) && !joins.Push(8, 102));
-        CHECK(joins.Dropped() == 1);
-        std::vector<std::uint64_t> order;
-        joins.Drain([&](std::uint64_t g, std::uint64_t p) { order.push_back(g * 1000 + p); });
-        CHECK(order.size() == 2 && order[0] == 7100 && order[1] == 7101 && joins.Size() == 0);
-    }
-}
-
 int main()
 {
     TestDefaultsNeverRestrict();
@@ -1356,7 +1259,6 @@ int main()
     TestPendingReplies();
     TestRoleCheckMemberRefresh();
     TestCharacterCreateDeleteCleanup();
-    TestGuildMembership();
     std::printf("F14 SOCIAL ISOLATION POLICY %u/%u passed; NO WORLD HIDING\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }

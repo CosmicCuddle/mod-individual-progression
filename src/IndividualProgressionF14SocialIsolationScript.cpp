@@ -24,16 +24,12 @@
 #include "Battleground.h"
 #include "BattlegroundMgr.h"
 #include "BattlegroundQueue.h"
-#include "CalendarMgr.h"
 #include "Chat.h"
 #include "DBCStores.h"
 #include "GameTime.h"
 #include "GlobalScript.h"
 #include "Group.h"
 #include "GroupScript.h"
-#include "Guild.h"
-#include "GuildMgr.h"
-#include "GuildScript.h"
 #include "LFG.h"
 #include "LFGMgr.h"
 #include "ObjectAccessor.h"
@@ -197,19 +193,6 @@ namespace
     }
 
     // Dungeon Finder facts captured at queue join, by GUID (see policy).
-    // Guild joins wait here (values only) for the world update.
-    std::mutex& GuildJoinsLock()
-    {
-        static std::mutex lock;
-        return lock;
-    }
-
-    Policy::PendingReplies<256>& GuildJoins()
-    {
-        static Policy::PendingReplies<256> joins; // (guild id, joiner GUID)
-        return joins;
-    }
-
     std::mutex& QueueFactsLock()
     {
         static std::mutex lock;
@@ -944,99 +927,6 @@ namespace
     };
 #endif
 
-    // Guild membership (owner decision 14 Nov 2026). World thread only:
-    // everything is looked up again here; removal goes through Core's own
-    // Guild::DeleteMember, exactly like the `.guild uninvite` command.
-    void RemoveFromGuild(uint32 guildId, ObjectGuid guid)
-    {
-        Guild* guild = sGuildMgr->GetGuildById(guildId);
-        if (!guild || !guild->GetMember(guid))
-            return;
-        guild->DeleteMember(guid, false, true, true);
-        sCalendarMgr->RemovePlayerGuildEventsAndSignups(guid, guildId);
-    }
-
-    void EnforceGuildJoin(uint32 guildId, ObjectGuid joinerGuid)
-    {
-        Guild* guild = sGuildMgr->GetGuildById(guildId);
-        Player* joiner = ObjectAccessor::FindPlayer(joinerGuid);
-        if (!guild || !joiner || joiner->GetGuildId() != guildId)
-            return;
-        bool const joinerHuman = Policy::HumanStillVanilla(ReadHuman(joiner));
-        bool const joinerBot = Policy::BotIsRestrictedRandomBot(ReadBot(joiner));
-        if (!joinerHuman && !joinerBot)
-            return;
-        bool anyHuman = false;
-        std::vector<ObjectGuid> restricted;
-        std::vector<ObjectGuid> offline;
-        for (auto const& [low, member] : guild->GetUnorderedMembers())
-        {
-            ObjectGuid const guid = member.GetGUID();
-            if (guid == joinerGuid)
-                continue;
-            Player const* online = ObjectAccessor::FindPlayer(guid);
-            if (!online)
-            {
-                offline.push_back(guid);
-                continue;
-            }
-            anyHuman = anyHuman || Policy::HumanStillVanilla(ReadHuman(online));
-            if (Policy::GuildMemberRestricted(true, Policy::BotIsRestrictedRandomBot(ReadBot(online)), false))
-                restricted.push_back(guid);
-        }
-        {
-            std::lock_guard<std::mutex> lock(ConfirmedLock());
-            for (ObjectGuid const& guid : offline)
-                if (Policy::GuildMemberRestricted(false, false, Confirmed().Contains(guid.GetRawValue())))
-                    restricted.push_back(guid);
-        }
-        switch (Policy::DecideGuildJoin(true, joinerHuman, joinerBot, anyHuman))
-        {
-            case Policy::GuildJoinAction::RemoveRestrictedMembers:
-                for (ObjectGuid const& guid : restricted)
-                    RemoveFromGuild(guildId, guid);
-                break;
-            case Policy::GuildJoinAction::RemoveJoiner:
-                RemoveFromGuild(guildId, joinerGuid);
-                break;
-            case Policy::GuildJoinAction::None:
-                break;
-        }
-    }
-
-    void EnforcePendingGuildJoins()
-    {
-        std::vector<std::pair<uint64, uint64>> joins;
-        {
-            std::lock_guard<std::mutex> lock(GuildJoinsLock());
-            GuildJoins().Drain([&joins](std::uint64_t guildId, std::uint64_t joiner)
-            {
-                joins.emplace_back(guildId, joiner);
-            });
-        }
-        if (!OptionOn())
-            return;
-        for (auto const& [guildId, joiner] : joins)
-            EnforceGuildJoin(static_cast<uint32>(guildId), ObjectGuid(joiner));
-    }
-
-    // Any thread (Playerbots may add a bot from its factory): only queue
-    // the values; the world update decides and removes.
-    class F14SocialIsolationGuildMembershipScript final : public GuildScript
-    {
-    public:
-        F14SocialIsolationGuildMembershipScript() : GuildScript("IndividualProgression_F14SocialIsolationGuildMembership",
-            {GUILDHOOK_ON_ADD_MEMBER}) { }
-
-        void OnAddMember(Guild* guild, Player* player, uint8& /*plRank*/) override
-        {
-            if (!OptionOn() || !guild || !player)
-                return;
-            std::lock_guard<std::mutex> lock(GuildJoinsLock());
-            GuildJoins().Push(guild->GetId(), player->GetGUID().GetRawValue());
-        }
-    };
-
     // T1 only: remembers the world thread and counts world ticks. Reads nothing.
     class F14SocialIsolationWorldThreadScript final : public WorldScript
     {
@@ -1048,7 +938,6 @@ namespace
         {
             WorldThread().Mark();
             SendPendingReplies();
-            EnforcePendingGuildJoins();
         }
     };
 
@@ -1079,7 +968,6 @@ void AddSC_mod_individual_progression_f14_social_isolation()
     new F14SocialIsolationWorldThreadScript();
     new F14SocialIsolationLfgScript();
     new F14SocialIsolationGroupScript();
-    new F14SocialIsolationGuildMembershipScript();
     new F14SocialIsolationBattlegroundScript();
     new F14SocialIsolationSpellScript();
 #if defined(COSMIC_F14_GUILD_INVITE_HOOK_VERSION) && COSMIC_F14_GUILD_INVITE_HOOK_VERSION >= 1
