@@ -48,6 +48,16 @@ bool PlayerbotAI::SayToGuild(std::string const& msg)
   - the source contract shows no direct `BroadcastToGuild` call in `src/Ai`, `src/Util` or `src/Bot`;
   - the queued packet layout is `type, lang, cstring`.
 
+### Status: PB #22 `d4451103` (peer-reviewed PASS at source level)
+- `SayToGuild` queues a value `GuildChatOperation`, which the world-thread processor runs.
+- The epoch, guild, membership and rank right are re-checked; `OnPlayerCanUseChat(…, Guild*)` runs before `BroadcastToGuild`.
+- **P-2 is closed by #22** (native/gameplay UNKNOWN).
+
+## F-5: bot guild accept off the world thread (PB, found 14 Nov 2026)
+- **Where:** `GuildAcceptAction.cpp:52` calls `HandleGuildAcceptOpcode` directly from bot AI, reaching `Guild::HandleAcceptMember` → `AddMember` on a map worker.
+- **IP effect:** the IP consumer's late re-check removes a restricted bot at the next world update (remediation, not prevention).
+- **PB fix:** queue `CMSG_GUILD_ACCEPT` on the bot session, like PR #21, so Core #28's admission veto decides on the world thread before persistence.
+
 ## P-4: don't assign bots to guilds with real members
 
 ### Today

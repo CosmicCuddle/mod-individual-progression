@@ -43,9 +43,10 @@
 - There is no admission-time `DeleteMember` and no bulk sweep. A human is never removed.
 
 ## Remaining dependencies (not claimed)
-- **Playerbots P-2:** bot guild chat calls `Guild::BroadcastToGuild` from bot AI on a map thread. The recipient hook then usually fails open. Routing it through the world thread is the PB fix.
+- **Playerbots P-2:** closed by PB #22 `d4451103` (bot guild chat queued to the world thread; peer-reviewed PASS at source level). Native/gameplay UNKNOWN.
+- **Playerbots F-5:** bot guild accept (`GuildAcceptAction.cpp:52`) calls Core's accept handler from bot AI, so `AddMember` runs off the world thread and is caught by the late re-check rather than prevented. PB fix: queue `CMSG_GUILD_ACCEPT`.
 - **Playerbots P-4:** bot-guild assignment filter. With admission refused, Playerbots' `InitGuild` just logs a failed add.
-- **Admission off the world thread:** a real caller exists (the Playerbots level-up re-roll, when `ResetBotLevelEnabled`). It's handled by the world-update re-check, so the bot is a member for at most one world update. Chat is filtered per recipient meanwhile, but the bot's own sends from bot AI fail open (P-2).
+- **Admission off the world thread:** a real caller exists (the Playerbots level-up re-roll, when `ResetBotLevelEnabled`). It's handled by the world-update re-check, so the bot is a member for at most one world update. Chat is filtered per recipient meanwhile (bot sends too, once PB #22 is in). A second caller is PB bot guild accept (F-5).
 - **Human join and login remediation:** removal runs at the next world update, so the roster is shared for that interval. Chat is already filtered per recipient.
 - **Native build and gameplay:** UNKNOWN.
 
