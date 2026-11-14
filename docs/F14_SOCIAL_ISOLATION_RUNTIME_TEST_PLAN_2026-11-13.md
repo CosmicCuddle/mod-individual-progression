@@ -74,6 +74,10 @@ Expected results assume the option is ON. Each case lists the steps and then the
 | M3 | H0 mails a BE/Dr RandomBot that hasn't logged in since the restart | delivered (unknown) |
 | M4 | R logs out (remembered), then R is deleted; H0 mails to that name/GUID | not refused by F14 (F-3; the deleted name itself is Core's normal "not found") |
 | M5 | a new character is created (any race); H0 mails it before its first login | delivered (F-3: create forgets the GUID) |
+| GM1 | R (and a bot Guild Master R) are in a guild; H0 accepts an invite into it (from a non-restricted member) | every restricted RandomBot leaves the guild within a world tick; a bot Guild Master's rank passes to the next-highest member |
+| GM2 | H0 is in a guild and online; Playerbots adds R to it (randomization) | R leaves the guild within a world tick |
+| GM3 | as GM2 but H0 is offline, or H0 is stage 8+, or the joiner is an Altbot | stock: nobody is removed |
+| GM4 | GM1 with the option OFF | stock |
 | GI1 | (patched Core only) H0's guild officer invites R; R's guild invites H0 | no invitation is sent; H0 gets one reply when H0 started it |
 | GI2 | (patched Core only) H8 invites R | stock |
 | OFF | set the option to `0`, `.reload config`, repeat P1, P4 and W1 | stock behaviour everywhere |

@@ -396,6 +396,40 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         return optionEnabled && worldThread && tracked && inRoleCheck;
     }
 
+    // Guild membership (owner decision, 14 Nov 2026): a verified restricted
+    // RandomBot never stays in a guild with a still-Vanilla human.
+    //  - a still-Vanilla human joins  -> every restricted bot member leaves
+    //    (a bot Guild Master too; Core promotes the next rank);
+    //  - a restricted bot joins a guild holding an ONLINE still-Vanilla
+    //    human -> that bot leaves.
+    // Unknown or offline humans never trigger anything; Altbots are
+    // neither side; race alone is never used.
+    enum class GuildJoinAction : std::uint8_t
+    {
+        None,
+        RemoveRestrictedMembers,
+        RemoveJoiner,
+    };
+
+    constexpr GuildJoinAction DecideGuildJoin(bool optionEnabled, bool joinerStillVanillaHuman,
+                                              bool joinerRestrictedBot, bool anyOnlineStillVanillaHumanMember)
+    {
+        if (!optionEnabled)
+            return GuildJoinAction::None;
+        if (joinerStillVanillaHuman)
+            return GuildJoinAction::RemoveRestrictedMembers;
+        if (joinerRestrictedBot && anyOnlineStillVanillaHumanMember)
+            return GuildJoinAction::RemoveJoiner;
+        return GuildJoinAction::None;
+    }
+
+    // A member is restricted when online live facts say so, or, while
+    // offline, when it was confirmed at its last logout this run.
+    constexpr bool GuildMemberRestricted(bool online, bool onlineRestrictedBot, bool offlineConfirmed)
+    {
+        return online ? onlineRestrictedBot : offlineConfirmed;
+    }
+
     constexpr bool OfflineMailRefused(bool optionEnabled, bool senderStillVanillaHuman,
                                       bool receiverConfirmedRestrictedBot)
     {
