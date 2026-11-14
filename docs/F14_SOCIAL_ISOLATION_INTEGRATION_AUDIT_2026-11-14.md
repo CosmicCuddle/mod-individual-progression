@@ -79,7 +79,7 @@ Each row lists, in order: the initiator, the target, the thread, the Core entry,
 | `BgVanillaRoster` | `OnBattlegroundAddPlayer` (world, ON) | port check | `BgLock` | leave / destroy (regardless of the option) | empty | missed humans are covered by (d) | none |
 | `BgQueuedHumans` | BG queue join (world, ON) | (b) bot join | `BgLock` | live re-check plus prune; logout; BG add | empty | re-checked live | none |
 | `ConfirmedRestrictedBots` | logout (world, ON, verified R) | mail (world) | `ConfirmedLock` | that GUID's next login; **character create or delete** (F-3, also OFF) | empty | over-blocks mail only for that GUID, until create/delete/login | none (cluster GUID reuse is no longer a dependency) |
-| Guild join queue (`PendingReplies<256>` of guild id + joiner) | `GuildScript::OnAddMember` (any thread, option ON) | world update `EnforcePendingGuildJoins` | `GuildJoinsLock` | drained every tick (cleared, no action, when OFF) | empty | everything is looked up again; a gone guild or joiner is skipped | none |
+| Pending guild joins (`PendingGuildJoins`, keyed guild id + joiner, coalescing, never drops) | `GuildScript::OnEvent(JOIN_GUILD)` (any thread, option ON; facts captured on the world thread) | world update `EnforcePendingGuildJoins` | `GuildJoinsLock` | emptied every world update (cleared, no action, when OFF) | empty | everything is looked up again; an unknown joiner is logged UNRESOLVED | off-thread join + logout before the update |
 | `WorldThreadMarker` | `WorldScript::OnUpdate` | all hooks | atomics | — | unset until the first tick (until then everything is allowed) | — | none |
 | `thread_local OwnedMapRecord` | `OnPlayerBeforeUpdate` | same thread | per thread | tick expiry | — | an expired record ⇒ no scope ⇒ allow | none |
 | Reply text | config load/reload | reply send (world) | `_f14SocialIsolationReplyLock` | reload | config | — | none |
@@ -258,13 +258,13 @@ So a party that changes while queued always leaves the queue. To requeue it must
 - **Population:** RandomBots only (`RandomBotGuildCount` 20, `RandomBotGuildSizeMax` 15 by default; skipped when `DeleteRandomBotGuilds`).
 - **Could a human end up there?** Only if a human joined that bot guild earlier, by invite from a member. With the guild patch, an invite between a restricted pair is refused. An invite from a non-restricted member (another human or a non-BE/Draenei bot) is allowed.
 - **Effect:** a later direct fill could put a verified Blood Elf/Draenei RandomBot into a guild that already holds a still-Vanilla human. That shares only guild chat and roster. No whisper, trade, group, duel or mail rule is bypassed, because those are decided per pair.
-- **Owner decision (14 Nov 2026):** a restricted RandomBot must not stay in a guild with a still-Vanilla human. When such a human joins, the restricted bots leave (a bot Guild Master too). A restricted bot added to a guild holding an online still-Vanilla human leaves.
-- **Implemented:** `F14SocialIsolationGuildMembershipScript` (`GUILDHOOK_ON_ADD_MEMBER`) queues `(guild id, joiner GUID)` in a bounded queue (256) from any thread. The world update (`EnforcePendingGuildJoins`) looks everything up again and removes through `Guild::DeleteMember(guid, false, true, true)` plus `RemovePlayerGuildEventsAndSignups`, the same calls as Core's `.guild uninvite`.
-- **Residuals:** an offline still-Vanilla human never triggers a removal (unknown never restricts). The Playerbots guild manager may assign a bot to the same guild again at a later randomization; each such add ends in removal (bounded churn). A PB-side assignment filter would be a separate PB-lane item.
+- **Owner decision (14 Nov 2026, Option B):** a still-Vanilla human and a verified restricted RandomBot must not share guild membership or guild chat. New joins only; no sweep of existing mixed guilds; never remove a human.
+- **Status:** an isolated candidate on `feature/cs03-ip-f14-guild-isolation-20261114`. The first version (`dbb10b9e`) was **not accepted** (CS01 6876912900) and was reverted from the social branch. The rework closes the offline-add and lossy-queue gaps, narrows logout-before-drain, proves a survivor before each removal, drops calendar cleanup, and adds the restricted-bot chat gate.
+- **Coverage, gaps and cross-repo proposals P-1 to P-4:** `docs/F14_GUILD_ISOLATION_CROSS_REPO_PROPOSAL_2026-11-14.md`. Membership compliance is **not** claimed.
 
 ## Findings needing a decision
 
 - **F-1 (Playerbots):** **closed at PB #21 `c5b9d6c3`+** (preflight). It was an ordinary expansion-grouping admission gap, not social isolation (CS01 6876278508).
 - **F-2 (IP):** **implemented** (section 5).
 - **F-3 (IP):** **implemented** (section 6).
-- **F-4 (guild membership):** **owner-decided and implemented** in IP (section 13).
+- **F-4 (guild membership/chat):** owner Option B; isolated IP candidate plus Core/PB proposals (section 13).

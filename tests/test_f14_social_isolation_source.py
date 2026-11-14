@@ -95,7 +95,8 @@ class HooksAndAuthority(unittest.TestCase):
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY", "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL",
             "PLAYERHOOK_CAN_SEND_MAIL", "ALLSPELLHOOK_ON_SPELL_CHECK_CAST", "PLAYERHOOK_ON_F14_CAN_GUILD_INVITE",
             "PLAYERHOOK_ON_LOGIN", "PLAYERHOOK_ON_CREATE", "PLAYERHOOK_ON_DELETE",
-            "GROUPHOOK_ON_ADD_MEMBER", "GROUPHOOK_ON_DISBAND", "GUILDHOOK_ON_ADD_MEMBER"]))
+            "GROUPHOOK_ON_ADD_MEMBER", "GROUPHOOK_ON_DISBAND", "GUILDHOOK_ON_EVENT",
+            "PLAYERHOOK_CAN_PLAYER_USE_GUILD_CHAT"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
         self.assertEqual(overrides, sorted([
             "OnF14ShouldExcludeWhoEntryForViewer", "OnPlayerCanGroupAccept", "OnPlayerCanGroupInvite",
@@ -103,7 +104,7 @@ class HooksAndAuthority(unittest.TestCase):
             "OnPlayerCanJoinLfg", "OnPlayerLogout", "OnPlayerCanJoinInBattlegroundQueue",
             "OnPlayerCanBattleFieldPort", "OnBattlegroundAddPlayer", "OnBattlegroundRemovePlayerAtLeave",
             "OnBattlegroundDestroy", "OnPlayerCanSendMail", "OnSpellCheckCast", "OnPlayerCanGuildInvite", "OnPlayerLogin",
-            "OnPlayerCreate", "OnPlayerDelete", "OnAddMember", "OnAddMember", "OnDisband"]))
+            "OnPlayerCreate", "OnPlayerDelete", "OnAddMember", "OnEvent", "OnDisband", "OnPlayerCanUseChat"]))
         # The guild hook is overridden only inside the patched-Core guard.
         self.assertEqual(re.findall(r"\bbool (OnPlayerCanGuildInvite)\(Player\* inviter, Player\* invitee\) override", self.src),
                          ["OnPlayerCanGuildInvite"])
@@ -303,43 +304,67 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertNotIn("sLFGMgr", veto)
 
     def test_guild_membership_owner_decision(self):
-        # The hook only queues values (any thread); it reads no other player.
-        hook = self.body("void OnAddMember(Guild* guild, Player* player, uint8& ) override", "\n        }\n")
-        self.assertRegex(hook, r"if \(!OptionOn\(\) \|\| !guild \|\| !player\)\s*return;")
-        self.assertIn("GuildJoins().Push(guild->GetId(), player->GetGUID().GetRawValue());", hook)
-        for token in ("ReadHuman", "ReadBot", "DeleteMember", "ObjectAccessor", "GetUnorderedMembers"):
+        # Join source: the JOIN_GUILD event every successful AddMember logs,
+        # with a GUID, online or offline, from any thread.
+        hook = self.body("ObjectGuid::LowType , uint8 ) override", "\n        }\n")
+        self.assertRegex(hook, r"if \(!OptionOn\(\) \|\| !guild \|\| eventType != GUILD_EVENT_LOG_JOIN_GUILD \|\| !playerGuid1\)\s*return;")
+        self.assertIn("ObjectGuid::Create<HighGuid::Player>(playerGuid1)", hook)
+        # A Player is read only on the world thread, to capture facts.
+        self.assertLess(hook.index("if (WorldThread().IsCurrent())"), hook.index("ObjectAccessor::FindPlayer(joiner)"))
+        self.assertIn("GuildJoins().Mark(guild->GetId(), joiner.GetRawValue(), captured);", hook)
+        for token in ("DeleteMember", "GetUnorderedMembers", "Push("):
             self.assertNotIn(token, hook, token)
-        self.assertIn("{GUILDHOOK_ON_ADD_MEMBER}", self.src)
+        self.assertIn("{GUILDHOOK_ON_EVENT}", self.src)
+        self.assertNotIn("GUILDHOOK_ON_ADD_MEMBER", self.src)  # needed a live Player: offline adds were lost
         self.assertIn("new F14SocialIsolationGuildMembershipScript();", self.src)
-        # The drain runs from the world update only, and does nothing when OFF.
+        # The pending set never drops (no capacity), and is drained each update.
+        policy = strip_comments(read(POLICY))
+        pend = policy.split("class PendingGuildJoins", 1)[1].split("\n    };\n", 1)[0]
+        for token in ("Capacity", "_dropped", "return false"):
+            self.assertNotIn(token, pend, token)
+        self.assertIn("joins.swap(_joins);", pend)
         drain = self.body("void EnforcePendingGuildJoins()", "\n    }\n")
         self.assertLess(drain.index("GuildJoins().Drain("), drain.index("if (!OptionOn())"))
         self.assertLess(drain.index("if (!OptionOn())\n            return;"), drain.index("EnforceGuildJoin("))
         self.assertEqual(self.src.count("EnforcePendingGuildJoins();"), 1)
-        # Everything is looked up again; identity from verified facts only.
-        enforce = self.body("void EnforceGuildJoin(uint32 guildId, ObjectGuid joinerGuid)", "\n    }\n")
-        self.assertIn("if (!guild || !joiner || joiner->GetGuildId() != guildId)", enforce)
-        self.assertIn("Policy::HumanStillVanilla(ReadHuman(joiner))", enforce)
-        self.assertIn("Policy::BotIsRestrictedRandomBot(ReadBot(joiner))", enforce)
-        self.assertIn("Confirmed().Contains(guid.GetRawValue())", enforce)
-        self.assertIn("Policy::DecideGuildJoin(true, joinerHuman, joinerBot, anyHuman)", enforce)
+        enforce = self.body("void EnforceGuildJoin(uint32 guildId, ObjectGuid joinerGuid, Policy::GuildJoinerFacts captured)", "\n    }\n")
+        self.assertIn("if (!guild || !guild->GetMember(joinerGuid))\n            return;", enforce)
+        self.assertIn("Policy::ResolveGuildJoiner(joiner != nullptr,", enforce)
+        self.assertRegex(enforce, r"if \(!facts\.known\)\s*\{\s*LOG_INFO\([^;]*UNRESOLVED[^;]*;\s*return;")
+        self.assertIn("Policy::DecideGuildJoin(true, facts.stillVanillaHuman, facts.restrictedBot, anyHuman)", enforce)
         for token in ("getRace", "GetRace", "IsTbcRace", "DeleteMember"):
             self.assertNotIn(token, enforce, token)
-        self.assertRegex(enforce, r"case Policy::GuildJoinAction::RemoveRestrictedMembers:\s*"
-                         r"for \(ObjectGuid const& guid : restricted\)\s*RemoveFromGuild\(guildId, guid\);\s*break;")
-        self.assertRegex(enforce, r"case Policy::GuildJoinAction::RemoveJoiner:\s*RemoveFromGuild\(guildId, joinerGuid\);\s*break;")
-        self.assertRegex(enforce, r"case Policy::GuildJoinAction::None:\s*break;")
-        # The confirmed-set lock is never held while players are read.
-        locked = enforce.split("std::lock_guard<std::mutex> lock(ConfirmedLock());", 1)[1].split("\n        }", 1)[0]
+        self.assertRegex(enforce, r"case Policy::GuildJoinAction::RemoveRestrictedMembers:[^}]*for \(ObjectGuid const& guid : restricted\)\s*RemoveFromGuildIfSafe\(guildId, guid,")
+        self.assertIn("return g.GetMember(joinerGuid) != nullptr;", enforce)
+        self.assertRegex(enforce, r"case Policy::GuildJoinAction::RemoveJoiner:\s*RemoveFromGuildIfSafe\(guildId, joinerGuid,")
+        # Removal: re-proven immediately before the only DeleteMember call;
+        # stock kick flags, never canDeleteGuild; no extra cleanup.
+        remove = self.body("void RemoveFromGuildIfSafe(uint32 guildId, ObjectGuid target, Reason reasonStillHolds)", "\n    }\n")
+        self.assertIn("Guild* guild = sGuildMgr->GetGuildById(guildId);", remove)
+        self.assertLess(remove.index("Policy::GuildRemovalSafe("), remove.index("guild->DeleteMember(target, false, true, false);"))
+        self.assertIn("guild ? guild->GetMemberSize() : 0", remove)
+        self.assertEqual(self.src.count("DeleteMember("), 1)
+        self.assertNotIn("sCalendarMgr", self.src)
+        self.assertIn("return guildExists && targetIsMember && memberCount >= 2 && reasonStillHolds;", policy)
+        # The confirmed-set lock never covers a player read.
+        scan = self.body("void ScanGuild(Guild const& guild, ObjectGuid except, bool& anyOnlineHuman, std::vector<ObjectGuid>* restricted)\n    {", "\n    }\n")
+        locked = scan.split("std::lock_guard<std::mutex> lock(ConfirmedLock());", 1)[1]
         for token in ("ReadHuman", "ReadBot", "FindPlayer"):
             self.assertNotIn(token, locked, token)
-        # Removal only through Core's own DeleteMember, re-validated first.
-        remove = self.body("void RemoveFromGuild(uint32 guildId, ObjectGuid guid)", "\n    }\n")
-        self.assertIn("if (!guild || !guild->GetMember(guid))", remove)
-        self.assertIn("guild->DeleteMember(guid, false, true, true);", remove)
-        self.assertEqual(self.src.count("DeleteMember("), 1)
-        policy = strip_comments(read(POLICY))
         self.assertIn("return online ? onlineRestrictedBot : offlineConfirmed;", policy)
+
+    def test_guild_chat_sender_gate(self):
+        chat = self.body("std::string& , Guild* guild) override", "\n        }\n")
+        self.assertRegex(chat, r"if \(!OptionOn\(\) \|\| !player \|\| !guild \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return true;")
+        self.assertIn("if (type != CHAT_MSG_GUILD && type != CHAT_MSG_OFFICER)", chat)
+        # Only a restricted bot is ever blocked; a human's chat never is.
+        self.assertLess(chat.index("if (!Policy::BotIsRestrictedRandomBot(ReadBot(player)))\n                return true;"),
+                        chat.index("ScanGuild("))
+        self.assertIn("return !Policy::GuildChatSenderBlocked(true, true, anyHuman);", chat)
+        self.assertNotIn("SendInCharacterReply", chat)  # no broadcast to the guild
+        self.assertIn("PLAYERHOOK_CAN_PLAYER_USE_GUILD_CHAT", self.src)
+        policy = strip_comments(read(POLICY))
+        self.assertIn("return optionEnabled && senderRestrictedBot && anyOnlineStillVanillaHumanMember;", policy)
 
     def test_f3_create_delete_forget_offline_mail(self):
         create = self.body("void OnPlayerCreate(Player* player) override", "\n        }\n")

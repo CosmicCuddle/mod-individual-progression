@@ -24,7 +24,6 @@
 #include "Battleground.h"
 #include "BattlegroundMgr.h"
 #include "BattlegroundQueue.h"
-#include "CalendarMgr.h"
 #include "Chat.h"
 #include "DBCStores.h"
 #include "GameTime.h"
@@ -49,6 +48,7 @@
 #include <algorithm>
 #include <mutex>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace
@@ -204,9 +204,9 @@ namespace
         return lock;
     }
 
-    Policy::PendingReplies<256>& GuildJoins()
+    Policy::PendingGuildJoins& GuildJoins()
     {
-        static Policy::PendingReplies<256> joins; // (guild id, joiner GUID)
+        static Policy::PendingGuildJoins joins;
         return joins;
     }
 
@@ -385,6 +385,8 @@ namespace
         return AllowPairIn(CurrentReadScope(), surface, initiator, other, addonMessage);
     }
 
+    void ScanGuild(Guild const& guild, ObjectGuid except, bool& anyOnlineHuman, std::vector<ObjectGuid>* restricted);
+
     class F14SocialIsolationPlayerScript final : public PlayerScript
     {
     public:
@@ -394,7 +396,7 @@ namespace
              PLAYERHOOK_ON_BEFORE_UPDATE, PLAYERHOOK_CAN_JOIN_LFG, PLAYERHOOK_ON_LOGOUT,
              PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE, PLAYERHOOK_CAN_BATTLEFIELD_PORT,
              PLAYERHOOK_CAN_SEND_MAIL, PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_CREATE,
-             PLAYERHOOK_ON_DELETE}) { }
+             PLAYERHOOK_ON_DELETE, PLAYERHOOK_CAN_PLAYER_USE_GUILD_CHAT}) { }
 
         // Offline mail: a character that logs in is no longer "remembered";
         // its next logout re-remembers it only if still a verified
@@ -613,6 +615,24 @@ namespace
             if (type != CHAT_MSG_WHISPER)
                 return true;
             return AllowPair(Policy::Surface::Whisper, player, receiver, language == LANG_ADDON);
+        }
+
+        // Guild/officer chat from the client path (CMSG_MESSAGECHAT is
+        // PROCESS_THREADUNSAFE: world thread). A restricted RandomBot may not
+        // speak while a still-Vanilla human member is online. Never blocks a
+        // human's chat (that needs a per-recipient Core seam).
+        bool OnPlayerCanUseChat(Player* player, uint32 type, uint32 /*language*/,
+                                std::string& /*msg*/, Guild* guild) override
+        {
+            if (!OptionOn() || !player || !guild || !WorldThread().IsCurrent())
+                return true;
+            if (type != CHAT_MSG_GUILD && type != CHAT_MSG_OFFICER)
+                return true;
+            if (!Policy::BotIsRestrictedRandomBot(ReadBot(player)))
+                return true;
+            bool anyHuman = false;
+            ScanGuild(*guild, player->GetGUID(), anyHuman, nullptr);
+            return !Policy::GuildChatSenderBlocked(true, true, anyHuman);
         }
 
         // Reached after Core's faction, distance and state checks.
@@ -944,35 +964,32 @@ namespace
     };
 #endif
 
-    // Guild membership (owner decision 14 Nov 2026). World thread only:
-    // everything is looked up again here; removal goes through Core's own
-    // Guild::DeleteMember, exactly like the `.guild uninvite` command.
-    void RemoveFromGuild(uint32 guildId, ObjectGuid guid)
+    // Guild membership (owner decision 14 Nov 2026). World thread only.
+    // Removal goes through Core's own Guild::DeleteMember with the stock
+    // kick flags (as Guild::HandleRemoveMember does) and canDeleteGuild
+    // false; GuildRemovalSafe is re-proven immediately before each call.
+    template<typename Reason>
+    void RemoveFromGuildIfSafe(uint32 guildId, ObjectGuid target, Reason reasonStillHolds)
     {
         Guild* guild = sGuildMgr->GetGuildById(guildId);
-        if (!guild || !guild->GetMember(guid))
+        bool const member = guild && guild->GetMember(target);
+        if (!Policy::GuildRemovalSafe(guild != nullptr, member, guild ? guild->GetMemberSize() : 0,
+                                      guild && reasonStillHolds(*guild)))
             return;
-        guild->DeleteMember(guid, false, true, true);
-        sCalendarMgr->RemovePlayerGuildEventsAndSignups(guid, guildId);
+        guild->DeleteMember(target, false, true, false);
     }
 
-    void EnforceGuildJoin(uint32 guildId, ObjectGuid joinerGuid)
+    // Live scan of the members other than `except`: is a still-Vanilla
+    // human online, and which members are restricted bots (online by live
+    // facts, offline only if confirmed at their last logout).
+    void ScanGuild(Guild const& guild, ObjectGuid except, bool& anyOnlineHuman, std::vector<ObjectGuid>* restricted)
     {
-        Guild* guild = sGuildMgr->GetGuildById(guildId);
-        Player* joiner = ObjectAccessor::FindPlayer(joinerGuid);
-        if (!guild || !joiner || joiner->GetGuildId() != guildId)
-            return;
-        bool const joinerHuman = Policy::HumanStillVanilla(ReadHuman(joiner));
-        bool const joinerBot = Policy::BotIsRestrictedRandomBot(ReadBot(joiner));
-        if (!joinerHuman && !joinerBot)
-            return;
-        bool anyHuman = false;
-        std::vector<ObjectGuid> restricted;
+        anyOnlineHuman = false;
         std::vector<ObjectGuid> offline;
-        for (auto const& [low, member] : guild->GetUnorderedMembers())
+        for (auto const& [low, member] : guild.GetUnorderedMembers())
         {
             ObjectGuid const guid = member.GetGUID();
-            if (guid == joinerGuid)
+            if (guid == except)
                 continue;
             Player const* online = ObjectAccessor::FindPlayer(guid);
             if (!online)
@@ -980,24 +997,60 @@ namespace
                 offline.push_back(guid);
                 continue;
             }
-            anyHuman = anyHuman || Policy::HumanStillVanilla(ReadHuman(online));
-            if (Policy::GuildMemberRestricted(true, Policy::BotIsRestrictedRandomBot(ReadBot(online)), false))
-                restricted.push_back(guid);
+            anyOnlineHuman = anyOnlineHuman || Policy::HumanStillVanilla(ReadHuman(online));
+            if (restricted && Policy::GuildMemberRestricted(true, Policy::BotIsRestrictedRandomBot(ReadBot(online)), false))
+                restricted->push_back(guid);
         }
+        if (!restricted)
+            return;
+        std::lock_guard<std::mutex> lock(ConfirmedLock());
+        for (ObjectGuid const& guid : offline)
+            if (Policy::GuildMemberRestricted(false, false, Confirmed().Contains(guid.GetRawValue())))
+                restricted->push_back(guid);
+    }
+
+    void EnforceGuildJoin(uint32 guildId, ObjectGuid joinerGuid, Policy::GuildJoinerFacts captured)
+    {
+        Guild* guild = sGuildMgr->GetGuildById(guildId);
+        if (!guild || !guild->GetMember(joinerGuid))
+            return; // the joiner already left: this join left no mix behind
+        Player const* joiner = ObjectAccessor::FindPlayer(joinerGuid);
+        bool offlineConfirmed = false;
+        if (!joiner)
         {
             std::lock_guard<std::mutex> lock(ConfirmedLock());
-            for (ObjectGuid const& guid : offline)
-                if (Policy::GuildMemberRestricted(false, false, Confirmed().Contains(guid.GetRawValue())))
-                    restricted.push_back(guid);
+            offlineConfirmed = Confirmed().Contains(joinerGuid.GetRawValue());
         }
-        switch (Policy::DecideGuildJoin(true, joinerHuman, joinerBot, anyHuman))
+        Policy::GuildJoinerFacts const facts = Policy::ResolveGuildJoiner(joiner != nullptr,
+            joiner && Policy::HumanStillVanilla(ReadHuman(joiner)),
+            joiner && Policy::BotIsRestrictedRandomBot(ReadBot(joiner)), captured, offlineConfirmed);
+        if (!facts.known)
+        {
+            LOG_INFO("module", "IndividualProgression F14: guild {} join by {} left UNRESOLVED (joiner offline, no facts)",
+                     guildId, joinerGuid.ToString());
+            return;
+        }
+        if (!facts.stillVanillaHuman && !facts.restrictedBot)
+            return;
+        bool anyHuman = false;
+        std::vector<ObjectGuid> restricted;
+        ScanGuild(*guild, joinerGuid, anyHuman, &restricted);
+        switch (Policy::DecideGuildJoin(true, facts.stillVanillaHuman, facts.restrictedBot, anyHuman))
         {
             case Policy::GuildJoinAction::RemoveRestrictedMembers:
+                // Reason: the joining Vanilla human is still a member.
                 for (ObjectGuid const& guid : restricted)
-                    RemoveFromGuild(guildId, guid);
+                    RemoveFromGuildIfSafe(guildId, guid,
+                        [joinerGuid](Guild const& g) { return g.GetMember(joinerGuid) != nullptr; });
                 break;
             case Policy::GuildJoinAction::RemoveJoiner:
-                RemoveFromGuild(guildId, joinerGuid);
+                // Reason: an online still-Vanilla human is still a member.
+                RemoveFromGuildIfSafe(guildId, joinerGuid, [joinerGuid](Guild const& g)
+                {
+                    bool human = false;
+                    ScanGuild(g, joinerGuid, human, nullptr);
+                    return human;
+                });
                 break;
             case Policy::GuildJoinAction::None:
                 break;
@@ -1006,34 +1059,44 @@ namespace
 
     void EnforcePendingGuildJoins()
     {
-        std::vector<std::pair<uint64, uint64>> joins;
+        std::vector<std::tuple<uint32, uint64, Policy::GuildJoinerFacts>> joins;
         {
             std::lock_guard<std::mutex> lock(GuildJoinsLock());
-            GuildJoins().Drain([&joins](std::uint64_t guildId, std::uint64_t joiner)
+            GuildJoins().Drain([&joins](std::uint32_t guildId, std::uint64_t joiner, Policy::GuildJoinerFacts facts)
             {
-                joins.emplace_back(guildId, joiner);
+                joins.emplace_back(guildId, joiner, facts);
             });
         }
         if (!OptionOn())
             return;
-        for (auto const& [guildId, joiner] : joins)
-            EnforceGuildJoin(static_cast<uint32>(guildId), ObjectGuid(joiner));
+        for (auto const& [guildId, joiner, facts] : joins)
+            EnforceGuildJoin(guildId, ObjectGuid(joiner), facts);
     }
 
-    // Any thread (Playerbots may add a bot from its factory): only queue
-    // the values; the world update decides and removes.
+    // Every successful Guild::AddMember logs GUILD_EVENT_LOG_JOIN_GUILD with
+    // the joiner's GUID (Guild.cpp:2332 -> _LogEvent -> OnGuildEvent), online
+    // or offline, from any thread. Only values are queued; on the world
+    // thread the joiner's facts are captured too, so a logout before the
+    // world update still has a positive answer.
     class F14SocialIsolationGuildMembershipScript final : public GuildScript
     {
     public:
         F14SocialIsolationGuildMembershipScript() : GuildScript("IndividualProgression_F14SocialIsolationGuildMembership",
-            {GUILDHOOK_ON_ADD_MEMBER}) { }
+            {GUILDHOOK_ON_EVENT}) { }
 
-        void OnAddMember(Guild* guild, Player* player, uint8& /*plRank*/) override
+        void OnEvent(Guild* guild, uint8 eventType, ObjectGuid::LowType playerGuid1,
+                     ObjectGuid::LowType /*playerGuid2*/, uint8 /*newRank*/) override
         {
-            if (!OptionOn() || !guild || !player)
+            if (!OptionOn() || !guild || eventType != GUILD_EVENT_LOG_JOIN_GUILD || !playerGuid1)
                 return;
+            ObjectGuid const joiner = ObjectGuid::Create<HighGuid::Player>(playerGuid1);
+            Policy::GuildJoinerFacts captured;
+            if (WorldThread().IsCurrent())
+                if (Player const* player = ObjectAccessor::FindPlayer(joiner))
+                    captured = Policy::GuildJoinerFacts{true, Policy::HumanStillVanilla(ReadHuman(player)),
+                                                        Policy::BotIsRestrictedRandomBot(ReadBot(player))};
             std::lock_guard<std::mutex> lock(GuildJoinsLock());
-            GuildJoins().Push(guild->GetId(), player->GetGUID().GetRawValue());
+            GuildJoins().Mark(guild->GetId(), joiner.GetRawValue(), captured);
         }
     };
 

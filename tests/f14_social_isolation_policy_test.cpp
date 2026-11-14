@@ -1318,14 +1318,92 @@ namespace
                 // OFF: nothing, ever.
                 CHECK(P::DecideGuildJoin(false, joiner.vanillaHuman, joiner.restrictedOnline, anyHuman) == A::None);
             }
-        // The join queue: bounded, FIFO, values only.
-        P::PendingReplies<2> joins;
-        CHECK(!joins.Push(0, 5) && !joins.Push(5, 0) && joins.Size() == 0); // no id: ignored
-        CHECK(joins.Push(7, 100) && joins.Push(7, 101) && !joins.Push(8, 102));
-        CHECK(joins.Dropped() == 1);
-        std::vector<std::uint64_t> order;
-        joins.Drain([&](std::uint64_t g, std::uint64_t p) { order.push_back(g * 1000 + p); });
-        CHECK(order.size() == 2 && order[0] == 7100 && order[1] == 7101 && joins.Size() == 0);
+        // Joiner facts: live when online; captured at the join (world
+        // thread) when it logged out before the world update; a confirmed
+        // bot; otherwise UNKNOWN (never acted on).
+        P::GuildJoinerFacts const none{};
+        P::GuildJoinerFacts const capHuman{true, true, false};
+        P::GuildJoinerFacts const capBot{true, false, true};
+        for (int on = 0; on < 2; ++on)
+            for (int lh = 0; lh < 2; ++lh)
+                for (int lb = 0; lb < 2; ++lb)
+                    for (int c = 0; c < 3; ++c)
+                        for (int conf = 0; conf < 2; ++conf)
+                        {
+                            P::GuildJoinerFacts const cap = c == 0 ? none : c == 1 ? capHuman : capBot;
+                            P::GuildJoinerFacts const f = P::ResolveGuildJoiner(on, lh, lb, cap, conf);
+                            if (on)
+                                CHECK(f.known && f.stillVanillaHuman == (lh != 0) && f.restrictedBot == (lb != 0));
+                            else if (cap.known)
+                                CHECK(f.known && f.stillVanillaHuman == cap.stillVanillaHuman &&
+                                      f.restrictedBot == cap.restrictedBot);
+                            else if (conf)
+                                CHECK(f.known && !f.stillVanillaHuman && f.restrictedBot);
+                            else
+                                CHECK(!f.known && !f.stillVanillaHuman && !f.restrictedBot); // offline add, no facts
+                        }
+        // Logout before the world update: the captured human still acts.
+        {
+            P::GuildJoinerFacts const f = P::ResolveGuildJoiner(false, false, false, capHuman, false);
+            CHECK(P::DecideGuildJoin(true, f.stillVanillaHuman, f.restrictedBot, false) == A::RemoveRestrictedMembers);
+        }
+        // Removal safety, proven before every removal.
+        for (int g = 0; g < 2; ++g)
+            for (int m = 0; m < 2; ++m)
+                for (std::size_t count = 0; count < 4; ++count)
+                    for (int r = 0; r < 2; ++r)
+                        CHECK(P::GuildRemovalSafe(g, m, count, r) == (g && m && count >= 2 && r));
+        CHECK(!P::GuildRemovalSafe(true, true, 1, true));   // sole member (even the leader): never, no disband
+        CHECK(!P::GuildRemovalSafe(true, true, 5, false));  // add -> leave -> drain: the reason is gone
+        CHECK(!P::GuildRemovalSafe(true, false, 5, true));  // already removed (duplicate)
+        CHECK(!P::GuildRemovalSafe(false, true, 5, true));  // guild gone
+        // Sequential removals: re-proven after each one; the human survivor
+        // keeps every removal safe, and the guild never drops below one.
+        for (std::size_t bots = 0; bots < 20; ++bots)
+        {
+            std::size_t members = bots + 1; // the Vanilla human + restricted bots
+            for (std::size_t i = 0; i < bots; ++i)
+            {
+                CHECK(P::GuildRemovalSafe(true, true, members, true));
+                --members;
+            }
+            CHECK(members == 1);
+        }
+        // Guild chat sender gate: only a restricted bot, only beside an
+        // online Vanilla human, only ON. Humans are never blocked here.
+        for (int o2 = 0; o2 < 2; ++o2)
+            for (int b = 0; b < 2; ++b)
+                for (int h = 0; h < 2; ++h)
+                    CHECK(P::GuildChatSenderBlocked(o2, b, h) == (o2 && b && h));
+
+        // Pending joins never drop: coalesce per (guild, joiner); facts
+        // overwrite only when known; drained completely.
+        P::PendingGuildJoins joins;
+        joins.Mark(0, 5, capHuman);
+        joins.Mark(7, 0, capHuman);
+        CHECK(joins.Size() == 0); // no id: ignored
+        for (std::uint64_t i = 1; i <= 10000; ++i)
+            joins.Mark(7, i, none);
+        CHECK(joins.Size() == 10000);
+        joins.Mark(7, 42, capHuman);
+        joins.Mark(7, 42, none);  // an unknown re-mark keeps the known facts
+        joins.Mark(7, 42, none);
+        CHECK(joins.Size() == 10000);
+        joins.Mark(8, 42, capBot); // the same character in another guild id: separate
+        CHECK(joins.Size() == 10001);
+        std::size_t drained = 0, known = 0;
+        bool sawHuman = false, sawBot = false;
+        joins.Drain([&](std::uint32_t g, std::uint64_t p, P::GuildJoinerFacts f)
+        {
+            ++drained;
+            known += f.known ? 1 : 0;
+            if (g == 7 && p == 42)
+                sawHuman = f.known && f.stillVanillaHuman;
+            if (g == 8 && p == 42)
+                sawBot = f.known && f.restrictedBot;
+        });
+        CHECK(drained == 10001 && known == 2 && sawHuman && sawBot && joins.Size() == 0);
+        joins.Drain([&](std::uint32_t, std::uint64_t, P::GuildJoinerFacts) { CHECK(false); }); // empty after drain
     }
 }
 

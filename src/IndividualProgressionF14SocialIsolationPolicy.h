@@ -24,7 +24,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
+#include <utility>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -429,6 +431,76 @@ namespace IndividualProgressionF14SocialIsolationPolicy
     {
         return online ? onlineRestrictedBot : offlineConfirmed;
     }
+
+    // The joining character's kind. Online: live facts. Offline at decision
+    // time: the facts captured on the world thread at the join, else a bot
+    // confirmed at its last logout this run; otherwise UNKNOWN (no action).
+    struct GuildJoinerFacts
+    {
+        bool known = false;
+        bool stillVanillaHuman = false;
+        bool restrictedBot = false;
+    };
+
+    constexpr GuildJoinerFacts ResolveGuildJoiner(bool online, bool liveStillVanillaHuman, bool liveRestrictedBot,
+                                                  GuildJoinerFacts captured, bool offlineConfirmedBot)
+    {
+        if (online)
+            return GuildJoinerFacts{true, liveStillVanillaHuman, liveRestrictedBot};
+        if (captured.known)
+            return captured;
+        if (offlineConfirmedBot)
+            return GuildJoinerFacts{true, false, true};
+        return GuildJoinerFacts{};
+    }
+
+    // Checked again immediately before EVERY removal: the guild exists, the
+    // target is still a member, at least one other member survives (so
+    // Core's DeleteMember can never disband the guild, whatever its flags),
+    // and the reason for the removal still holds.
+    constexpr bool GuildRemovalSafe(bool guildExists, bool targetIsMember, std::size_t memberCount,
+                                    bool reasonStillHolds)
+    {
+        return guildExists && targetIsMember && memberCount >= 2 && reasonStillHolds;
+    }
+
+    // Guild chat sent by a restricted RandomBot while a still-Vanilla human
+    // member is online (client chat path; the human's own chat needs a Core
+    // recipient seam, see the guild proposal).
+    constexpr bool GuildChatSenderBlocked(bool optionEnabled, bool senderRestrictedBot,
+                                          bool anyOnlineStillVanillaHumanMember)
+    {
+        return optionEnabled && senderRestrictedBot && anyOnlineStillVanillaHumanMember;
+    }
+
+    // Joins waiting for the world update. Never drops one: entries are keyed
+    // (guild id, joiner) and coalesce, so between two world updates the set
+    // holds at most one entry per membership created in that interval, and
+    // it is emptied by every world update.
+    class PendingGuildJoins
+    {
+    public:
+        void Mark(std::uint32_t guildId, std::uint64_t joiner, GuildJoinerFacts captured)
+        {
+            if (!guildId || !joiner)
+                return;
+            GuildJoinerFacts& slot = _joins[{guildId, joiner}];
+            if (captured.known)
+                slot = captured;
+        }
+        template<typename Fn>
+        void Drain(Fn fn)
+        {
+            std::map<std::pair<std::uint32_t, std::uint64_t>, GuildJoinerFacts> joins;
+            joins.swap(_joins);
+            for (auto const& [key, facts] : joins)
+                fn(key.first, key.second, facts);
+        }
+        std::size_t Size() const { return _joins.size(); }
+
+    private:
+        std::map<std::pair<std::uint32_t, std::uint64_t>, GuildJoinerFacts> _joins;
+    };
 
     constexpr bool OfflineMailRefused(bool optionEnabled, bool senderStillVanillaHuman,
                                       bool receiverConfirmedRestrictedBot)
