@@ -35,7 +35,7 @@ jobs:
           repository: CosmicCuddle/mod-individual-progression
           ref: c92853b618af25b933655023797a9c0f1ab3d7fc
           path: acore/modules/mod-individual-progression
-          fetch-depth: 2
+          fetch-depth: 4
           persist-credentials: false
 
       - name: Checkout exact synced Character Services
