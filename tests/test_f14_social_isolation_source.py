@@ -353,6 +353,20 @@ class HooksAndAuthority(unittest.TestCase):
             self.assertNotIn(token, locked, token)
         self.assertIn("return online ? onlineRestrictedBot : offlineConfirmed;", policy)
 
+    def test_guild_login_remediation_owner_decision(self):
+        login = self.body("void OnPlayerLogin(Player* player) override", "\n        }\n")
+        # The offline-mail forget stays unconditional and first.
+        self.assertLess(login.index("Confirmed().Forget(player->GetGUID().GetRawValue());"),
+                        login.index("if (!OptionOn() || !WorldThread().IsCurrent())"))
+        self.assertLess(login.index("if (!OptionOn() || !WorldThread().IsCurrent())\n                return;"),
+                        login.index("ReadHuman(player)"))
+        self.assertIn("Policy::LoginTriggersGuildCheck(true, true, guildId != 0, human)", login)
+        self.assertIn("GuildJoins().Mark(guildId, player->GetGUID().GetRawValue(), Policy::GuildJoinerFacts{true, true, false});", login)
+        for token in ("ReadBot", "DeleteMember", "GetUnorderedMembers", "getRace"):
+            self.assertNotIn(token, login, token)
+        policy = strip_comments(read(POLICY))
+        self.assertIn("return optionEnabled && worldThread && inGuild && stillVanillaHuman;", policy)
+
     def test_guild_chat_sender_gate(self):
         chat = self.body("std::string& , Guild* guild) override", "\n        }\n")
         self.assertRegex(chat, r"if \(!OptionOn\(\) \|\| !player \|\| !guild \|\| !WorldThread\(\)\.IsCurrent\(\)\)\s*return true;")

@@ -454,6 +454,15 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         return GuildJoinerFacts{};
     }
 
+    // Owner decision (14 Nov 2026): a still-Vanilla human (real client)
+    // logging in to a guild triggers the same removal of restricted bots as
+    // that human joining it. Bots, TBC/Wrath humans and Altbots never do.
+    constexpr bool LoginTriggersGuildCheck(bool optionEnabled, bool worldThread, bool inGuild,
+                                           bool stillVanillaHuman)
+    {
+        return optionEnabled && worldThread && inGuild && stillVanillaHuman;
+    }
+
     // Checked again immediately before EVERY removal: the guild exists, the
     // target is still a member, at least one other member survives (so
     // Core's DeleteMember can never disband the guild, whatever its flags),

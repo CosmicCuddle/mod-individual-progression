@@ -405,8 +405,22 @@ namespace
         {
             if (!player)
                 return;
-            std::lock_guard<std::mutex> lock(ConfirmedLock());
-            Confirmed().Forget(player->GetGUID().GetRawValue());
+            {
+                std::lock_guard<std::mutex> lock(ConfirmedLock());
+                Confirmed().Forget(player->GetGUID().GetRawValue());
+            }
+            // Guild (owner decision 14 Nov 2026: "remove them on login"): a
+            // still-Vanilla human logging in to a guild is treated like a
+            // join by that human; the world update removes restricted bots
+            // through the same proven path. World thread only.
+            if (!OptionOn() || !WorldThread().IsCurrent())
+                return;
+            uint32 const guildId = player->GetGuildId();
+            bool const human = Policy::HumanStillVanilla(ReadHuman(player));
+            if (!Policy::LoginTriggersGuildCheck(true, true, guildId != 0, human))
+                return;
+            std::lock_guard<std::mutex> lock(GuildJoinsLock());
+            GuildJoins().Mark(guildId, player->GetGUID().GetRawValue(), Policy::GuildJoinerFacts{true, true, false});
         }
 
         // F-3: a created or deleted character never keeps an offline-mail

@@ -1369,6 +1369,28 @@ namespace
             }
             CHECK(members == 1);
         }
+        // Login remediation (owner): only a still-Vanilla human in a guild,
+        // on the world thread, option ON. It then acts like that human's join.
+        for (int o3 = 0; o3 < 2; ++o3)
+            for (int w = 0; w < 2; ++w)
+                for (int g = 0; g < 2; ++g)
+                    for (int h = 0; h < 2; ++h)
+                        CHECK(P::LoginTriggersGuildCheck(o3, w, g, h) == (o3 && w && g && h));
+        CHECK(!P::LoginTriggersGuildCheck(true, true, true, P::HumanStillVanilla(altbot)));      // Altbot
+        CHECK(!P::LoginTriggersGuildCheck(true, true, true, P::HumanStillVanilla(VanillaHuman(8)))); // TBC
+        {
+            P::PendingGuildJoins logins;
+            logins.Mark(9, 500, P::GuildJoinerFacts{true, true, false});
+            logins.Mark(9, 500, none); // a later unknown join event keeps the human facts
+            bool acted = false;
+            logins.Drain([&](std::uint32_t, std::uint64_t, P::GuildJoinerFacts f)
+            {
+                P::GuildJoinerFacts const r = P::ResolveGuildJoiner(false, false, false, f, false);
+                acted = P::DecideGuildJoin(true, r.stillVanillaHuman, r.restrictedBot, false) ==
+                    A::RemoveRestrictedMembers;
+            });
+            CHECK(acted);
+        }
         // Guild chat sender gate: only a restricted bot, only beside an
         // online Vanilla human, only ON. Humans are never blocked here.
         for (int o2 = 0; o2 < 2; ++o2)
