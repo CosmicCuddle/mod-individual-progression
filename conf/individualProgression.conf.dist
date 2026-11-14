@@ -130,6 +130,25 @@ IndividualProgression.F14.ProtectVerifiedRandomBotGroupFloor = 0
 #
 IndividualProgression.F14.ProtectVerifiedRandomBotStageFloor = 0
 
+# IndividualProgression.F14.VerifiedRandomBotTbcFloor
+#
+#        DEVELOPMENT ONLY / OFF by default. One authoritative rule for a
+#        positively VERIFIED headless Blood Elf/Draenei RandomBot: it always
+#        holds at least TBC (stage 8; Wrath, stage 13, from level 71). At
+#        login it replaces the level-based write for exactly those bots, so a
+#        bot left at stage 0 is repaired at its next login. While online, a
+#        bot whose stage markers a Playerbots re-roll removed is repaired
+#        within a few seconds. Any other IP write below TBC for such a bot
+#        (group sync, .ip set) lands on TBC instead, so a Wrath bot can fall
+#        back to TBC but never to Vanilla. A saved higher stage is kept.
+#        Humans, Altbots, SelfBots, GMs and unknown characters are never
+#        written; race alone never qualifies. ProgressionLimit: 0 = no cap;
+#        a limit below 8 means the rule makes no writes; a target above a
+#        positive limit is capped at the limit. FORCED OFF without the
+#        Playerbots API. Owner approval required.
+#
+IndividualProgression.F14.VerifiedRandomBotTbcFloor = 0
+
 # IndividualProgression.F14.RandomBotSocialIsolation
 #
 #        DEVELOPMENT ONLY / OFF by default. While an ordinary human player is

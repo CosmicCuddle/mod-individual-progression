@@ -446,6 +446,11 @@ public:
     // would push a positively verified headless BE/Draenei RandomBot below an
     // already earned stage 8+. Default OFF; never creates or grants a stage.
     bool f14ProtectVerifiedRandomBotStageFloor = false;
+    // F14 verified RandomBot TBC floor (one authoritative rule, default
+    // OFF): a positively verified headless BE/Draenei RandomBot holds at
+    // least stage 8 (Wrath for 71+), repaired at login and after a
+    // Playerbots re-roll, and never written below TBC by any IP route.
+    bool f14VerifiedRandomBotTbcFloor = false;
     // F14 social isolation (default OFF): a verified BE/Draenei RandomBot
     // declines whisper/trade/group with a still-Vanilla human, leaves that
     // human's /who and answers once in character. Never hides in the world.
@@ -525,6 +530,12 @@ public:
     bool HasF14VerifiedRandomBotIdentity(Player const* player);
     // True => ForceUpdateProgressionState(player, requested) must not run.
     bool BlocksF14VerifiedStageFloorDowngrade(Player* player, uint8 requestedStage);
+    // F14 TBC floor: this player is a floored, positively verified BE/Draenei
+    // RandomBot right now (option ON, usable limit). Login/world thread only.
+    bool IsF14VerifiedRandomBotTbcFloorTarget(Player* player);
+    // World thread only (after the map update): re-applies the TBC floor to
+    // online verified bots whose markers a Playerbots re-roll removed.
+    void RepairF14VerifiedRandomBotTbcFloors();
     bool HasF14VerifiedRandomBotGuid(ObjectGuid const& guid);
     std::uint64_t GetF14VerifiedRandomBotLoginEpoch(ObjectGuid const& guid);
     // F14 attack/corpse lifecycle registry (IndividualProgressionF14LifecycleScript.cpp).

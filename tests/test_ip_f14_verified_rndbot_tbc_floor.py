@@ -38,7 +38,8 @@ class F14Floor(unittest.TestCase):
         self.assertLess(unit.index("IsRandomBot("),unit.index("ForceUpdateProgressionState("))
         self.assertLess(unit.index("CanSetVerifiedTbcRaceStage("),unit.index("ForceUpdateProgressionState("))
         self.assertIn("if (savedStage < newStage)",unit)
-        self.assertIn("if (!preserveVerifiedRandomBotStage && !appliedVerifiedRandomBotTbcFloor)",login)
+        # The later one-rule TBC floor may add its own skip reason.
+        self.assertRegex(login,r"if \(!preserveVerifiedRandomBotStage && !appliedVerifiedRandomBotTbcFloor( && !appliedF14TbcFloor)?\)")
 
     def test_existing_owner_defaults_and_pure_policy(self):
         conf=read("conf/individualProgression.conf.dist")

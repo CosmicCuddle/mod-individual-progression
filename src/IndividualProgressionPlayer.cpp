@@ -1,6 +1,7 @@
 #include "IndividualProgression.h"
 #include "IndividualProgressionGroupPolicy.h"
 #include "IndividualProgressionF14LoginPolicy.h"
+#include "IndividualProgressionF14TbcFloorPolicy.h"
 // Optional Playerbots dependency: the original IP fork can build without it.
 #if __has_include("../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h")
 #include "../../mod-playerbots/src/Bot/RandomPlayerbotMgr.h"
@@ -76,7 +77,8 @@ public:
              sIndividualProgression->f14ExperimentalRndbotPlayerVisibility ||
              sIndividualProgression->f14ExperimentalAttackLifecycleRegistry ||
              sIndividualProgression->f14RandomBotSocialIsolation ||
-             sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor) &&
+             sIndividualProgression->f14ProtectVerifiedRandomBotStageFloor ||
+             sIndividualProgression->f14VerifiedRandomBotTbcFloor) &&
             sIndividualProgression->isBotAccount(player) &&
             (player->getRace() == RACE_DRAENEI || player->getRace() == RACE_BLOODELF) &&
             player->GetSession() && player->GetSession()->IsHeadless())
@@ -103,6 +105,25 @@ public:
                         player->AddItem(ITEM_THIEVES_TOOLS, 1);
                 }
             }
+
+            // F14 verified RandomBot TBC floor (one authoritative rule, default
+            // OFF): a positively verified headless BE/Draenei RandomBot holds
+            // at least TBC (Wrath for 71+); a saved higher stage is kept. This
+            // replaces the level write below for exactly that population and
+            // repairs an existing stage-0 bot at its next login.
+            bool appliedF14TbcFloor = false;
+#if COSMIC_IP_F14_PLAYERBOTS_AVAILABLE
+            if (sIndividualProgression->IsF14VerifiedRandomBotTbcFloorTarget(player))
+            {
+                uint8 const savedStage = sIndividualProgression->GetPlayerProgressionFromQuests(player);
+                uint8 const targetStage = IndividualProgressionF14TbcFloorPolicy::TargetStage(
+                    savedStage, player->GetLevel(), sIndividualProgression->progressionLimit);
+                if (IndividualProgressionF14TbcFloorPolicy::NeedsRepair(savedStage, targetStage))
+                    sIndividualProgression->ForceUpdateProgressionState(
+                        player, static_cast<ProgressionState>(targetStage));
+                appliedF14TbcFloor = true;
+            }
+#endif
 
             // F14: independently default-OFF TBC floor for positively selected
             // headless BE/Draenei RandomBots. This is NOT a visibility fix.
@@ -161,7 +182,7 @@ public:
             }
 
 #endif
-            if (!preserveVerifiedRandomBotStage && !appliedVerifiedRandomBotTbcFloor)
+            if (!preserveVerifiedRandomBotStage && !appliedVerifiedRandomBotTbcFloor && !appliedF14TbcFloor)
             {
                 if (player->GetLevel() <= 60)
                     sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(0));
