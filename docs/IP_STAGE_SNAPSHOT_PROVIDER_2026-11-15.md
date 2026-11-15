@@ -144,3 +144,24 @@ Core `21ff1973` plus modules. All direct writers of `Player::m_RewardedQuests`:
   - IP disabled;
   - paid and unpaid being indistinguishable at raw = effective.
 - **Not a dependency:** it's a pure test; no runtime code uses it.
+
+## IP epoch ↔ Core equipment incarnation binding fixture (CS01 Part11 6896196735)
+**What it tests:** `tests/pb59_authority_mapping/ip_core_binding_test.cpp` uses the real IP `Registry` and the real Core `EquipmentCaptureState` (a pinned copy of Core `82d340c1`, blob `4c6b0bf3`, drift-checked by `run.sh`).
+- **The binding:** an authority record carries **both** the IP Known snapshot and the Core stamp.
+- **Check B:** the record is valid only when each still matches its own source (IP bracket reads with `SameKnownSnapshot`, and Core `Current(stamp)`).
+- **No equality** between the IP epoch and the Core incarnation is assumed.
+
+**Result:** 26/26 with g++, clang++ and ASan/UBSan.
+
+**Cases:**
+- login gap (Core bound, IP not yet registered or published);
+- deliberately **unequal** valid counters pass;
+- GUID mismatch;
+- Core revision mutation (including a nested mutation in progress);
+- IP revision change and same-value republish;
+- reconnect in world (new Core incarnation, same IP epoch: the old record refuses, a new one passes);
+- logout gap (Core detached, IP still Known);
+- full relog;
+- config reload.
+
+**Supersedes:** case 7 of `ip_authority_mapping_test.cpp`, which assumed a shared epoch.

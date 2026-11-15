@@ -61,6 +61,8 @@ int main()
     CHECK(reg.Get(guid).generation == s.generation + 1);
     CHECK(auth && !MatchesFinalB(*auth, rp, re));
     // 7. Relog: new IP epoch; equipment still carrying the old epoch -> refuse; republished equipment -> ok.
+    //    (Earlier model with a SHARED epoch. Superseded for Core 82d340c1 by ip_core_binding_test.cpp,
+    //    where the IP epoch and the Core incarnation are independent counters.)
     reg.Erase(guid);
     std::uint64_t const epoch2 = reg.Register(guid);
     CHECK(epoch2 != epoch);
