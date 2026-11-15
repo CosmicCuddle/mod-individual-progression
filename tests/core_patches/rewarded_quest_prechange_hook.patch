@@ -1,0 +1,89 @@
+diff --git a/src/server/game/Entities/Player/PlayerQuest.cpp b/src/server/game/Entities/Player/PlayerQuest.cpp
+index c36b855..fefac3d 100644
+--- a/src/server/game/Entities/Player/PlayerQuest.cpp
++++ b/src/server/game/Entities/Player/PlayerQuest.cpp
+@@ -905,6 +905,8 @@ void Player::RewardQuest(Quest const* quest, uint32 reward, Object* questGiver,
+ 
+ void Player::SetRewardedQuest(uint32 quest_id)
+ {
++    if (m_RewardedQuests.find(quest_id) == m_RewardedQuests.end())
++        sScriptMgr->OnPlayerBeforeRewardedQuestChange(this, quest_id, true);
+     m_RewardedQuests.insert(quest_id);
+     m_RewardedQuestsSave[quest_id] = true;
+ }
+@@ -1589,7 +1591,9 @@ void Player::RemoveRewardedQuest(uint32 questId, bool update /*= true*/)
+     RewardedQuestSet::iterator rewItr = m_RewardedQuests.find(questId);
+     if (rewItr != m_RewardedQuests.end())
+     {
+-        m_RewardedQuests.erase(rewItr);
++        sScriptMgr->OnPlayerBeforeRewardedQuestChange(this, questId, false);
++        // Handlers must not mutate the set; erase by key so a stale iterator is never used.
++        m_RewardedQuests.erase(questId);
+         m_RewardedQuestsSave[questId] = false;
+     }
+ 
+diff --git a/src/server/game/Scripting/ScriptDefines/PlayerScript.cpp b/src/server/game/Scripting/ScriptDefines/PlayerScript.cpp
+index 25b9489..b0884c1 100644
+--- a/src/server/game/Scripting/ScriptDefines/PlayerScript.cpp
++++ b/src/server/game/Scripting/ScriptDefines/PlayerScript.cpp
+@@ -37,6 +37,11 @@ void ScriptMgr::OnPlayerGossipSelectCode(Player* player, uint32 menu_id, uint32
+     CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_GOSSIP_SELECT_CODE, script->OnPlayerGossipSelectCode(player, menu_id, sender, action, code));
+ }
+ 
++void ScriptMgr::OnPlayerBeforeRewardedQuestChange(Player* player, uint32 questId, bool rewarded)
++{
++    CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_BEFORE_REWARDED_QUEST_CHANGE, script->OnPlayerBeforeRewardedQuestChange(player, questId, rewarded));
++}
++
+ void ScriptMgr::OnPlayerCompleteQuest(Player* player, Quest const* quest)
+ {
+     CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_PLAYER_COMPLETE_QUEST, script->OnPlayerCompleteQuest(player, quest));
+diff --git a/src/server/game/Scripting/ScriptDefines/PlayerScript.h b/src/server/game/Scripting/ScriptDefines/PlayerScript.h
+index 7773e4c..27c7b4c 100644
+--- a/src/server/game/Scripting/ScriptDefines/PlayerScript.h
++++ b/src/server/game/Scripting/ScriptDefines/PlayerScript.h
+@@ -37,6 +37,9 @@ namespace WorldPackets::NPC
+     class TrainerList;
+ }
+ 
++// Lets modules detect the pre-change rewarded-quest hook at compile time.
++#define COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION 1
++
+ enum PlayerHook
+ {
+     PLAYERHOOK_ON_PLAYER_JUST_DIED,
+@@ -241,6 +244,7 @@ enum PlayerHook
+     PLAYERHOOK_ON_BEFORE_RECEIVE_SPELL_LIST_FROM_TRAINER,
+     PLAYERHOOK_ON_GET_TRAINER_SPELL_STATE,
+     PLAYERHOOK_ON_AFTER_TRAIN_SPELL,
++    PLAYERHOOK_ON_BEFORE_REWARDED_QUEST_CHANGE, // COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION 1
+     PLAYERHOOK_END
+ };
+ 
+@@ -268,6 +272,14 @@ public:
+     // Called when a player completes a quest
+     virtual void OnPlayerCompleteQuest(Player* /*player*/, Quest const* /*quest_id*/) { }
+ 
++    /**
++     * @brief Called BEFORE a rewarded-quest record is actually added (rewarded = true)
++     * or removed (rewarded = false), on the thread performing the change.
++     * Not called when the call would not change the set, nor during character load.
++     * Handlers must not mutate the player's rewarded-quest set.
++     */
++    virtual void OnPlayerBeforeRewardedQuestChange(Player* /*player*/, uint32 /*questId*/, bool /*rewarded*/) { }
++
+     // Called when a player kills another player
+     virtual void OnPlayerPVPKill(Player* /*killer*/, Player* /*killed*/) { }
+ 
+diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
+index 01a64f8..a66facd 100644
+--- a/src/server/game/Scripting/ScriptMgr.h
++++ b/src/server/game/Scripting/ScriptMgr.h
+@@ -397,6 +397,7 @@ public: /* PlayerScript */
+     void OnPlayerFirstLogin(Player* player);
+     void OnPlayerSetMaxLevel(Player* player, uint32& maxPlayerLevel);
+     void OnPlayerCompleteQuest(Player* player, Quest const* quest);
++    void OnPlayerBeforeRewardedQuestChange(Player* player, uint32 questId, bool rewarded);
+     void OnPlayerBattlegroundDesertion(Player* player, BattlegroundDesertionType const desertionType);
+     bool OnPlayerCanJoinInBattlegroundQueue(Player* player, ObjectGuid BattlemasterGuid, BattlegroundTypeId BGTypeID, uint8 joinAsGroup, GroupJoinBattlegroundResult& err);
+     bool OnPlayerShouldBeRewardedWithMoneyInsteadOfExp(Player* player);
