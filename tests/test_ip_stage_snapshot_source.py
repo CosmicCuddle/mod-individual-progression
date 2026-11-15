@@ -137,6 +137,16 @@ class IpWiring(unittest.TestCase):
         self.assertIn("AddSC_mod_individual_progression_stage_snapshot();",
                       body(CORE, "void AddSC_mod_individual_progression()"))
 
+    def test_composed_paid_confirm_invalidates_before_bit(self):
+        sig = "void IndividualProgression::CompletePaidExpansionPurchase(WorldSession* session, uint32 guid, uint64 token, bool committed)"
+        if sig not in EXP:
+            self.skipTest("paid durable purchase (#184) not composed on this branch")
+        c = body(EXP, sig)
+        grant = c.index("if (completion == PurchaseState::Completion::GrantAccess)\n        {")
+        inv = c.index("InvalidateStageSnapshot(session->GetPlayer()->GetGUID());")
+        bit = c.index("_paidExpansionFlags[guid] |=")
+        self.assertTrue(grant < inv < bit)
+
     def test_existing_getters_unchanged(self):
         eff = body(EXP, "uint8 IndividualProgression::GetEffectiveProgression(Player* player)")
         self.assertNotIn("Snapshot", eff)

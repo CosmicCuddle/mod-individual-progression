@@ -45,6 +45,24 @@ def strip_comments(src):
     return re.sub(r"//[^\n]*", "", src)
 
 
+# The merged master commit that carries this feature as delivered. Exact
+# insertion audits of THIS feature compare PARENT..SOCIAL_LANDED, so later,
+# separately reviewed features that touch the same files (for example the
+# F14 verified RandomBot TBC floor) do not invalidate them.
+SOCIAL_LANDED = "05ff032b625f6e8abb6b2b5be496bb8a3ee65c96"
+
+
+def added_lines_landed(name):
+    try:
+        out = subprocess.run(["git", "-C", str(ROOT), "diff", "-U0", PARENT, SOCIAL_LANDED, "--", name],
+                             check=True, capture_output=True, text=True).stdout
+    except subprocess.CalledProcessError:
+        raise unittest.SkipTest("landed social commit not available in this clone")
+    plus = [l[1:] for l in out.splitlines() if l.startswith("+") and not l.startswith("+++")]
+    minus = [l[1:] for l in out.splitlines() if l.startswith("-") and not l.startswith("---")]
+    return plus, minus
+
+
 def added_lines(name):
     out = subprocess.run(["git", "-C", str(ROOT), "diff", "-U0", PARENT, "--", name],
                          check=True, capture_output=True, text=True).stdout
@@ -629,19 +647,19 @@ class GroupFloorPopulation(unittest.TestCase):
 
 class ExactInsertions(unittest.TestCase):
     def test_player_cpp_one_or_reason(self):
-        plus, minus = added_lines("src/IndividualProgressionPlayer.cpp")
+        plus, minus = added_lines_landed("src/IndividualProgressionPlayer.cpp")
         # Inserted before the pinned last reason so the #80 gate pin holds.
         self.assertEqual(minus, [])
         self.assertEqual(plus, ["             sIndividualProgression->f14RandomBotSocialIsolation ||"])
 
     def test_core_and_header_additions_only(self):
         for name in ("src/IndividualProgression.cpp", "src/IndividualProgression.h"):
-            plus, minus = added_lines(name)
+            plus, minus = added_lines_landed(name)
             self.assertEqual(minus, [], name)
             joined = "\n".join(plus)
             for token in ("ForceUpdateProgressionState", "RewardQuest", "enforceGroupRules ="):
                 self.assertNotIn(token, joined, name)
-        plus, _ = added_lines("src/IndividualProgression.cpp")
+        plus, _ = added_lines_landed("src/IndividualProgression.cpp")
         self.assertIn("    AddSC_mod_individual_progression_f14_social_isolation();", plus)
 
     def test_existing_ip_hooks_untouched(self):

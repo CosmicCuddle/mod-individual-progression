@@ -26,6 +26,7 @@
 
 using namespace IndividualProgressionExpansionPolicy;
 namespace ReceiptPolicy = IndividualProgressionReceiptPolicy;
+namespace PurchaseState = IndividualProgressionPaidPurchaseState;
 
 namespace
 {
@@ -246,9 +247,40 @@ void IndividualProgression::LoadPaidExpansionEntitlement(Player* player)
         std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
         _paidExpansionFlags.erase(guid);
         _paidExpansionLedgers.erase(guid);
+        _paidExpansionPurchases.erase(guid);
         return;
     }
-    ReceiptPolicy::Decoded const ledger = ReadStrictPaidLedger(guid);
+    // This hook also runs on far teleport and reconnect. While a purchase is
+    // unresolved the DB row may not hold the staged receipt yet: keep the
+    // cache. A Pending purchase whose callback lived on another session can
+    // no longer be acknowledged: it becomes Unconfirmed (never refunded).
+    {
+        std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
+        auto const purchase = _paidExpansionPurchases.find(guid);
+        if (purchase != _paidExpansionPurchases.end())
+        {
+            if (PurchaseState::CallbackLost(purchase->second, reinterpret_cast<std::uintptr_t>(player->GetSession())))
+            {
+                purchase->second.state = PurchaseState::State::Unconfirmed;
+                LOG_ERROR("module", "IndividualProgression: paid purchase for character {} lost its commit callback (session changed); left unconfirmed, no refund or retry",
+                    guid);
+            }
+            if (!PurchaseState::ReloadMayReplaceCache(purchase->second))
+                return;
+        }
+    }
+    bool const commissionGate = paidExpansionCommissionMissingReceipt &&
+        StoreWritesAllowed(true, PaidExpansionStoreSaving());
+    ReceiptPolicy::Decoded const stored = ReadStrictPaidLedger(guid);
+    ReceiptPolicy::Decoded const ledger = PurchaseState::CommissionIfAbsent(stored, commissionGate);
+    if (ledger && !stored)
+    {
+        // Truly absent row only: stage the canonical empty v1 receipt in the
+        // Player settings map; it is saved with the character.
+        for (uint32 slot = 0; slot < ReceiptPolicy::Slots; ++slot)
+            player->UpdatePlayerSetting(PaidExpansionSettingSource, slot, ledger.ledger.fields[slot]);
+        LOG_INFO("module", "IndividualProgression: commissioned empty paid receipt for character {} (no row existed)", guid);
+    }
     uint8 bits = 0;
     if (ledger && RawStageBeforeMap(player) >= VanillaFinalStage)
     {
@@ -275,7 +307,7 @@ void IndividualProgression::LoadPaidExpansionEntitlement(Player* player)
 
 PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)
 {
-    if (!player || !player->IsInWorld() || player->IsBeingTeleportedFar() ||
+    if (!player || !player->IsInWorld() || player->IsBeingTeleportedFar() || !player->GetSession() ||
         costCopper > static_cast<uint32>(std::numeric_limits<int32>::max()))
         return PurchaseResult::InvalidRequest;
 
@@ -289,6 +321,10 @@ PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8
         std::shared_lock<std::shared_mutex> lock(_paidExpansionLock);
         if (_paidExpansionLedgers.find(player->GetGUID().GetCounter()) == _paidExpansionLedgers.end())
             return PurchaseResult::EntryUnavailable;
+        // Duplicate click, or another era, while a purchase is unresolved.
+        auto const purchase = _paidExpansionPurchases.find(player->GetGUID().GetCounter());
+        if (purchase != _paidExpansionPurchases.end() && !PurchaseState::MayStartPurchase(purchase->second))
+            return PurchaseResult::PurchasePending;
     }
     bool entryAvailable = true;
     if (IsKnownEra(eraValue) && static_cast<Era>(eraValue) == Era::Tbc)
@@ -325,8 +361,6 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
         return check;
 
     Era const era = static_cast<Era>(eraValue);
-    uint32 const index = era == Era::Tbc ? SettingTbc : SettingWrath;
-    uint8 const rawBeforePurchase = GetPlayerProgressionFromQuests(player);
     ReceiptPolicy::Ledger stagedLedger;
     {
         std::shared_lock<std::shared_mutex> lock(_paidExpansionLock);
@@ -342,50 +376,129 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
             costCopper, static_cast<uint32>(timestamp)))
         return PurchaseResult::EntryUnavailable;
 
-    // 2. Charge, then record the purchase.
-    player->ModifyMoney(-static_cast<int32>(costCopper));
-    SetPaidExpansionFlag(player, index, FlagPaid);
-
-    // 3. Buying TBC unlocks the Into the Breach (10259) hand-in; it does
-    //    NOT grant stage 8. Buying Wrath opens effective stage 13 by setting
-    //    its entitlement flag, without granting 14. Quest availability and
-    //    already-rewarded recovery need separate integration before release.
-    //    Never write a progression marker as a side effect of payment.
-
-    // 4. Verify payment semantics, NOT the TBC quest hand-in. A paid
-    //    stage-7 character must remain at stage 7 immediately after buying.
-    //    On any failure undo the flag and refund.
-    bool const opened = era == Era::Tbc
-        ? GetPlayerProgressionFromQuests(player) == rawBeforePurchase &&
-          GetExpansionFacts(player).tbcPaid
-        : GetEffectiveProgression(player) >= WrathAccessStage;
-    if (!opened)
+    // 2. Reserve the purchase BEFORE any debit, atomically with the check:
+    //    a duplicate click or a second era is refused while unresolved.
+    uint32 const guid = player->GetGUID().GetCounter();
+    WorldSession* const session = player->GetSession();
+    uint64 token = 0;
     {
-        SetPaidExpansionFlag(player, index, FlagNone);
-        player->ModifyMoney(static_cast<int32>(costCopper));
-        LOG_ERROR("module", "IndividualProgression: {} purchase for character {} could not be applied; refunded {} copper",
-            EraName(era), player->GetGUID().GetCounter(), costCopper);
-        return PurchaseResult::EntryUnavailable;
+        std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
+        PurchaseState::Record& record = _paidExpansionPurchases[guid];
+        if (!PurchaseState::MayStartPurchase(record))
+            return PurchaseResult::PurchasePending;
+        token = ++_paidExpansionNextToken;
+        record = PurchaseState::Submit(eraValue, token, reinterpret_cast<std::uintptr_t>(session));
     }
 
-    // 5. Store ALL eight validated v1 slots in the same Player settings map
-    // before the single character+gold SaveToDB transaction. Core's
-    // UpdatePlayerSetting creates a missing vector with index+1 elements.
-    // A first TBC write ending at slot 5 would otherwise save only six
-    // tokens, and the strict decoder would reject the paid entitlement at
-    // next login. Never infer that a missing/legacy row can be purchased:
-    // those still fail closed in CanPurchaseExpansion before any debit.
+    // 3. Charge and stage ALL eight validated v1 slots in the Player
+    //    settings map. Core's UpdatePlayerSetting creates a missing vector
+    //    with index+1 elements, so every slot is written. The entitlement
+    //    bit is NOT set here: access opens only on a confirmed commit.
+    //    Buying TBC unlocks the Into the Breach (10259) hand-in; it does NOT
+    //    grant stage 8. Buying Wrath opens effective stage 13 by its flag,
+    //    without granting 14. Never write a progression marker as a side
+    //    effect of payment.
+    player->ModifyMoney(-static_cast<int32>(costCopper));
     for (uint32 slot = 0; slot < ReceiptPolicy::Slots; ++slot)
         player->UpdatePlayerSetting(PaidExpansionSettingSource, slot, stagedLedger.fields[slot]);
     {
         std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
-        _paidExpansionLedgers[player->GetGUID().GetCounter()] = stagedLedger;
+        _paidExpansionLedgers[guid] = stagedLedger;
     }
-    player->SaveToDB(false, false);
+
+    // 4. One transaction: Core's SaveToDB always writes the money and every
+    //    settings source together, so gold and receipt commit (or fail)
+    //    together, here and in any later ordinary save. Acknowledge only
+    //    through the commit callback; never refund, retry or reset on failure.
+    CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+    player->SaveToDB(trans, false, false);
+    session->AddTransactionCallback(CharacterDatabase.AsyncCommitTransaction(trans)).AfterComplete(
+        [session, guid, token](bool committed)
+        {
+            sIndividualProgression->CompletePaidExpansionPurchase(session, guid, token, committed);
+        });
     // Purchase record: the "module" log channel (Server.log by default).
-    LOG_INFO("module", "IndividualProgression: character {} purchased {} for {} copper",
-        player->GetGUID().GetCounter(), EraName(era), costCopper);
-    return PurchaseResult::Success;
+    LOG_INFO("module", "IndividualProgression: character {} submitted {} purchase for {} copper (awaiting commit)",
+        guid, EraName(era), costCopper);
+    return PurchaseResult::Submitted;
+}
+
+void IndividualProgression::CompletePaidExpansionPurchase(WorldSession* session, uint32 guid, uint64 token, bool committed)
+{
+    PurchaseState::Completion completion = PurchaseState::Completion::Ignored;
+    uint8 eraValue = 0;
+    {
+        std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
+        auto const record = _paidExpansionPurchases.find(guid);
+        if (record == _paidExpansionPurchases.end())
+            return; // logged out: the next login reads the DB
+        completion = PurchaseState::Complete(record->second, token, committed);
+        eraValue = record->second.era;
+        if (completion == PurchaseState::Completion::GrantAccess)
+        {
+            // Stage snapshot (#59): the effective stage changes; invalidate
+            // before the bit becomes observable (snapshot lock is separate
+            // and never nested the other way round).
+            if (session && session->GetPlayer() && session->GetPlayer()->GetGUID().GetCounter() == guid)
+                InvalidateStageSnapshot(session->GetPlayer()->GetGUID());
+            _paidExpansionFlags[guid] |= static_cast<Era>(eraValue) == Era::Tbc ? PaidExpansionBitTbc : PaidExpansionBitWrath;
+        }
+    }
+    if (completion == PurchaseState::Completion::Ignored)
+        return;
+
+    Era const era = static_cast<Era>(eraValue);
+    Player* player = session ? session->GetPlayer() : nullptr;
+    bool const sameCharacter = player && player->GetGUID().GetCounter() == guid;
+    if (completion == PurchaseState::Completion::GrantAccess)
+    {
+        LOG_INFO("module", "IndividualProgression: character {} purchase of {} committed", guid, EraName(era));
+        if (sameCharacter)
+        {
+            // Access just changed (Wrath: effective 12 -> 13): the same
+            // refresh as any legitimate progression change. Only here, after
+            // GrantAccess; never at Submitted/Pending/Unconfirmed.
+            if (player->IsInWorld())
+            {
+                CheckAdjustments(player);
+                checkIPPhasing(player, player->GetAreaId());
+            }
+            ChatHandler(session).PSendSysMessage("|cff00ff00Your purchase of {} is complete.|r", EraName(era));
+        }
+        return;
+    }
+    LOG_ERROR("module", "IndividualProgression: character {} purchase of {} could not be confirmed; NOT refunded or retried (reconcile from the database)",
+        guid, EraName(era));
+    if (sameCharacter)
+        ChatHandler(session).PSendSysMessage(
+            "|cffff0000Your {} purchase could not be confirmed yet. Do not buy it again: it will be checked when you next log in. Contact server staff if it is still missing.|r",
+            EraName(era));
+}
+
+IndividualProgressionPaidPurchaseState::View IndividualProgression::GetPaidPurchaseState(Player* player, Era era)
+{
+    if (!player || !IsPaidExpansionActive())
+        return PurchaseState::View::None;
+    uint32 const guid = player->GetGUID().GetCounter();
+    std::shared_lock<std::shared_mutex> lock(_paidExpansionLock);
+    PurchaseState::Record record;
+    auto const purchase = _paidExpansionPurchases.find(guid);
+    if (purchase != _paidExpansionPurchases.end())
+        record = purchase->second;
+    uint8 bits = 0;
+    auto const flags = _paidExpansionFlags.find(guid);
+    if (flags != _paidExpansionFlags.end())
+        bits = flags->second;
+    bool const bit = bits & (era == Era::Tbc ? PaidExpansionBitTbc : PaidExpansionBitWrath);
+    return PurchaseState::ViewFor(record, static_cast<uint8>(era), bit);
+}
+
+void IndividualProgression::ForgetPaidExpansionPurchase(Player* player)
+{
+    if (!player)
+        return;
+    std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
+    _paidExpansionPurchases.erase(player->GetGUID().GetCounter());
 }
 
 // "First login" means the character's first login with the feature ON. Every
@@ -449,7 +562,8 @@ class IndividualProgression_PaidExpansionPlayerScript : public PlayerScript
 public:
     IndividualProgression_PaidExpansionPlayerScript() : PlayerScript("IndividualProgression_PaidExpansion",
         { PLAYERHOOK_ON_SEND_INITIAL_PACKETS_BEFORE_ADD_TO_MAP, PLAYERHOOK_ON_LOGIN,
-          PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE, PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT }) { }
+          PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE, PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT,
+          PLAYERHOOK_ON_LOGOUT }) { }
 
     // Defence in depth: Core's CompleteQuest invokes this veto BEFORE setting
     // quest COMPLETE. Conditions.ScriptName is not evaluated by our pinned
@@ -538,9 +652,14 @@ public:
         sIndividualProgression->SendPaidExpansionReminder(player);
     }
 
-    // No logout hook: erasing on OnPlayerLogout left a window where a paid,
-    // still in-world character read as unpaid. The entry (purchase bits only)
-    // is replaced on every load, so a stale one is never used.
+    // Purchase bits are NOT erased at logout: that left a window where a
+    // paid, still in-world character read as unpaid; they are replaced on
+    // every load. Only the unresolved-purchase record is forgotten here: its
+    // callback dies with the session and the next login reads the DB.
+    void OnPlayerLogout(Player* player) override
+    {
+        sIndividualProgression->ForgetPaidExpansionPurchase(player);
+    }
 };
 
 // Hide the ordinary quest-giver menu for a normal unpaid human without

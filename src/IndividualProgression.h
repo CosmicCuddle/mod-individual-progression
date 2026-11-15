@@ -20,10 +20,13 @@
 #include "IndividualProgressionExpansionPolicy.h"
 #include "IndividualProgressionReceiptPolicy.h"
 #include "IndividualProgressionStageSnapshot.h"
+#include "IndividualProgressionPaidPurchaseState.h"
 
 // Lets dependent modules (e.g. Character Services) detect the paid expansion
 // API at compile time and keep building against an IP without it.
-#define COSMIC_IP_PAID_EXPANSION_API_VERSION 1
+// v2: PurchaseExpansion returns Submitted/PurchasePending (never Success);
+// success is durable only when GetPaidPurchaseState reports Active.
+#define COSMIC_IP_PAID_EXPANSION_API_VERSION 2
 #include <atomic>
 #include <mutex>
 #include <regex>
@@ -432,6 +435,10 @@ public:
     // the expansion vendor opens the next era.
     bool paidExpansionEnabled = false;
     bool paidExpansionGrandfatherStage13 = false;
+    // Release gate, default OFF: stage the canonical empty v1 receipt for a
+    // character whose paid row is truly ABSENT, so it can buy. Malformed,
+    // legacy or inconsistent rows are never commissioned or overwritten.
+    bool paidExpansionCommissionMissingReceipt = false;
     // F14: verified headless racial RandomBot login stage floor. Do not
     // enable until observer+combat+WHO concealment is actually wired.
     bool f14ForceVerifiedRandomBotTbcFloorOnLogin = false;
@@ -611,6 +618,13 @@ public:
     void LoadPaidExpansionEntitlement(Player* player);
     void EvaluatePaidExpansionGrandfather(Player* player);
     void SendPaidExpansionReminder(Player* player);
+    // Durable purchase acknowledgement (API v2). A vendor must not report a
+    // purchase as complete unless this returns View::Active for that era.
+    IndividualProgressionPaidPurchaseState::View GetPaidPurchaseState(Player* player, IndividualProgressionExpansionPolicy::Era era);
+    // Commit callback (the purchasing session's query-callback context).
+    void CompletePaidExpansionPurchase(WorldSession* session, uint32 guid, uint64 token, bool committed);
+    // Logout: forget an unresolved purchase; the next login reads the DB.
+    void ForgetPaidExpansionPurchase(Player* player);
 
 private:
     struct AccountMatch
@@ -639,6 +653,9 @@ private:
     std::unordered_map<uint32, uint8> _paidExpansionFlags;
     // Missing or invalid RAW settings are unknown, never free purchases.
     std::unordered_map<uint32, IndividualProgressionReceiptPolicy::Ledger> _paidExpansionLedgers;
+    // Unresolved/confirmed purchase per character for this session (same lock).
+    std::unordered_map<uint32, IndividualProgressionPaidPurchaseState::Record> _paidExpansionPurchases;
+    uint64 _paidExpansionNextToken = 0;
     std::shared_mutex _paidExpansionLock;
 
     // Stage snapshot registry (full GUID key); its own lock, never held

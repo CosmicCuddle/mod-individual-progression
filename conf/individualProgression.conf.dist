@@ -196,6 +196,20 @@ IndividualProgression.PaidExpansion.Enable = 0
 #
 IndividualProgression.PaidExpansion.GrandfatherStage13 = 0
 
+# IndividualProgression.PaidExpansion.CommissionMissingReceipt
+#
+#        RELEASE GATE - owner decision, default 0. With PaidExpansion on,
+#        a character can only buy from a valid canonical paid receipt row.
+#        0 = OFF (default). A character with NO row cannot buy (fail
+#            closed); nothing is written.
+#        1 = At login, a character whose paid row is truly ABSENT (no row at
+#            all) gets the canonical empty receipt staged in memory; it is
+#            saved with the character. Malformed, legacy, wrong-length or
+#            inconsistent rows are NEVER commissioned or overwritten; they
+#            need staff repair.
+#
+IndividualProgression.PaidExpansion.CommissionMissingReceipt = 0
+
 # IndividualProgression.PaidExpansion.VendorName
 #
 #        NPC name shown in the yellow login reminder.

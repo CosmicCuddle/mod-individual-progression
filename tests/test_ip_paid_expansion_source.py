@@ -310,20 +310,26 @@ class PurchaseSequence(unittest.TestCase):
         self.assertLess(check, bail)
         self.assertLess(bail, debit)
 
-    def test_flag_after_debit_then_verify_refund_save_without_quest_grant(self):
+    def test_reserve_debit_stage_then_acknowledged_commit_without_quest_grant(self):
+        # API v2 (durable purchase, 14 Nov 2026): the former in-memory
+        # flag/verify/refund sequence before a fire-and-forget save is
+        # replaced by reserve -> debit -> stage receipt -> ONE transaction
+        # committed with a callback. The entitlement bit is set only by the
+        # confirmed callback; no refund exists anywhere on this path.
         p = self.PURCHASE
+        reserve = p.index("record = PurchaseState::Submit(eraValue, token, reinterpret_cast<std::uintptr_t>(session));")
         debit = p.index("player->ModifyMoney(-static_cast<int32>(costCopper));")
-        flag = p.index("SetPaidExpansionFlag(player, index, FlagPaid);")
-        verify = p.index("if (!opened)")
-        undo = p.index("SetPaidExpansionFlag(player, index, FlagNone);")
-        refund = p.index("player->ModifyMoney(static_cast<int32>(costCopper));")
-        save = p.index("player->SaveToDB(false, false);")
-        self.assertTrue(debit < flag < verify < undo < refund < save)
+        save = p.index("player->SaveToDB(trans, false, false);")
+        commit = p.index("session->AddTransactionCallback(CharacterDatabase.AsyncCommitTransaction(trans)).AfterComplete(")
+        self.assertTrue(reserve < debit < save < commit)
+        self.assertNotIn("SetPaidExpansionFlag(", p)
+        self.assertNotIn("ModifyMoney(static_cast<int32>(costCopper))", code(EXP))
+        self.assertNotIn("SaveToDB(false, false)", p)
+        self.assertIn("return PurchaseResult::Submitted;", p)
+        self.assertNotIn("return PurchaseResult::Success;", p)
         # Payment records entitlement but does not itself award stage8 or 10259.
         self.assertNotIn("UpdateProgressionState(", p)
-        self.assertIn("GetPlayerProgressionFromQuests(player) == rawBeforePurchase", p)
-        self.assertIn("GetExpansionFacts(player).tbcPaid", p)
-        self.assertIn("GetEffectiveProgression(player) >= WrathAccessStage", p)
+        self.assertNotIn("RewardQuest(", p)
 
     def test_no_direct_stage_writes_or_wrath_tier_skip(self):
         self.assertNotIn("ForceUpdateProgressionState", code(EXP))
@@ -554,7 +560,7 @@ class UnpaidTbcQuestAccessGate(unittest.TestCase):
         script = body(EXP, "class IndividualProgression_PaidExpansionPlayerScript")
         self.assertNotRegex(script, r"(?m)^\s*#\s*if(?:def|ndef)?\b")
         script = code(re.sub(r"/\*.*?\*/", "", script, flags=re.S))
-        self.assertIn("PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE, PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT })",
+        self.assertIn("PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE, PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT, PLAYERHOOK_ON_LOGOUT })",
                       " ".join(script.split()))
         self.assertEqual(script.count("PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT"), 1)
         self.assertNotIn("GetDialogStatus", EXP)
@@ -576,7 +582,8 @@ class StrictReceiptRuntime(unittest.TestCase):
         reader = code(body(EXP, "static ReceiptPolicy::Decoded ReadStrictPaidLedger(uint32 guid)"))
         self.assertIn("SELECT data FROM character_settings", reader)
         self.assertIn("ReceiptPolicy::DecodeRaw(", reader)
-        self.assertIn("ReceiptPolicy::Decoded const ledger = ReadStrictPaidLedger(guid);", loader)
+        self.assertIn("ReceiptPolicy::Decoded const stored = ReadStrictPaidLedger(guid);", loader)
+        self.assertIn("ReceiptPolicy::Decoded const ledger = PurchaseState::CommissionIfAbsent(stored, commissionGate);", loader)
         self.assertNotIn("GetPlayerSetting(", loader)
         self.assertIn("_paidExpansionLedgers.erase(guid);", loader)
         acct = code(body(EXP, "uint8 IndividualProgression::GetAccountEffectiveProgression(uint32 accountId)"))
@@ -601,12 +608,12 @@ class StrictReceiptRuntime(unittest.TestCase):
         self.assertRegex(purchase, re.escape(all_slots) +
                          r"\s*\n\s*" + re.escape(write_slot) + r"\s*\n\s*\{")
         # A later same-session purchase needs the updated cached receipt.
-        cache_store = "_paidExpansionLedgers[player->GetGUID().GetCounter()] = stagedLedger;"
+        cache_store = "_paidExpansionLedgers[guid] = stagedLedger;"
         self.assertEqual(purchase.count(cache_store), 1)
-        self.assertLess(purchase.index("if (!opened)"), purchase.index(all_slots))
+        self.assertLess(purchase.index("player->ModifyMoney(-static_cast<int32>(costCopper));"), purchase.index(all_slots))
         self.assertLess(purchase.index(all_slots), purchase.index(write_slot))
         self.assertLess(purchase.index(write_slot), purchase.index(cache_store))
-        self.assertLess(purchase.index(cache_store), purchase.index("player->SaveToDB(false, false);"))
+        self.assertLess(purchase.index(cache_store), purchase.index("player->SaveToDB(trans, false, false);"))
         # No post-RecordPurchase direct assignment may zero any staged receipt
         # slot before debit. M7 used: stagedLedger.fields[2] = 0;.
         validated_to_write = purchase[purchase.index("ReceiptPolicy::RecordPurchase("):
@@ -634,7 +641,8 @@ class StrictReceiptRuntime(unittest.TestCase):
         self.assertNotIn("uint32 const timeSlot", purchase)
         self.assertNotIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, moneySlot", purchase)
         self.assertNotIn("player->UpdatePlayerSetting(PaidExpansionSettingSource, timeSlot", purchase)
-        self.assertEqual(purchase.count("player->SaveToDB(false, false);"), 1)
+        self.assertEqual(purchase.count("player->SaveToDB(trans, false, false);"), 1)
+        self.assertEqual(purchase.count("SaveToDB("), 1)
         self.assertNotIn("PlayerSettingsStore::UpdateSetting(", purchase)
         self.assertNotIn("CharacterDatabase.Execute(", purchase)
 
@@ -659,7 +667,14 @@ class StorageAndThreads(unittest.TestCase):
         self.assertIn("PLAYERHOOK_ON_BEFORE_QUEST_COMPLETE", script)
         self.assertIn("sIndividualProgression->LoadPaidExpansionEntitlement(player);",
                       body(script, "void OnPlayerSendInitialPacketsBeforeAddToMap("))
-        self.assertNotIn("OnPlayerLogout", code(script))
+        # API v2: the logout hook forgets ONLY the unresolved-purchase
+        # record; purchase bits and the cached receipt are kept.
+        logout = code(body(script, "void OnPlayerLogout(Player* player) override"))
+        self.assertRegex(logout, r"void OnPlayerLogout\(Player\* player\) override\s*\{\s*sIndividualProgression->ForgetPaidExpansionPurchase\(player\);\s*\}?\s*$")
+        forget = code(body(EXP, "void IndividualProgression::ForgetPaidExpansionPurchase(Player* player)"))
+        self.assertIn("_paidExpansionPurchases.erase(", forget)
+        self.assertNotIn("_paidExpansionFlags", forget)
+        self.assertNotIn("_paidExpansionLedgers", forget)
         self.assertNotIn("ForgetPaidExpansionEntitlement", EXP + HEADER)
 
     def test_cache_tracks_purchase_bits_but_mirrors_all_receipt_slots(self):
@@ -718,7 +733,7 @@ class PolicyHeader(unittest.TestCase):
             self.assertIn(f"constexpr std::uint8_t {name} = {value};", POLICY)
 
     def test_api_version_macro_for_dependent_modules(self):
-        self.assertIn("#define COSMIC_IP_PAID_EXPANSION_API_VERSION 1\n", HEADER)
+        self.assertIn("#define COSMIC_IP_PAID_EXPANSION_API_VERSION 2\n", HEADER)
         self.assertLess(HEADER.index('#include "IndividualProgressionExpansionPolicy.h"'),
                         HEADER.index("#define COSMIC_IP_PAID_EXPANSION_API_VERSION"))
 
