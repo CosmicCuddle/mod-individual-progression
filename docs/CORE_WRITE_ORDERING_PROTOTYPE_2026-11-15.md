@@ -104,7 +104,7 @@ Checks per run: 138 at 1 worker (K12 is skipped, see §5), 148 at 2, 149 at 4 an
 ## 4. Mutation check (each mutant must make the harness fail)
 Tooling: `tests/db_harness/run_keyed_mutations.sh` applies each mutant in `tests/db_harness/keyed_mutants.py` to a copy of the header, rebuilds, and runs `keyed 4`.
 
-**22/22 mutants are killed** (`keyed 4`; first failing scenario shown).
+**27/27 mutants are killed** (22 in revision 2, plus M24–M28 in revision 3) (`keyed 4`; first failing scenario shown).
 
 | Mutant | What it breaks | Killed by |
 |---|---|---|
@@ -130,6 +130,11 @@ Tooling: `tests/db_harness/run_keyed_mutations.sh` applies each mutant in `tests
 | M9 | A cancelled running read is still delivered | K3 |
 | M10 | A build exception does not advance the key | K13 (the drain times out) |
 | M15 | No stall report | K12 |
+| M24 | No freeze on inconsistent purchase proof | K24 |
+| M25 | Journal fence not compared | K24 (fence variant) |
+| M26 | Frozen key still pumps queued ops | K24 |
+| M27 | Frozen key still admits writes | K24 |
+| M28 | Callback exception propagates | K25 (the harness aborts on the uncaught exception) |
 
 Not mutation-tested, with the reason:
 - **Per-key FIFO itself:** its "mutant" is the unkeyed baseline, `run_harness.sh reverse 2`, which overwrites a confirmed purchase.
@@ -166,3 +171,14 @@ Not mutation-tested, with the reason:
 | Marker-before-first-lock race | Closed by the claim: once it commits, no transaction of the old fence can commit, whatever it had executed | K15, K23 |
 | One worker blocks all async work | Unchanged; documented (§5). In-pool design: a dedicated reconciliation connection. | — |
 | Multi-key writer inventory | Unchanged; Core lane | — |
+
+## 7. Revision 3 (CS01 review 6895011029)
+| Finding | Answer | Evidence |
+|---|---|---|
+| HIGH: the log proves the op but the journal mismatches, yet queued writes still pump | The key **freezes**: queued ops stay held, new writes get `Frozen`, logins are refused. Only an explicit `ResolveFrozen(guid)` (authoritative reconciliation) releases it. | K24 (fence-mismatch and op-mismatch variants); M24, M26, M27 |
+| HIGH: journal fence not verified | The journal check compares guid, seq, op **and fence** | K24 fence variant; M25 |
+| HIGH: a callback exception can leave the key in `Delivering` | Every waiter and read callback runs inside a catch. The key still leaves `Delivering`, the remaining waiters are still called, and the key freezes (the caller's state is unknown). | K25; M28 |
+| Process nonce from wall clock only | Wall clock + pid + 64 random bits (prototype only; production identity is a separate review) | — |
+| `_keys` lifetime and captured SQL/builder bytes unbounded; prepared binds and schema retention | Open, for production review. Not addressed in the prototype. | — |
+
+**Results:** 160/170/171/171 checks at 1/2/4/8 workers; restart 3 + 6; `netloss` 13/13.
