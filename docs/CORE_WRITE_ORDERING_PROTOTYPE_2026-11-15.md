@@ -104,7 +104,7 @@ Checks per run: 138 at 1 worker (K12 is skipped, see §5), 148 at 2, 149 at 4 an
 ## 4. Mutation check (each mutant must make the harness fail)
 Tooling: `tests/db_harness/run_keyed_mutations.sh` applies each mutant in `tests/db_harness/keyed_mutants.py` to a copy of the header, rebuilds, and runs `keyed 4`.
 
-**27/27 mutants are killed** (22 in revision 2, plus M24–M28 in revision 3) (`keyed 4`; first failing scenario shown).
+**30/30 mutants are killed** (22 in revision 2, M24–M28 in revision 3, M29–M31 in revision 4) (`keyed 4`; first failing scenario shown).
 
 | Mutant | What it breaks | Killed by |
 |---|---|---|
@@ -135,6 +135,9 @@ Tooling: `tests/db_harness/run_keyed_mutations.sh` applies each mutant in `tests
 | M26 | Frozen key still pumps queued ops | K24 |
 | M27 | Frozen key still admits writes | K24 |
 | M28 | Callback exception propagates | K25 (the harness aborts on the uncaught exception) |
+| M29 | Blind unfreeze (no proof re-read) | K24 |
+| M30 | Shutdown callback outside `Invoke` | K26 (abort) |
+| M31 | Same-guid duplicate without the earlier write-log proof | K27 |
 
 Not mutation-tested, with the reason:
 - **Per-key FIFO itself:** its "mutant" is the unkeyed baseline, `run_harness.sh reverse 2`, which overwrites a confirmed purchase.
@@ -182,3 +185,14 @@ Not mutation-tested, with the reason:
 | `_keys` lifetime and captured SQL/builder bytes unbounded; prepared binds and schema retention | Open, for production review. Not addressed in the prototype. | — |
 
 **Results:** 160/170/171/171 checks at 1/2/4/8 workers; restart 3 + 6; `netloss` 13/13.
+
+## 8. Revision 4 (CS01 review 6895440140)
+| Finding | Answer | Evidence |
+|---|---|---|
+| `ResolveFrozen` was a blind unfreeze | `ResolveFrozen(guid, callerStateRecovered, done)`. It refuses without caller recovery. A proof freeze is only released after a re-read finds the write log **and** journal consistent for the frozen op (seq, fence, op, guid). | K24 (refuses without recovery, refuses before repair, releases after an authoritative repair); M29 |
+| Shutdown deadline callbacks ran outside `Invoke` | They're contained: every waiter is settled exactly once, Shutdown returns, and late DB callbacks are ignored | K26; M30 |
+| Same-guid duplicate trusted on guid alone | A DuplicatePurchase needs the earlier journal row's own write-log row (same seq, fence, op); otherwise Unresolved and frozen | K27; M31 |
+
+Production must also validate the receipt in `character_settings` before any grant. That's out of scope for this harness and stays open, together with `_keys` lifetime, byte bounds, prepared binds and log retention.
+
+**Results:** 174/184/185/185 checks at 1/2/4/8 workers; restart 3 + 6; `netloss` 13/13. Verified against the Core `82d340c1` DB layer (unchanged from `21ff1973`).
