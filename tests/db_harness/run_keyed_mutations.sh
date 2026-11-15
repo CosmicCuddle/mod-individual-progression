@@ -26,7 +26,8 @@ PY
     -lmysqlclient -lssl -lcrypto -lboost_system -lboost_filesystem -lboost_program_options \
     -lboost_iostreams -lboost_thread -lz -lpthread -ldl" > "$D/build.log" 2>&1 || { echo "$name BUILD-FAIL"; survived=1; continue; }
   timeout 400 "$D/keyed" "$CONN" keyed 4 > "$D/run.log" 2>&1; rc=$?
-  if [ $rc -ne 0 ]; then echo "$name KILLED rc=$rc first: $(grep -m1 '^FAIL' "$D/run.log" | sed 's/.*harness.cpp://')"
+  if [ $rc -eq 2 ] || ! grep -q "KEYED ORDERING HARNESS\|^FAIL" "$D/run.log"; then echo "$name ERROR (harness could not run, rc=$rc)"; survived=1
+  elif [ $rc -ne 0 ]; then echo "$name KILLED rc=$rc first: $(grep -m1 '^FAIL' "$D/run.log" | sed 's/.*harness.cpp://')"
   else echo "$name SURVIVED"; survived=1; fi
   sleep 5 # let any external lock holder finish
 done

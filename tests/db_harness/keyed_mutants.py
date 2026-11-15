@@ -7,7 +7,7 @@ DELIVER = """            k.state = KeyState::Delivering;
             std::vector<Waiter> waiters = TakeWaiters(k.current);
             for (auto& w : waiters)
                 if (w.done)
-                    w.done(w.purchase ? forPurchase : forSaves);
+                    Invoke(k, [&] { w.done(w.purchase ? forPurchase : forSaves); });
             k.running = false;
             k.current = Op();
             k.state = KeyState::Idle;
@@ -21,7 +21,7 @@ DELIVER_LATE = """            std::vector<Waiter> waiters = TakeWaiters(k.curren
             Pump(guid, k);
             for (auto& w : waiters)
                 if (w.done)
-                    w.done(w.purchase ? forPurchase : forSaves);"""
+                    Invoke(k, [&] { w.done(w.purchase ? forPurchase : forSaves); });"""
 M = {
  # ambiguity / proof (H1)
  "M2_advance_on_ambiguous": [(UNCERTAIN, "                    DeliverAndAdvance(guid, key, Outcome::NotCommitted, Outcome::NotCommitted);\n                    return;")],
@@ -52,6 +52,12 @@ M = {
  "M20_cross_session_coalescing": [(" && tail.epoch == epoch)", ")")],
  "M21_purchase_coalescing": [("if (!purchase && !k.queue.empty())", "if (!k.queue.empty())"),
                              (" && tail.purchaseId.empty() && ", " && ")],
+ # freeze on inconsistent proof / callback failure (CS01 6895011029)
+ "M24_no_freeze_on_inconsistent_proof": [("                        if (!journalMine)\n                            Freeze(key);", "                        if (false)\n                            Freeze(key);")],
+ "M25_journal_fence_ignored": [("\n                            && f[8].Get<uint64_t>() == op.fence);", ");")],
+ "M26_frozen_ignored_by_pump": [(" && !k.abandoned && !k.frozen)", " && !k.abandoned)")],
+ "M27_frozen_admission_ignored": [("            if (it->second.frozen)\n                return Admit::Frozen;\n", "")],
+ "M28_callback_exception_propagates": [("                ++_stats.callbackExceptions;\n                Freeze(k);", "                ++_stats.callbackExceptions;\n                throw;")],
  # lifecycle
  "M8_no_shutdown_drain": [("while (!Idle() && Clock::now() < deadline)", "while (false)")],
  "M9_running_cancel_ignored": [("k.current.discard = true;", "k.current.discard = false;")],

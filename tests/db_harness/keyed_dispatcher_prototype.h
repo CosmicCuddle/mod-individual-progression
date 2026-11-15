@@ -46,6 +46,8 @@
 #include <deque>
 #include <functional>
 #include <optional>
+#include <random>
+#include <unistd.h>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -56,7 +58,7 @@ namespace KeyedProto
 {
     using Clock = std::chrono::steady_clock;
 
-    enum class Admit { Queued, Coalesced, StaleEpoch, NoSession, Backpressure, ShuttingDown, PurchaseInFlight, Fenced };
+    enum class Admit { Queued, Coalesced, StaleEpoch, NoSession, Backpressure, ShuttingDown, PurchaseInFlight, Fenced, Frozen };
     enum class Outcome { Committed, NotCommitted, DuplicatePurchase, IdConflict, BuildFailed, Unresolved };
     enum class KeyState { Idle, Claiming, Running, Uncertain, Delivering };
 
@@ -72,6 +74,7 @@ namespace KeyedProto
             case Admit::ShuttingDown: return "ShuttingDown";
             case Admit::PurchaseInFlight: return "PurchaseInFlight";
             case Admit::Fenced: return "Fenced";
+            case Admit::Frozen: return "Frozen";
         }
         return "?";
     }
@@ -128,7 +131,7 @@ namespace KeyedProto
     {
         uint64_t writesDispatched = 0, readsDispatched = 0, reconciliations = 0, claimAttempts = 0, coalesced = 0,
                  backpressure = 0, staleEpoch = 0, cancelled = 0, buildFailures = 0, fencedOut = 0,
-                 idConflicts = 0, maxQueuedPerKey = 0, maxWaitersSeen = 0;
+                 idConflicts = 0, maxQueuedPerKey = 0, maxWaitersSeen = 0, frozen = 0, callbackExceptions = 0;
     };
 
     class Dispatcher
@@ -139,9 +142,36 @@ namespace KeyedProto
         // harness_purchase_journal(purchase_id PK, guid, seq, fence, op).
         Dispatcher(Limits limits, Hooks hooks)
             : _limits(limits), _hooks(std::move(hooks)),
-              _nonce(std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  std::chrono::system_clock::now().time_since_epoch()).count()))
+              _nonce(MakeNonce())
         {
+        }
+
+        // Process identity for op/claim tokens: wall clock + pid + 64 random bits.
+        // (Prototype only: production identity needs its own review.)
+        static std::string MakeNonce()
+        {
+            std::random_device rd;
+            uint64_t const r = (uint64_t(rd()) << 32) ^ rd();
+            return Acore::StringFormat("{:x}.{}.{:x}", std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count(), static_cast<long>(::getpid()), r);
+        }
+
+        // Explicit authoritative reconciliation (operator / audit) of a Frozen
+        // key: only after this do queued ops and new admissions proceed.
+        bool ResolveFrozen(uint32_t guid)
+        {
+            auto it = _keys.find(guid);
+            if (it == _keys.end() || !it->second.frozen)
+                return false;
+            it->second.frozen = false;
+            Pump(guid, it->second);
+            return true;
+        }
+
+        bool Frozen(uint32_t guid) const
+        {
+            auto it = _keys.find(guid);
+            return it != _keys.end() && it->second.frozen;
         }
 
         Dispatcher(Dispatcher const&) = delete;
@@ -154,6 +184,9 @@ namespace KeyedProto
         {
             if (_shuttingDown || TotalPending() >= _limits.maxTotalPending || _totalWaiters >= _limits.maxTotalWaiters)
                 return 0;
+            auto existing = _keys.find(guid);
+            if (existing != _keys.end() && existing->second.frozen)
+                return 0; // login refused until explicit reconciliation
             Key& k = _keys[guid];
             k.leaseEpoch = ++_epochCounter;
             k.leaseOpen = true;
@@ -389,6 +422,7 @@ namespace KeyedProto
             bool leaseOpen = false;
             bool owned = false;            // this process holds the marker fence
             bool fenced = false;           // another claimant took the fence: refuse writes
+            bool frozen = false;           // inconsistent proof / callback failure: nothing runs until ResolveFrozen
             bool claimQueued = false;
             uint64_t fence = 0;
             uint64_t lastSeq = 0;
@@ -420,6 +454,8 @@ namespace KeyedProto
             }
             if (!it->second.leaseOpen)
                 return Admit::NoSession;
+            if (it->second.frozen)
+                return Admit::Frozen;
             if (write && it->second.fenced)
                 return Admit::Fenced;
             return Admit::Queued;
@@ -509,7 +545,7 @@ namespace KeyedProto
         // Start the head op if the key is free (the per-key FIFO guarantee).
         void Pump(uint32_t guid, Key& k)
         {
-            while (!k.running && k.state == KeyState::Idle && !k.queue.empty() && !k.abandoned)
+            while (!k.running && k.state == KeyState::Idle && !k.queue.empty() && !k.abandoned && !k.frozen)
             {
                 k.current = std::move(k.queue.front());
                 k.queue.pop_front();
@@ -531,12 +567,36 @@ namespace KeyedProto
             std::vector<Waiter> waiters = TakeWaiters(k.current);
             for (auto& w : waiters)
                 if (w.done)
-                    w.done(w.purchase ? forPurchase : forSaves);
+                    Invoke(k, [&] { w.done(w.purchase ? forPurchase : forSaves); });
             k.running = false;
             k.current = Op();
             k.state = KeyState::Idle;
             k.stallReported = false;
             Pump(guid, k);
+        }
+
+        // A throwing callback leaves the caller's state unknown: the key is
+        // frozen (fail closed) but still leaves Delivering, and the remaining
+        // waiters are still called.
+        template <class Fn>
+        void Invoke(Key& k, Fn&& fn)
+        {
+            try
+            {
+                fn();
+            }
+            catch (...)
+            {
+                ++_stats.callbackExceptions;
+                Freeze(k);
+            }
+        }
+
+        void Freeze(Key& k)
+        {
+            if (!k.frozen)
+                ++_stats.frozen;
+            k.frozen = true;
         }
 
         void Schedule(Key& k, std::function<void()> step)
@@ -606,7 +666,7 @@ namespace KeyedProto
             uint64_t const n = reconcile ? k.current.seq : 0;
             std::string const pid = reconcile ? k.current.purchaseId : std::string();
             std::string const sql = Acore::StringFormat(
-                "SELECT m.seq, m.fence, m.owner, l.fence, l.op, j.guid, j.seq, j.op FROM harness_write_seq m "
+                "SELECT m.seq, m.fence, m.owner, l.fence, l.op, j.guid, j.seq, j.op, j.fence FROM harness_write_seq m "
                 "LEFT JOIN harness_write_log l ON l.guid = m.guid AND l.seq = {} "
                 "LEFT JOIN harness_purchase_journal j ON j.purchase_id = '{}' WHERE m.guid = {}", n, pid, guid);
             _queryCallbacks.AddCallback(CharacterDatabase.AsyncQuery(sql)).WithCallback(
@@ -656,8 +716,11 @@ namespace KeyedProto
                     if (logMine)
                     {
                         bool const journalMine = op.purchaseId.empty() || (!f[5].IsNull() && f[5].Get<uint32_t>() == guid
-                            && f[6].Get<uint64_t>() == op.seq && f[7].Get<std::string>() == op.opToken);
+                            && f[6].Get<uint64_t>() == op.seq && f[7].Get<std::string>() == op.opToken
+                            && f[8].Get<uint64_t>() == op.fence);
                         forPurchase = journalMine ? Outcome::Committed : Outcome::Unresolved;
+                        if (!journalMine)
+                            Freeze(key); // inconsistent proof: nothing else runs until explicit reconciliation
                     }
                     else if (!op.purchaseId.empty() && !f[5].IsNull())
                     {
@@ -697,7 +760,7 @@ namespace KeyedProto
                         return;
                     key.state = KeyState::Delivering;
                     if (!key.current.discard && key.current.readDone)
-                        key.current.readDone(r);
+                        Invoke(key, [&] { key.current.readDone(r); });
                     DeliverAndAdvance(guid, key, Outcome::Committed, Outcome::Committed);
                 });
         }

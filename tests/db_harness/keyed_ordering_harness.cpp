@@ -4,7 +4,7 @@
 // real IP receipt policy; the dispatcher under test is
 // keyed_dispatcher_prototype.h. THROWAWAY DATABASE ONLY (run_harness.sh).
 //
-//   keyed <workers>   K1-K10, K12-K21, K23 (K12 needs >= 2 workers)
+//   keyed <workers>   K1-K10, K12-K21, K23-K25 (K12 needs >= 2 workers)
 //   restart1          K11 part 1: purchase left Unresolved at shutdown
 //   restart2          K11 part 2: a NEW process reconciles it from the DB
 //   netloss           K22: real COMMIT network loss through commit_drop_proxy.py
@@ -919,6 +919,80 @@ namespace
             Name(a), Name(b), Name(after), Name(c), (long long)s.money, (unsigned long long)s.markerSeq);
     }
 
+    // K24 (CS01 6895011029): the write log proves THIS op committed, but the
+    // purchase journal row disagrees (wrong fence, then wrong op). The purchase
+    // is Unresolved and the key FREEZES: the save queued behind it does not
+    // run, new writes and logins are refused, until ResolveFrozen.
+    void K24InconsistentProofFreezes(char const* variant)
+    {
+        uint32 const g = 1173;
+        Reset(g, 1000);
+        Player p = Load(g);
+        bool forged = false;
+        Hooks h;
+        h.beforeReconcile = [&](InFlight const& w)
+        {
+            if (w.guid != g || forged)
+                return;
+            forged = true;
+            bool const badFence = std::string(variant) == "fence";
+            Mysql(Acore::StringFormat(
+                "UPDATE harness_write_seq SET seq = {}, fence = {} WHERE guid = {}; "
+                "INSERT INTO harness_write_log (guid, seq, fence, op) VALUES ({}, {}, {}, '{}'); "
+                "INSERT INTO harness_purchase_journal (purchase_id, guid, seq, fence, op) VALUES ('{}', {}, {}, {}, '{}');",
+                w.seq, w.fence, g, g, w.seq, w.fence, w.op, w.purchaseId, g, w.seq,
+                badFence ? w.fence + 7 : w.fence, badFence ? w.op : std::string("someone-else")));
+        };
+        Dispatcher d({}, h);
+        uint64 const e = d.BeginSession(g);
+        CHECK(Drain(d));
+        StagePurchase(p, 400);
+        p.failNext = true; // our own attempt fails; the forged rows decide
+        Outcome op = Outcome::Committed, os = Outcome::Unresolved;
+        CHECK(d.SubmitPurchase(g, e, Acore::StringFormat("k24-{}", variant), SaveBuilder(&p), [&](Outcome o) { op = o; }) == Admit::Queued);
+        CHECK(d.SubmitSave(g, e, SaveBuilder(&p), [&](Outcome o) { os = o; }) == Admit::Queued);
+        RunUntil(d, [&] { return op != Outcome::Committed; }, 10000);
+        RunUntil(d, [] { return false; }, 500); // give a wrongly pumped save time to run
+        bool const frozen = d.Frozen(g);
+        bool const queuedHeld = os == Outcome::Unresolved && d.Queued(g) == 1 && ReadDb(g).tailRows == 0;
+        Admit const more = d.SubmitSave(g, e, SaveBuilder(&p), [](Outcome) {});
+        uint64 const login = d.BeginSession(g);
+        CHECK(op == Outcome::Unresolved && frozen && queuedHeld && more == Admit::Frozen && login == 0);
+        CHECK(d.ResolveFrozen(g)); // explicit authoritative reconciliation
+        CHECK(Drain(d));
+        CHECK(os == Outcome::Committed && !d.Frozen(g));
+        std::printf("K24 inconsistent proof (%s mismatch): purchase=%s frozen=%d queued_save_held=%d new_write=%s login_refused=%d "
+            "after_ResolveFrozen queued_save=%s\n", variant, Name(op), frozen, queuedHeld, Name(more), login == 0, Name(os));
+    }
+
+    // K25 (CS01 6895011029): a throwing callback never leaves the key stuck in
+    // Delivering; the key freezes (caller state unknown) until ResolveFrozen.
+    void K25CallbackException()
+    {
+        uint32 const g = 1174;
+        Reset(g, 1000);
+        Player p = Load(g);
+        Dispatcher d({}, {});
+        uint64 const e = d.BeginSession(g);
+        CHECK(Drain(d));
+        bool otherWaiterCalled = false, readDelivered = false;
+        p.sleepSec = 0.3;
+        CHECK(d.SubmitSave(g, e, SaveBuilder(&p), [](Outcome) { throw std::runtime_error("callback failure"); }) == Admit::Queued);
+        CHECK(d.SubmitSave(g, e, SaveBuilder(&p), [&](Outcome) { otherWaiterCalled = true; }) == Admit::Queued);
+        // The second save coalesces? No: the first is running, so this one is queued.
+        CHECK(d.SubmitRead(g, e, LoginSql(g), [&](QueryResult) { readDelivered = true; }) == Admit::Queued);
+        RunUntil(d, [&] { return d.GetStats().callbackExceptions == 1; }, 5000);
+        RunUntil(d, [] { return false; }, 300);
+        bool const notStuck = d.StateOf(g) == KeyState::Idle && d.Frozen(g);
+        bool const held = !otherWaiterCalled && !readDelivered && d.Queued(g) == 2;
+        CHECK(notStuck && held);
+        CHECK(d.ResolveFrozen(g));
+        CHECK(Drain(d));
+        CHECK(otherWaiterCalled && readDelivered && !d.Frozen(g));
+        std::printf("K25 callback exception: exceptions=%llu key_state_idle_and_frozen=%d queued_held=%d after_ResolveFrozen save=%d read=%d\n",
+            (unsigned long long)d.GetStats().callbackExceptions, notStuck, held, otherWaiterCalled, readDelivered);
+    }
+
     // K22: REAL network loss at COMMIT (commit_drop_proxy.py between Core and
     // MySQL; no test hook). Core reconnects and reports the transaction as
     // failed ("may or may not have been written"); reconciliation decides.
@@ -1090,6 +1164,9 @@ int main(int argc, char** argv)
         K20NoCrossSessionCoalesce();
         K21PurchaseNeverCoalesces();
         K23TwoWriters();
+        K24InconsistentProofFreezes("fence");
+        K24InconsistentProofFreezes("op");
+        K25CallbackException();
     }
     CharacterDatabase.Close();
     MySQL::Library_End();
