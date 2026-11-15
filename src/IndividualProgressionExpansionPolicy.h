@@ -56,7 +56,12 @@ namespace IndividualProgressionExpansionPolicy
         NotEligible,               // final milestone of the previous era not earned
         BlockedByProgressionLimit, // server progression cap does not reach the era
         EntryUnavailable,          // persistence/marker template missing: fail closed
-        InsufficientFunds
+        InsufficientFunds,
+        // API v2 (appended; earlier values keep their numbers). PurchaseExpansion
+        // returns Submitted instead of Success: debited and queued, NOT yet
+        // durable. Access opens only when the commit callback confirms it.
+        Submitted,
+        PurchasePending            // an earlier purchase is unresolved: no debit
     };
 
     struct CharacterFacts

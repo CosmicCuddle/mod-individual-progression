@@ -1737,6 +1737,7 @@ private:
         sIndividualProgression->AutoAttune = sConfigMgr->GetOption<bool>("IndividualProgression.AutoAttune", false);
         sIndividualProgression->paidExpansionEnabled = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.Enable", false);
         sIndividualProgression->paidExpansionGrandfatherStage13 = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.GrandfatherStage13", false);
+        sIndividualProgression->paidExpansionCommissionMissingReceipt = sConfigMgr->GetOption<bool>("IndividualProgression.PaidExpansion.CommissionMissingReceipt", false);
         sIndividualProgression->paidExpansionVendorName = sConfigMgr->GetOption<std::string>("IndividualProgression.PaidExpansion.VendorName", "Chronomancer Vezrath");
 #if defined(COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT) && COSMIC_IP_F14_VERIFIED_ACTOR_PUBLICATION_EXPERIMENT >= 1
         // The atomic actor-source gate is published only after LoadConfig.

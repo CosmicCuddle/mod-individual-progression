@@ -1309,3 +1309,34 @@ Focused native tests require every completeness family independently, exercise t
 
   Hosted CI is milestone-only. No Worldserver link or gameplay test.
 - **Live status/approval/rollback:** NOT MERGED, NOT DEPLOYED, OFF by default; owner approval required. Rollback: keep the option `0`, or close the DRAFT; no host, DB, config or client was touched.
+
+## IP-PAID-DURABLE-PURCHASE-20261114: durable paid purchase acknowledgement and commissioning gate (DRAFT/OFF), CS03-IP
+- **Owner / request:**
+  - owner: CosmicCuddle (Coordination #61 and #18);
+  - requested by CS01 in Issue #13 comment 6884694721.
+- **Branch:** `feature/cs03-ip-paid-durable-purchase-20261114`, from `master` `05ff032b`.
+- **Behaviour, with `PaidExpansion.Enable = 1` only:**
+  - a purchase returns `Submitted`;
+  - access opens only when the `AsyncCommitTransaction` callback confirms the single gold+receipt transaction;
+  - a failure is `Unconfirmed`, with no refund, retry or second charge;
+  - duplicate clicks return `PurchasePending`;
+  - a teleport or reconnect reload keeps the staged cache.
+- **API:** `COSMIC_IP_PAID_EXPANSION_API_VERSION 2`, plus `GetPaidPurchaseState`.
+- **New option:** `IndividualProgression.PaidExpansion.CommissionMissingReceipt = 0`. It stages the canonical empty receipt for a truly absent row only.
+- **Files:**
+  - `src/IndividualProgressionPaidPurchaseState.h` (new, pure);
+  - `src/IndividualProgressionExpansion.cpp`, `src/IndividualProgression.h`, `src/IndividualProgression.cpp`, `src/IndividualProgressionExpansionPolicy.h`;
+  - conf;
+  - tests;
+  - `docs/IP_PAID_DURABLE_PURCHASE_2026-11-14.md`.
+- **Dependencies:**
+  - stock Core `AsyncCommitTransaction`/`AddTransactionCallback`;
+  - Core's existing paid-row preservation;
+  - no SQL, DBC or client change.
+- **Tests:** model 1,786/1,786 (×8 toolchains); contracts 13/13; mutations M1–M17 caught.
+- **Status:** NOT MERGED, NOT DEPLOYED, OFF.
+- **Release gates:** a DB failure test; CS v2 consumer; owner commissioning decision; backup/rollback.
+- **Rollback:** keep the options at 0, or revert.
+- **Receipt audit tool (14 Nov 2026):** `tools/ip_paid_receipt_audit.sql` is a single read-only `SELECT`. `tools/ip_paid_receipt_audit.py` is an offline classifier at C++ `DecodeRaw` parity (differential test). Run it against a backup or replica only. It's a prerequisite for the commissioning decision and changes no runtime.
+- **Persistence-failure harness (14 Nov 2026):** `tests/db_harness/` runs Core's real DB layer (`AsyncCommitTransaction` + callback processor) against a throwaway MySQL 8 with trigger-injected failures: 26/26, and D1–D3 caught. Test-only; it never touches an owner DB.
+- **Keyed save-ordering prototype (15 Nov 2026, CS01 Part09 decision 2; revision 2 per CS01 review 6894208993):** `tests/db_harness/keyed_dispatcher_prototype.h`, `keyed_ordering_harness.cpp`, `commit_drop_proxy.py`, `run_keyed_harness.sh` and `run_keyed_mutations.sh` prototype design C rev2 above Core's real DB layer on a throwaway MySQL 8: per-character FIFO; a fenced compare-and-set marker; an exact per-op write log and a guid-bound purchase journal; reconciliation by claim; callbacks before the next dispatch; capped, same-session-only coalescing; lease epochs; shutdown drain; two-process restart; real COMMIT network loss through a local proxy (K1–K23, 1/2/4/8 workers). Test-only; no Core, config, SQL or owner-DB change. Results: `docs/CORE_WRITE_ORDERING_PROTOTYPE_2026-11-15.md`.
