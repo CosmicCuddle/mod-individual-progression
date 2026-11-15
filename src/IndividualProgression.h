@@ -19,6 +19,7 @@
 #include "IWorld.h"
 #include "IndividualProgressionExpansionPolicy.h"
 #include "IndividualProgressionReceiptPolicy.h"
+#include "IndividualProgressionStageSnapshot.h"
 
 // Lets dependent modules (e.g. Character Services) detect the paid expansion
 // API at compile time and keep building against an IP without it.
@@ -580,6 +581,22 @@ public:
     // Paid expansion entitlement API. Character Services (or any vendor) must
     // call PurchaseExpansion instead of writing stage markers itself.
     bool IsPaidExpansionActive() const;
+
+    // Cache-only stage snapshot (Coordination #59, API v1; see
+    // IndividualProgressionStageSnapshot.h). Any thread: a shared lock and a
+    // value copy; never a DB query, a Player dereference or an insertion.
+    IndividualProgressionStageSnapshot::Snapshot GetStageSnapshot(ObjectGuid const& guid) const;
+    // Login (registers a new session epoch) / logout (erases).
+    void RegisterStageSnapshot(Player* player);
+    void EraseStageSnapshot(ObjectGuid const& guid);
+    // Synchronous invalidation BEFORE a change becomes observable; no Player read.
+    void InvalidateStageSnapshot(ObjectGuid const& guid);
+    void InvalidateAllStageSnapshots();
+    // Owner thread only (PlayerScript::OnPlayerUpdate): publish if dirty.
+    void PublishStageSnapshotIfDirty(Player* player);
+    // Re-warm the account cache for online sessions (world thread, after a
+    // reload); never under the snapshot lock.
+    void WarmAccountCacheForOnlineSessions();
     uint8 GetEffectiveProgression(Player* player);
     bool IsAutomaticGrantAllowed(Player* player, uint8 targetStage);
     bool HasExpansionEntitlement(Player* player, IndividualProgressionExpansionPolicy::Era era);
@@ -604,6 +621,8 @@ private:
     };
 
     AccountMatch GetAccountMatch(uint32 accountId);
+    // Cache-only: never queries the DB. False on a cache miss.
+    bool TryGetAccountMatch(uint32 accountId, AccountMatch& match);
 
     // excludedAccountsRegex and botAccountsRegex compiled once per config load, and what each
     // account name matched. The damage and healing hooks ask on map update threads.
@@ -621,6 +640,11 @@ private:
     // Missing or invalid RAW settings are unknown, never free purchases.
     std::unordered_map<uint32, IndividualProgressionReceiptPolicy::Ledger> _paidExpansionLedgers;
     std::shared_mutex _paidExpansionLock;
+
+    // Stage snapshot registry (full GUID key); its own lock, never held
+    // across a DB query or a Player access.
+    IndividualProgressionStageSnapshot::Registry _stageSnapshots;
+    mutable std::shared_mutex _stageSnapshotLock;
 
     // F14 optional GroupSync containment; only positively verified headless
     // Blood Elf / Draenei RandomBots are present, refreshed on each login.

@@ -215,6 +215,8 @@ uint8 IndividualProgression::GetAccountEffectiveProgression(uint32 accountId)
 
 void IndividualProgression::SetPaidExpansionFlag(Player* player, uint32 index, uint32 value)
 {
+    // Stage snapshot (#59): the effective stage may change; invalidate first.
+    InvalidateStageSnapshot(player->GetGUID());
     player->UpdatePlayerSetting(PaidExpansionSettingSource, index, value);
 
     uint8 const bit = BitForSetting(index);

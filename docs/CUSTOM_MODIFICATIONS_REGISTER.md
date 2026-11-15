@@ -1309,3 +1309,22 @@ Focused native tests require every completeness family independently, exercise t
 
   Hosted CI is milestone-only. No Worldserver link or gameplay test.
 - **Live status/approval/rollback:** NOT MERGED, NOT DEPLOYED, OFF by default; owner approval required. Rollback: keep the option `0`, or close the DRAFT; no host, DB, config or client was touched.
+
+## IP-STAGE-SNAPSHOT-20261115: cache-only stage snapshot for Playerbots AutoGear (#59), CS03-IP
+- **Owner / request:** CosmicCuddle (Coordination #59). Contract ACKed with amendments by CS01 (6892638392).
+- **Branch:** `feature/cs03-ip-stage-snapshot-provider-20261115`, from `05ff032b`.
+- **What it adds:**
+  - `GetStageSnapshot(ObjectGuid)`, any thread, cache-only, keyed by full GUID;
+  - session-epoch, generation and invalidation-guarded publishes, from the owner thread (`OnPlayerUpdate`) only;
+  - invalidation before every change (IP writes, paid flags, marker rewards, GM commands naming markers, config reload);
+  - erase at logout.
+- **Behaviour:** no existing behaviour changes, and there's no new config.
+- **Files:**
+  - `src/IndividualProgressionStageSnapshot.h`;
+  - `src/IndividualProgressionStageSnapshotScript.cpp`;
+  - small invalidation hooks in `IndividualProgression.cpp/.h` and `IndividualProgressionExpansion.cpp`;
+  - tests;
+  - `docs/IP_STAGE_SNAPSHOT_PROVIDER_2026-11-15.md`.
+- **Known gap:** the Core quest-clear spell effect has no hook (Core lane).
+- **Status:** NOT MERGED, NOT DEPLOYED.
+- **Rollback:** revert the branch.

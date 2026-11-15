@@ -73,6 +73,8 @@ void IndividualProgression::UpdateProgressionState(Player* player, ProgressionSt
     uint8 currentState = GetPlayerProgressionFromQuests(player);
     if (newState > currentState)
     {
+        // Stage snapshot (#59): invalidate before any marker becomes observable.
+        sIndividualProgression->InvalidateStageSnapshot(player->GetGUID());
         for (uint8 i = currentState; i <= newState; ++i)
         {
             uint32 PROGRESSION_QUEST = 66000 + i;
@@ -110,6 +112,10 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
 
     if (!newState && newState != 0)
         return;
+
+    // Stage snapshot (#59): invalidate before any marker write or removal
+    // (after the floor guard, whose refusal changes nothing).
+    sIndividualProgression->InvalidateStageSnapshot(player->GetGUID());
 
     // remove all hidden progression quests first
     for (uint8 i = PROGRESSION_MOLTEN_CORE; i <= PROGRESSION_WOTLK_TIER_5; ++i)
@@ -1771,6 +1777,9 @@ public:
 
     void OnBeforeConfigLoad(bool reload) override
     {
+        // Stage snapshot (#59): invalidate before new account rules, paid
+        // switches or limits become observable.
+        sIndividualProgression->InvalidateAllStageSnapshots();
         // The paid expansion switch is read at startup only: online characters'
         // purchase flags are cached at login, so toggling it by .reload could
         // briefly treat a paid character as unpaid.
@@ -1792,6 +1801,11 @@ public:
         // feature stays OFF and established progression continues.
         // Reload: keep the startup value. Turning the gate off here would make
         // every unpaid stage 13 Wrath-owned; purchases are refused instead.
+        // Stage snapshot (#59): a second invalidation rejects any publisher
+        // that computed with the old configuration while it was being loaded.
+        sIndividualProgression->InvalidateAllStageSnapshots();
+        if (reload)
+            sIndividualProgression->WarmAccountCacheForOnlineSessions();
         bool const requested = sIndividualProgression->paidExpansionEnabled;
         bool const storeSaving = sWorld->getBoolConfig(CONFIG_PLAYER_SETTINGS_ENABLED);
         sIndividualProgression->paidExpansionEnabled =
@@ -1868,6 +1882,7 @@ void AddSC_ip_paid_expansion();
 // registered here so the upstream Grim loader stays byte-identical.
 void AddSC_mod_individual_progression_f14_lifecycle();
 void AddSC_mod_individual_progression_f14_social_isolation();
+void AddSC_mod_individual_progression_stage_snapshot();
 
 void AddSC_mod_individual_progression()
 {
@@ -1875,4 +1890,5 @@ void AddSC_mod_individual_progression()
     AddSC_ip_paid_expansion();
     AddSC_mod_individual_progression_f14_lifecycle();
     AddSC_mod_individual_progression_f14_social_isolation();
+    AddSC_mod_individual_progression_stage_snapshot();
 }
