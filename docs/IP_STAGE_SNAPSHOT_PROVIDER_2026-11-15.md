@@ -20,6 +20,16 @@
 - **Re-read immediately before destroying gear,** and proceed only if `SameKnownSnapshot(first, second)` holds: same session epoch, generation and stages.
 - **Key:** the full GUID (`GetRawValue()`).
 
+## Revision and authorization linearization (revision 2: Codex 6892932909, CS01 6892952406)
+- **Revision:** `Snapshot::revision` is process-unique and changes on **every** publish and every invalidation, including a same-value republish, a reload, a new session or a marker command. `SameKnownSnapshot` requires an equal, non-zero revision, so it means "the same publication", not "the same values".
+- **Proposed authorization contract** (for CS01/Codex acceptance; no global lock):
+  1. **Plan** (non-destructive) from snapshot `A`: candidate items, caps, replacements.
+  2. **Mutation block**, on the **bot's own** map thread, synchronous: no yield, no foreign `Player` access. It starts with the final read `B`, and proceeds only if `SameKnownSnapshot(A, B)`. **`B` is the linearization point:** a change ordered after `B` (logout, downgrade, invalidation, marker removal) is ordered after this gear operation, exactly like a command that completed a moment before the change.
+  3. **Post-check:** read `C` right after the mutation. If `!SameKnownSnapshot(B, C)`, PB schedules a **corrective pass** on the bot's next own update. It may only remove or re-cap items above the cap of the then-current `Known` snapshot, and **never grants**. Further gearing is denied until a `Known` snapshot exists.
+  4. **Never hold an IP lock** across gear mutation or callbacks. Every IP call is a value copy under a shared lock.
+- **Lease alternative** (if the weaker semantics above are not accepted): a bounded per-character lease that records "broken" when an invalidation happens during it. It can't block GM or IP changes either, so its outcome is the same corrective pass. That's why the post-check variant is proposed as simpler, with no new state in IP.
+- **Composition with #184:** on the combined branch, `CompletePaidExpansionPurchase` invalidates before the confirmed bit is set (lock order is paid → snapshot only).
+
 ## Lifecycle
 | Event | Where it runs | What it does |
 |---|---|---|
