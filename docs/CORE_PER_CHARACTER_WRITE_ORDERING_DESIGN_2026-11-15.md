@@ -128,3 +128,19 @@ An older autosave (pre-purchase state, `DO SLEEP(1.5)` before its first statemen
 - an exception or cancellation inside a keyed op still advances its key;
 - backpressure caps are hit without dropping writes;
 - shutdown with a mid-reconciliation key.
+
+## 9. Isolated prototype (15 Nov 2026, CS01 Part09 decision 2)
+`CORE_WRITE_ORDERING_PROTOTYPE_2026-11-15.md` covers the prototype and its results. It is a per-character keyed dispatcher layered above the real `DatabaseWorkerPool` and tested on a throwaway MySQL 8.0.46 at 1/2/4/8 async workers. Scenarios K1–K14 cover:
+- the reverse hazard;
+- the relog fence and fence timeout with cancellation;
+- definite failure, lost acknowledgement, and a late server-side commit, all reconciled by a locking marker read;
+- duplicate purchase id;
+- lease epochs;
+- parallelism;
+- coalescing, per-key and global backpressure;
+- shutdown drain;
+- restart reconciliation across two processes;
+- Uncertain blocking;
+- build exceptions.
+
+All checks pass, and a mutation run kills every mutant listed there. No Core runtime change is made. The marker and journal tables exist only in the harness DB, and adding them to a real DB is an open owner decision.
