@@ -17,9 +17,16 @@ Categories (what the server would do at login with PaidExpansion ON):
   duplicate     more than one matching row for the character (never commissioned)
   source_variant  the row matched only through the collation (case/space)
 
---release: requires the anomaly and schema reports and FAILS (exit 2) on any
-duplicate, orphan or source-variant row, or a primary key other than
-(guid, source). Raw reports stay local; nothing is uploaded.
+--release prints TWO separate verdicts:
+  STRUCTURAL AUDIT        PASS/FAIL: no duplicate, orphan or source-variant row
+                          and a primary key of exactly (guid, source). FAIL -> exit 2.
+  COMMISSIONING READINESS READY/BLOCKED: every row the server refuses
+                          (malformed, wrong slot count, unknown version,
+                          inconsistent) needs an explicit OWNER DISPOSITION,
+                          recorded in --owner-dispositions (guid<TAB>text).
+                          BLOCKED -> exit 3. The tool never repairs anything.
+A structural PASS alone is NOT permission to enable commissioning.
+Raw reports stay local; nothing is uploaded.
 """
 import argparse
 import json
@@ -182,6 +189,35 @@ def parse_schema(lines):
     return schema
 
 
+def parse_dispositions(lines):
+    found = {}
+    for number, line in enumerate(lines, 1):
+        line = line.rstrip("\n").rstrip("\r")
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t", 1)
+        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].strip():
+            raise ValueError(f"dispositions line {number}: expected guid<TAB>non-empty owner disposition")
+        guid = int(parts[0])
+        if guid in found:
+            raise ValueError(f"dispositions line {number}: guid {guid} listed twice")
+        found[guid] = parts[1].strip()
+    return found
+
+
+def readiness(report, dispositions=None):
+    """Commissioning readiness, separate from the structural verdict."""
+    dispositions = dispositions or {}
+    unresolved = [g for g in report["needs_staff_repair"] if g not in dispositions]
+    unknown = sorted(g for g in dispositions if g not in report["needs_staff_repair"])
+    return {
+        "needs_owner_disposition": len(report["needs_staff_repair"]),
+        "unresolved": unresolved,
+        "dispositions_for_other_guids": unknown,
+        "ready": not unresolved and not unknown and not report["release_failures"],
+    }
+
+
 def audit(rows, anomalies=None, schema=None):
     items = [classify_row(*r) for r in rows]
     # A character with more than one main row (duplicate or collation
@@ -236,6 +272,8 @@ def main(argv=None):
     ap.add_argument("--schema", help="output of ip_paid_receipt_schema.sql")
     ap.add_argument("--release", action="store_true",
                     help="release audit: require --anomalies and --schema; exit 2 on any anomaly")
+    ap.add_argument("--owner-dispositions",
+                    help="guid<TAB>owner disposition for each refused row (recorded only; nothing is repaired)")
     ap.add_argument("--json", help="also write the full report to this local file")
     args = ap.parse_args(argv)
     if args.release and (not args.anomalies or not args.schema):
@@ -251,6 +289,11 @@ def main(argv=None):
         with open(args.schema, encoding="ascii") as handle:
             schema = parse_schema(handle)
     report = audit(rows, anomalies, schema)
+    dispositions = None
+    if args.owner_dispositions:
+        with open(args.owner_dispositions, encoding="utf-8") as handle:
+            dispositions = parse_dispositions(handle)
+    report["readiness"] = readiness(report, dispositions)
     print(f"characters: {report['characters']}")
     for name, count in report["categories"].items():
         print(f"  {name:17s} {count}")
@@ -266,9 +309,21 @@ def main(argv=None):
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:
             json.dump(report, handle, indent=2)
+    ready = report["readiness"]
+    print(f"refused rows needing an owner disposition: {ready['needs_owner_disposition']} "
+          f"(unresolved: {len(ready['unresolved'])})")
+    for guid in ready["dispositions_for_other_guids"]:
+        print(f"DISPOSITION ERROR: guid {guid} is not a refused row")
     if args.release:
-        print("RELEASE AUDIT: " + ("FAIL" if report["release_failures"] else "PASS"))
-        return 2 if report["release_failures"] else 0
+        structural_ok = not report["release_failures"]
+        print("STRUCTURAL AUDIT: " + ("PASS" if structural_ok else "FAIL"))
+        print("COMMISSIONING READINESS: " + ("READY" if ready["ready"] else
+              f"BLOCKED ({len(ready['unresolved'])} unresolved refused row(s) need an owner disposition)"
+              if structural_ok and not ready["dispositions_for_other_guids"] else
+              "BLOCKED" if structural_ok else "BLOCKED (structural audit failed)"))
+        if not structural_ok:
+            return 2
+        return 0 if ready["ready"] else 3
     return 0
 
 

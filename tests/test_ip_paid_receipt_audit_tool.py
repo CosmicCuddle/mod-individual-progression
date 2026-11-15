@@ -160,8 +160,10 @@ class Fixtures(unittest.TestCase):
         with self.assertRaises(ValueError):
             audit.parse_schema(["pk\tx\ty\n"])
 
-    def run_cli(self, tmp, main, anomalies=None, schema=None, release=False):
+    def run_cli(self, tmp, main, anomalies=None, schema=None, release=False, dispositions=None):
         args = [sys.executable, str(ROOT / "tools/ip_paid_receipt_audit.py"), str(main)]
+        if dispositions is not None:
+            args += ["--owner-dispositions", str(dispositions)]
         if anomalies is not None:
             args += ["--anomalies", str(anomalies)]
         if schema is not None:
@@ -184,14 +186,31 @@ class Fixtures(unittest.TestCase):
             schema.write_text("primary_key\tcharacter_settings\tguid,source\n", encoding="ascii")
             badschema = t / "b.tsv"
             badschema.write_text("primary_key\tcharacter_settings\t\n", encoding="ascii")
-            ok = self.run_cli(t, main, empty, schema, release=True)
+            # Structurally clean, but one legacy row is unresolved: BLOCKED (3).
+            blocked = self.run_cli(t, main, empty, schema, release=True)
+            self.assertEqual(blocked.returncode, 3, blocked.stdout + blocked.stderr)
+            self.assertIn("STRUCTURAL AUDIT: PASS", blocked.stdout)
+            self.assertIn("COMMISSIONING READINESS: BLOCKED (1 unresolved refused row(s) need an owner disposition)", blocked.stdout)
+            self.assertIn("refused rows needing an owner disposition: 1 (unresolved: 1)", blocked.stdout)
+            self.assertIn("needs staff repair (never commissioned): 1", blocked.stdout)
+            # Owner disposition recorded for exactly that row: READY (0).
+            disp = t / "disp.tsv"
+            disp.write_text("# owner decisions\n2\tkeep refused; staff repair after backup\n", encoding="utf-8")
+            ok = self.run_cli(t, main, empty, schema, release=True, dispositions=disp)
             self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
-            self.assertIn("RELEASE AUDIT: PASS", ok.stdout)
-            self.assertIn("needs staff repair (never commissioned): 1", ok.stdout)
+            self.assertIn("STRUCTURAL AUDIT: PASS", ok.stdout)
+            self.assertIn("COMMISSIONING READINESS: READY", ok.stdout)
+            self.assertEqual(main.read_text(encoding="ascii").count(b"1 0 0 ".hex()), 1)  # never repaired
+            # A disposition for a guid that is not a refused row: still BLOCKED.
+            wrong = t / "wrong.tsv"
+            wrong.write_text("2\tok\n1\tnot refused\n", encoding="utf-8")
+            self.assertEqual(self.run_cli(t, main, empty, schema, release=True, dispositions=wrong).returncode, 3)
             for anomalies, sch in ((orphan, schema), (empty, badschema)):
-                bad = self.run_cli(t, main, anomalies, sch, release=True)
+                bad = self.run_cli(t, main, anomalies, sch, release=True, dispositions=disp)
                 self.assertEqual(bad.returncode, 2)
-                self.assertIn("RELEASE AUDIT: FAIL", bad.stdout)
+                self.assertIn("STRUCTURAL AUDIT: FAIL", bad.stdout)
+                self.assertIn("COMMISSIONING READINESS: BLOCKED (structural audit failed)", bad.stdout)
+                self.assertNotIn("READINESS: READY", bad.stdout)
             missing = self.run_cli(t, main, None, schema, release=True)
             self.assertEqual(missing.returncode, 2)
             plain = self.run_cli(t, main)
@@ -199,6 +218,24 @@ class Fixtures(unittest.TestCase):
             dup = t / "d.tsv"
             dup.write_text("".join(tsv([(5, 1, 1, SRC, EMPTY, 66007)] * 2)), encoding="ascii")
             self.assertEqual(self.run_cli(t, dup, empty, schema, release=True).returncode, 2)
+            clean = t / "clean.tsv"
+            clean.write_text("".join(tsv([(7, 1, 0, "", "", 66007), (8, 1, 1, SRC, EMPTY, 66007)])), encoding="ascii")
+            r = self.run_cli(t, clean, empty, schema, release=True)
+            self.assertEqual(r.returncode, 0)
+            self.assertIn("COMMISSIONING READINESS: READY", r.stdout)
+
+    def test_structural_pass_is_not_readiness(self):
+        rows = audit.parse_tsv(tsv([(1, 1, 1, SRC, b"1 0 0 ".hex(), 66007), (2, 1, 0, "", "", 66007)]))
+        report = audit.audit(rows, [], audit.parse_schema(["primary_key\tcharacter_settings\tguid,source\n"]))
+        self.assertEqual(report["release_failures"], [])            # structurally clean
+        ready = audit.readiness(report)
+        self.assertFalse(ready["ready"])                              # but not ready
+        self.assertEqual((ready["needs_owner_disposition"], ready["unresolved"]), (1, [1]))
+        self.assertTrue(audit.readiness(report, {1: "owner: refuse until repaired"})["ready"])
+        self.assertFalse(audit.readiness(report, {1: "x", 2: "y"})["ready"])   # 2 is absent, not refused
+        for bad in (["1\t\n"], ["x\tok\n"], ["1\tok\n", "1\tagain\n"], ["1\n"]):
+            with self.assertRaises(ValueError):
+                audit.parse_dispositions(bad)
 
 
 def statements(path):

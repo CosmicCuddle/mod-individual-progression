@@ -9,12 +9,17 @@
 // Failures are injected by DB triggers controlled by harness_ctl.fail_stage:
 //   1 = characters UPDATE fails (start of the save)
 //   2 = a statement AFTER the receipt REPLACE fails (end of the save)
+//   3 = the characters UPDATE is SLOW (SLEEP 2): a logout save still in flight
+// Mode "ordering <asyncThreads>": fast relog - a slow logout save, then an
+// immediately queued async login read (as Core's DelayQueryHolder) and the
+// sync read IP does after it. Reports what the login read observed.
 // Run only against a THROWAWAY database (see run_harness.sh).
 #include "DatabaseEnv.h"
 #include "QueryResult.h"
 #include "Field.h"
 #include "MySQLThreading.h"
 #include "AsyncCallbackProcessor.h"
+#include "QueryCallback.h"
 #include "IndividualProgressionPaidPurchaseState.h"
 #include "IndividualProgressionReceiptPolicy.h"
 
@@ -243,6 +248,54 @@ namespace
         std::printf("S4 both-fail then relog+buy: db_money=%lld paid=%d\n", (long long)s.money, DbPaid(s));
     }
 
+    // Fast relog: logout save (fire-and-forget, as Player::SaveToDB) still in
+    // flight when the next login's async read is queued.
+    int ScenarioFastRelogOrdering(uint32 guid, unsigned asyncThreads)
+    {
+        Reset(guid, 1000);
+        Player p = Login(guid);
+        R::Ledger staged = *p.settings;
+        R::RecordPurchase(staged, R::Era::Tbc, 400, 1800000000u);
+        p.money = 600;
+        p.settings = staged;
+        SetFailStage(3);                                      // slow save
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        AppendSave(trans, p);
+        CharacterDatabase.CommitTransaction(trans);           // logout save
+        bool done = false;
+        int64 seenMoney = -1;
+        std::string seenData = "<no row>";
+        AsyncCallbackProcessor<QueryCallback> queries;
+        queries.AddCallback(CharacterDatabase.AsyncQuery(Acore::StringFormat(
+            "SELECT c.money, s.data FROM characters c LEFT JOIN character_settings s ON s.guid = c.guid "
+            "AND s.source = '{}' WHERE c.guid = {}", Source, guid)).WithCallback(
+            [&](QueryResult r)
+            {
+                if (r)
+                {
+                    Field* f = r->Fetch();
+                    seenMoney = f[0].Get<int64>();
+                    seenData = f[1].IsNull() ? std::string("<no row>") : f[1].Get<std::string>();
+                }
+                done = true;
+            }));
+        for (int i = 0; i < 2000 && !done; ++i)
+        {
+            queries.ProcessReadyCallbacks();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        // IP's strict sync read runs after the login holder completed.
+        DbState const syncRead = ReadDb(guid);
+        bool const loginSawSave = seenMoney == 600 && seenData == R::Serialize(staged);
+        bool const syncSawSave = syncRead.money == 600 && DbPaid(syncRead);
+        std::printf("ORDERING async_threads=%u: login_read money=%lld receipt=\"%s\" -> %s; ip_sync_read_after -> %s\n",
+            asyncThreads, (long long)seenMoney, seenData.c_str(), loginSawSave ? "FRESH" : "STALE",
+            syncSawSave ? "FRESH" : "STALE");
+        SetFailStage(0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2500)); // let the slow save finish
+        return loginSawSave && syncSawSave ? 0 : 1;
+    }
+
     void ScenarioMalformedNeverOverwritten(uint32 guid)
     {
         Reset(guid, 1000);
@@ -261,17 +314,27 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if (argc != 2)
+    bool const ordering = argc == 4 && std::string(argv[2]) == "ordering";
+    if (argc != 2 && !ordering)
     {
-        std::printf("usage: %s \"host;port;user;password;database\"\n", argv[0]);
+        std::printf("usage: %s \"host;port;user;password;database\" [ordering <asyncThreads>]\n", argv[0]);
         return 2;
     }
+    unsigned const asyncThreads = ordering ? static_cast<unsigned>(std::stoul(argv[3])) : 1;
     MySQL::Library_Init();
-    CharacterDatabase.SetConnectionInfo(argv[1], 1, 1);
+    CharacterDatabase.SetConnectionInfo(argv[1], static_cast<uint8>(asyncThreads), 1);
     if (CharacterDatabase.Open() || !CharacterDatabase.PrepareStatements())
     {
         std::printf("cannot open/prepare the throwaway character database\n");
         return 2;
+    }
+    if (ordering)
+    {
+        int const stale = ScenarioFastRelogOrdering(1006, asyncThreads);
+        CharacterDatabase.Close();
+        MySQL::Library_End();
+        // Exit 0 = fresh, 3 = stale observed (a finding, not a harness error).
+        return stale ? 3 : 0;
     }
     ScenarioSuccess(1001);
     ScenarioFirstFailLaterSuccess(1002);

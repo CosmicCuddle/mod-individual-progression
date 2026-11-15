@@ -87,7 +87,10 @@ python3 tools/ip_paid_receipt_audit.py receipts.tsv --anomalies anomalies.tsv --
   - **malformed, wrong_slot_count, unknown_version, inconsistent**;
   - **duplicate:** any character with more than one main row, never valid or commissionable;
   - **source_variant**.
-  - `--release` requires the anomaly and schema reports, prints `RELEASE AUDIT: PASS/FAIL`, and **exits 2** on any anomaly or an unexpected key.
+  - `--release` requires the anomaly and schema reports and prints **two separate verdicts** (CS01 6886368231):
+    - **`STRUCTURAL AUDIT: PASS/FAIL`:** no duplicate, orphan or variant rows, and the key is `(guid, source)`. FAIL exits **2**.
+    - **`COMMISSIONING READINESS: READY/BLOCKED`:** every refused row (malformed, wrong slot count, unknown version, inconsistent) needs an explicit **owner disposition** in `--owner-dispositions` (`guid<TAB>text`; recorded only, **never repaired**). BLOCKED exits **3**. A disposition for a guid that isn't a refused row also blocks.
+    - **A structural PASS alone is not permission to enable commissioning.**
 - **Privacy:** reports stay local. The optional `--json` report is written only where you point it.
 - **Parity and tests:** the Python port of `DecodeRaw` is checked against the **real C++ header** by `tests/test_ip_paid_receipt_audit_tool.py`, a differential test over about 30,000 strings covering all six statuses.
   - The same file covers fixtures (duplicates, including identical rows; collation variants; orphans; bad keys), the release exit codes, and read-only contracts for every statement.
@@ -113,16 +116,40 @@ python3 tools/ip_paid_receipt_audit.py receipts.tsv --anomalies anomalies.tsv --
 | S4 both fail | DB unchanged. After relog a purchase succeeds, and the DB was charged **exactly once** (600) |
 | S5 legacy `1 0 0 ` row | refused; the row is byte-for-byte unchanged |
 
-**Release audit over the resulting DB:** `RELEASE AUDIT: PASS`, key `guid,source`, with 3 valid paid, 1 absent (the rolled-back S3) and 1 needing repair (the S5 legacy row).
+**Release audit over the resulting DB:**
+- `STRUCTURAL AUDIT: PASS` (key `guid,source`);
+- `COMMISSIONING READINESS: BLOCKED (1 unresolved refused row(s) need an owner disposition)`, exit 3. That's the S5 legacy row.
+- 3 valid paid, plus S3's rolled-back row (absent) and the S6 ordering character.
 
 **Harness mutations:** D1 (receipt written outside the transaction) 19/26; D2 (refund on failure) 23/26; D3 (grant on failure) 25/26. All three are caught.
 
-**Environment note:** Core's `DatabaseIncompatibleVersion` parses the server version one character at a time. A **MariaDB 10.x** server therefore reads as older than "8.0.0" and is refused, so this harness needs MySQL 8.
+**Fast relog: stale read depends on `CharacterDatabase.WorkerThreads` (CS01 6886368231).**
+- **How Core loads a character:** `HandlePlayerLoginOpcode` reuses an in-world Player on reconnect (no DB read; IP marks a pending purchase Unconfirmed). Otherwise it loads through `CharacterDatabase.DelayQueryHolder`, on the **same async queue** as the fire-and-forget logout `SaveToDB`. IP's strict receipt read is a sync query that runs after that holder completes.
+- **Harness mode `ordering <threads>`:** a slow logout save (trigger `SLEEP(2)`) is queued, then the login read is queued immediately.
 
-**Not covered:**
-- the full `Player::SaveToDB` statement list and the world-session update loop;
-- a real network or connection-loss failure;
+| `WorkerThreads` | Login read | IP sync read after it |
+|---|---|---|
+| **1** (Core's default) | **FRESH** (money 600, paid receipt) | **FRESH** |
+| **2** | **STALE** (money 1000, no row) | **STALE** |
+
+- With one async worker, the queue is FIFO, so the save commits before the login read runs. With two or more, the login can overtake an in-flight save and load the character as it was before that save.
+- That's a general Core property, not paid-specific. For paid it matters most with **commissioning ON**: a stale "absent" read would stage an empty receipt that the next save writes over the real one.
+- **New release prerequisite:** confirm the live `CharacterDatabase.WorkerThreads = 1` before enabling paid or commissioning. Otherwise an owner decision is needed.
+
+**Ambiguous commit, from Core source:** `MySQLConnection::ExecuteTransactionAttempt` logs "Lost the connection during COMMIT. The transaction may or may not have been written" and returns an error, so the callback reports `false`.
+- That's the Unconfirmed path: no refund, no retry, and the next login reads DB truth.
+- A loss **before** COMMIT is rolled back by the server and retried up to 3 times.
+- This harness doesn't inject a real connection loss.
+
+**Environment note (scoped):** with Core `21ff1973`, `DatabaseIncompatibleVersion` parses the server version one character at a time. The MariaDB build I tried (10.11.14) was read as older than "8.0.0", and the pool refused to open. That's only this exact parser against that exact version; it's **not** a general compatibility statement. The harness ran on MySQL 8.0.46.
+
+**Outstanding gates (not covered here):**
+- the full `Player::SaveToDB` statement list inside a running world session;
+- a real connection-loss failure;
+- **the live `CharacterDatabase.WorkerThreads` value**;
 - gameplay.
+
+All results are developer-reported until someone runs them independently.
 
 ## B3: account bypass
 - The purchase path is per-character: `CanPurchaseExpansion`, `PurchaseExpansion`, the callback, the entitlement and effective-stage APIs, and `GetPaidPurchaseState` read no account data. Contracts and a model test now pin this.
