@@ -53,11 +53,15 @@ M = {
  "M21_purchase_coalescing": [("if (!purchase && !k.queue.empty())", "if (!k.queue.empty())"),
                              (" && tail.purchaseId.empty() && ", " && ")],
  # freeze on inconsistent proof / callback failure (CS01 6895011029)
- "M24_no_freeze_on_inconsistent_proof": [("                        if (!journalMine)\n                            Freeze(key);", "                        if (false)\n                            Freeze(key);")],
+ "M24_no_freeze_on_inconsistent_proof": [("                        if (!journalMine)\n                            FreezeForProof(key, op);", "                        if (false)\n                            FreezeForProof(key, op);")],
  "M25_journal_fence_ignored": [("\n                            && f[8].Get<uint64_t>() == op.fence);", ");")],
  "M26_frozen_ignored_by_pump": [(" && !k.abandoned && !k.frozen)", " && !k.abandoned)")],
  "M27_frozen_admission_ignored": [("            if (it->second.frozen)\n                return Admit::Frozen;\n", "")],
  "M28_callback_exception_propagates": [("                ++_stats.callbackExceptions;\n                Freeze(k);", "                ++_stats.callbackExceptions;\n                throw;")],
+ # proof-gated unfreeze, shutdown containment, duplicate proof (CS01 6895440140)
+ "M29_blind_unfreeze": [("            if (!k.frozenProof)\n            {", "            if (true)\n            {")],
+ "M30_shutdown_callback_uncontained": [("                            Invoke(k, [&] { w.done(Outcome::Unresolved); });", "                            w.done(Outcome::Unresolved);")],
+ "M31_duplicate_without_proof": [("                            if (earlierProven)", "                            if (true)")],
  # lifecycle
  "M8_no_shutdown_drain": [("while (!Idle() && Clock::now() < deadline)", "while (false)")],
  "M9_running_cancel_ignored": [("k.current.discard = true;", "k.current.discard = false;")],

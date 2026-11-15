@@ -4,7 +4,7 @@
 // real IP receipt policy; the dispatcher under test is
 // keyed_dispatcher_prototype.h. THROWAWAY DATABASE ONLY (run_harness.sh).
 //
-//   keyed <workers>   K1-K10, K12-K21, K23-K25 (K12 needs >= 2 workers)
+//   keyed <workers>   K1-K10, K12-K21, K23-K27 (K12 needs >= 2 workers)
 //   restart1          K11 part 1: purchase left Unresolved at shutdown
 //   restart2          K11 part 2: a NEW process reconciles it from the DB
 //   netloss           K22: real COMMIT network loss through commit_drop_proxy.py
@@ -929,12 +929,14 @@ namespace
         Reset(g, 1000);
         Player p = Load(g);
         bool forged = false;
+        InFlight seen;
         Hooks h;
         h.beforeReconcile = [&](InFlight const& w)
         {
             if (w.guid != g || forged)
                 return;
             forged = true;
+            seen = w;
             bool const badFence = std::string(variant) == "fence";
             Mysql(Acore::StringFormat(
                 "UPDATE harness_write_seq SET seq = {}, fence = {} WHERE guid = {}; "
@@ -958,11 +960,23 @@ namespace
         Admit const more = d.SubmitSave(g, e, SaveBuilder(&p), [](Outcome) {});
         uint64 const login = d.BeginSession(g);
         CHECK(op == Outcome::Unresolved && frozen && queuedHeld && more == Admit::Frozen && login == 0);
-        CHECK(d.ResolveFrozen(g)); // explicit authoritative reconciliation
+        // Never a blind unfreeze: without caller recovery, and without repaired proof, it stays frozen.
+        int r1 = -1, r2 = -1, r3 = -1;
+        d.ResolveFrozen(g, false, [&](bool ok) { r1 = ok; });
+        d.ResolveFrozen(g, true, [&](bool ok) { r2 = ok; });
+        RunUntil(d, [&] { return r2 != -1; }, 5000);
+        RunUntil(d, [] { return false; }, 300);
+        bool const stillHeld = d.Frozen(g) && os == Outcome::Unresolved && ReadDb(g).tailRows == 0;
+        CHECK(r1 == 0 && r2 == 0 && stillHeld);
+        // Authoritative repair of the journal row (the audit's job), then resolve.
+        CHECK(Mysql(Acore::StringFormat("UPDATE harness_purchase_journal SET fence = {}, op = '{}' WHERE purchase_id = '{}'",
+            seen.fence, seen.op, seen.purchaseId)) == 0);
+        d.ResolveFrozen(g, true, [&](bool ok) { r3 = ok; });
         CHECK(Drain(d));
-        CHECK(os == Outcome::Committed && !d.Frozen(g));
+        CHECK(r3 == 1 && os == Outcome::Committed && !d.Frozen(g));
         std::printf("K24 inconsistent proof (%s mismatch): purchase=%s frozen=%d queued_save_held=%d new_write=%s login_refused=%d "
-            "after_ResolveFrozen queued_save=%s\n", variant, Name(op), frozen, queuedHeld, Name(more), login == 0, Name(os));
+            "resolve_without_recovery=%d resolve_without_repair=%d after_repair_resolve=%d queued_save=%s\n", variant, Name(op),
+            frozen, queuedHeld, Name(more), login == 0, r1, r2, r3, Name(os));
     }
 
     // K25 (CS01 6895011029): a throwing callback never leaves the key stuck in
@@ -986,11 +1000,66 @@ namespace
         bool const notStuck = d.StateOf(g) == KeyState::Idle && d.Frozen(g);
         bool const held = !otherWaiterCalled && !readDelivered && d.Queued(g) == 2;
         CHECK(notStuck && held);
-        CHECK(d.ResolveFrozen(g));
+        int rr = -1, rn = -1;
+        d.ResolveFrozen(g, false, [&](bool ok) { rn = ok; });
+        CHECK(rn == 0 && d.Frozen(g));
+        d.ResolveFrozen(g, true, [&](bool ok) { rr = ok; }); // caller confirms its state recovery
+        CHECK(rr == 1);
         CHECK(Drain(d));
         CHECK(otherWaiterCalled && readDelivered && !d.Frozen(g));
         std::printf("K25 callback exception: exceptions=%llu key_state_idle_and_frozen=%d queued_held=%d after_ResolveFrozen save=%d read=%d\n",
             (unsigned long long)d.GetStats().callbackExceptions, notStuck, held, otherWaiterCalled, readDelivered);
+    }
+
+    // K26 (CS01 6895440140): at the shutdown deadline a throwing Unresolved
+    // callback cannot interrupt abandonment: every waiter is settled exactly
+    // once, Shutdown returns, and no late callback arrives afterwards.
+    void K26ShutdownCallbackThrows()
+    {
+        uint32 const g = 1175;
+        Reset(g, 1000);
+        Player p = Load(g);
+        bool holder = false;
+        Hooks h;
+        h.loseAck = [g](uint32 guid, uint64 seq) { return guid == g && seq == 1; };
+        h.beforeReconcile = [&](InFlight const& w) { if (w.guid == g && !holder) { holder = true; HoldMarkerLock(g, 3.0); } };
+        Dispatcher d({}, h);
+        uint64 const e = d.BeginSession(g);
+        CHECK(Drain(d));
+        int calls1 = 0, calls2 = 0, calls3 = 0;
+        CHECK(d.SubmitSave(g, e, SaveBuilder(&p), [&](Outcome) { ++calls1; throw std::runtime_error("shutdown callback"); }) == Admit::Queued);
+        CHECK(d.SubmitSave(g, e, SaveBuilder(&p), [&](Outcome) { ++calls2; throw std::runtime_error("queued callback"); }) == Admit::Queued);
+        RunUntil(d, [&] { return holder; }, 3000);
+        CHECK(d.SubmitRead(g, e, LoginSql(g), [&](QueryResult) { ++calls3; }) == Admit::Queued);
+        bool const drained = d.Shutdown(800);
+        int const c1 = calls1, c2 = calls2, c3 = calls3;
+        RunUntil(d, [] { return false; }, 3500); // the held lock releases; late DB results must be ignored
+        CHECK(!drained && c1 == 1 && c2 == 1 && c3 == 0 && calls1 == 1 && calls2 == 1 && calls3 == 0);
+        CHECK(d.GetStats().callbackExceptions == 2 && d.Idle());
+        std::printf("K26 shutdown callback throws: drained=%d running_waiter_calls=%d queued_waiter_calls=%d read_delivered=%d "
+            "exceptions=%llu late_callbacks=0\n", drained, calls1, calls2, calls3,
+            (unsigned long long)d.GetStats().callbackExceptions);
+    }
+
+    // K27 (CS01 6895440140): a same-character journal row WITHOUT its exact
+    // write-log proof is not a DuplicatePurchase: Unresolved + frozen.
+    void K27DuplicateNeedsProof()
+    {
+        uint32 const g = 1176;
+        Reset(g, 1000);
+        Player p = Load(g);
+        Dispatcher d({}, {});
+        uint64 const e = d.BeginSession(g);
+        CHECK(Drain(d));
+        CHECK(Mysql(Acore::StringFormat("INSERT INTO harness_purchase_journal (purchase_id, guid, seq, fence, op) "
+            "VALUES ('k27-1176', {}, 99, 1, 'ghost')", g)) == 0);
+        StagePurchase(p, 400);
+        Outcome o = Outcome::Committed;
+        CHECK(d.SubmitPurchase(g, e, "k27-1176", SaveBuilder(&p), [&](Outcome out) { o = out; }) == Admit::Queued);
+        RunUntil(d, [&] { return o != Outcome::Committed; }, 10000);
+        DbState const s = ReadDb(g);
+        CHECK(o == Outcome::Unresolved && d.Frozen(g) && s.money == 1000 && !DbPaid(s));
+        std::printf("K27 duplicate without proof: outcome=%s frozen=%d db_money=%lld\n", Name(o), d.Frozen(g), (long long)s.money);
     }
 
     // K22: REAL network loss at COMMIT (commit_drop_proxy.py between Core and
@@ -1167,6 +1236,8 @@ int main(int argc, char** argv)
         K24InconsistentProofFreezes("fence");
         K24InconsistentProofFreezes("op");
         K25CallbackException();
+        K26ShutdownCallbackThrows();
+        K27DuplicateNeedsProof();
     }
     CharacterDatabase.Close();
     MySQL::Library_End();

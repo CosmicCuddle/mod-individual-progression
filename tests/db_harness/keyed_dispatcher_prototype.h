@@ -156,16 +156,49 @@ namespace KeyedProto
                 std::chrono::system_clock::now().time_since_epoch()).count(), static_cast<long>(::getpid()), r);
         }
 
-        // Explicit authoritative reconciliation (operator / audit) of a Frozen
-        // key: only after this do queued ops and new admissions proceed.
-        bool ResolveFrozen(uint32_t guid)
+        // Explicit authoritative reconciliation of a Frozen key. Never a blind
+        // unfreeze: the caller must confirm it recovered its own state, and a
+        // key frozen for inconsistent DB proof is only released after the
+        // dispatcher re-reads the write log and journal for the frozen op and
+        // finds them consistent (repaired). `done(true)` = released.
+        void ResolveFrozen(uint32_t guid, bool callerStateRecovered, std::function<void(bool)> done)
         {
             auto it = _keys.find(guid);
-            if (it == _keys.end() || !it->second.frozen)
-                return false;
-            it->second.frozen = false;
-            Pump(guid, it->second);
-            return true;
+            if (it == _keys.end() || !it->second.frozen || !callerStateRecovered)
+            {
+                if (done)
+                    done(false);
+                return;
+            }
+            Key& k = it->second;
+            if (!k.frozenProof)
+            {
+                Unfreeze(guid, k);
+                if (done)
+                    done(true);
+                return;
+            }
+            FrozenOp const fo = k.frozenOp;
+            _queryCallbacks.AddCallback(CharacterDatabase.AsyncQuery(Acore::StringFormat(
+                "SELECT l.fence, l.op, j.guid, j.seq, j.fence, j.op FROM harness_write_log l "
+                "LEFT JOIN harness_purchase_journal j ON j.purchase_id = '{}' WHERE l.guid = {} AND l.seq = {}",
+                fo.purchaseId, guid, fo.seq))).WithCallback(
+                [this, guid, fo, done](QueryResult r)
+                {
+                    Key& key = _keys[guid];
+                    bool ok = false;
+                    if (r)
+                    {
+                        Field* f = r->Fetch();
+                        ok = f[0].Get<uint64_t>() == fo.fence && f[1].Get<std::string>() == fo.op && !f[2].IsNull()
+                            && f[2].Get<uint32_t>() == guid && f[3].Get<uint64_t>() == fo.seq
+                            && f[4].Get<uint64_t>() == fo.fence && f[5].Get<std::string>() == fo.op;
+                    }
+                    if (ok)
+                        Unfreeze(guid, key);
+                    if (done)
+                        done(ok);
+                });
         }
 
         bool Frozen(uint32_t guid) const
@@ -335,12 +368,14 @@ namespace KeyedProto
                 if (k.running)
                     for (auto& w : TakeWaiters(k.current))
                         if (w.done)
-                            w.done(Outcome::Unresolved);
+                            Invoke(k, [&] { w.done(Outcome::Unresolved); });
                 for (Op& op : k.queue)
                     for (auto& w : TakeWaiters(op))
                         if (w.done)
-                            w.done(Outcome::Unresolved);
+                            Invoke(k, [&] { w.done(Outcome::Unresolved); });
                 k.queue.clear();
+                k.running = false;
+                k.current = Op();
             }
             return false;
         }
@@ -412,6 +447,14 @@ namespace KeyedProto
             bool dispatched = false;
         };
 
+        struct FrozenOp
+        {
+            uint64_t seq = 0;
+            uint64_t fence = 0;
+            std::string op;
+            std::string purchaseId;
+        };
+
         struct Key
         {
             std::deque<Op> queue;
@@ -423,6 +466,8 @@ namespace KeyedProto
             bool owned = false;            // this process holds the marker fence
             bool fenced = false;           // another claimant took the fence: refuse writes
             bool frozen = false;           // inconsistent proof / callback failure: nothing runs until ResolveFrozen
+            bool frozenProof = false;      // frozen for inconsistent DB proof (needs a consistent re-read)
+            FrozenOp frozenOp;
             bool claimQueued = false;
             uint64_t fence = 0;
             uint64_t lastSeq = 0;
@@ -599,6 +644,21 @@ namespace KeyedProto
             k.frozen = true;
         }
 
+        void FreezeForProof(Key& k, Op const& op)
+        {
+            Freeze(k);
+            k.frozenProof = true;
+            k.frozenOp = FrozenOp{op.seq, op.fence, op.opToken, op.purchaseId};
+        }
+
+        void Unfreeze(uint32_t guid, Key& k)
+        {
+            k.frozen = false;
+            k.frozenProof = false;
+            k.frozenOp = FrozenOp();
+            Pump(guid, k);
+        }
+
         void Schedule(Key& k, std::function<void()> step)
         {
             k.step = std::move(step);
@@ -666,9 +726,10 @@ namespace KeyedProto
             uint64_t const n = reconcile ? k.current.seq : 0;
             std::string const pid = reconcile ? k.current.purchaseId : std::string();
             std::string const sql = Acore::StringFormat(
-                "SELECT m.seq, m.fence, m.owner, l.fence, l.op, j.guid, j.seq, j.op, j.fence FROM harness_write_seq m "
+                "SELECT m.seq, m.fence, m.owner, l.fence, l.op, j.guid, j.seq, j.op, j.fence, p.fence, p.op FROM harness_write_seq m "
                 "LEFT JOIN harness_write_log l ON l.guid = m.guid AND l.seq = {} "
-                "LEFT JOIN harness_purchase_journal j ON j.purchase_id = '{}' WHERE m.guid = {}", n, pid, guid);
+                "LEFT JOIN harness_purchase_journal j ON j.purchase_id = '{}' "
+                "LEFT JOIN harness_write_log p ON p.guid = j.guid AND p.seq = j.seq WHERE m.guid = {}", n, pid, guid);
             _queryCallbacks.AddCallback(CharacterDatabase.AsyncQuery(sql)).WithCallback(
                 [this, guid, expected, token, reconcile](QueryResult r)
                 {
@@ -720,12 +781,24 @@ namespace KeyedProto
                             && f[8].Get<uint64_t>() == op.fence);
                         forPurchase = journalMine ? Outcome::Committed : Outcome::Unresolved;
                         if (!journalMine)
-                            Freeze(key); // inconsistent proof: nothing else runs until explicit reconciliation
+                            FreezeForProof(key, op); // inconsistent proof: nothing runs until reconciled
                     }
                     else if (!op.purchaseId.empty() && !f[5].IsNull())
                     {
                         if (f[5].Get<uint32_t>() == guid)
-                            forPurchase = Outcome::DuplicatePurchase;
+                        {
+                            // Only an exactly proven earlier charge is a duplicate: the
+                            // journal row's own write-log row (same seq, fence, op).
+                            bool const earlierProven = !f[9].IsNull() && f[9].Get<uint64_t>() == f[8].Get<uint64_t>()
+                                && f[10].Get<std::string>() == f[7].Get<std::string>();
+                            if (earlierProven)
+                                forPurchase = Outcome::DuplicatePurchase;
+                            else
+                            {
+                                forPurchase = Outcome::Unresolved;
+                                FreezeForProof(key, op);
+                            }
+                        }
                         else
                         {
                             forPurchase = Outcome::IdConflict; // never attribute another character's charge
