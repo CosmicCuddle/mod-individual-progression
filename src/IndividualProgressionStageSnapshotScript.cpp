@@ -119,7 +119,22 @@ class IndividualProgression_StageSnapshotPlayerScript : public PlayerScript
 {
 public:
     IndividualProgression_StageSnapshotPlayerScript() : PlayerScript("IndividualProgression_StageSnapshot",
-        { PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_LOGOUT, PLAYERHOOK_ON_UPDATE, PLAYERHOOK_ON_PLAYER_COMPLETE_QUEST }) { }
+        { PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_LOGOUT, PLAYERHOOK_ON_UPDATE, PLAYERHOOK_ON_PLAYER_COMPLETE_QUEST
+#if defined(COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION) && COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION >= 1
+          , PLAYERHOOK_ON_BEFORE_REWARDED_QUEST_CHANGE
+#endif
+        }) { }
+
+#if defined(COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION) && COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION >= 1
+    // Proposed Core pre-change hook (tests/core_patches/rewarded_quest_prechange_hook.patch):
+    // every actual add/remove of a rewarded quest, before it happens, on the
+    // mutating thread. Only markers invalidate; no Player mutation here.
+    void OnPlayerBeforeRewardedQuestChange(Player* player, uint32 questId, bool /*rewarded*/) override
+    {
+        if (player && SnapshotApi::IsStageMarkerQuest(questId))
+            sIndividualProgression->InvalidateStageSnapshot(player->GetGUID());
+    }
+#endif
 
     void OnPlayerLogin(Player* player) override
     {

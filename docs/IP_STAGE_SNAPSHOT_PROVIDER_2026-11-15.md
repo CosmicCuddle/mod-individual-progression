@@ -25,9 +25,13 @@
 - **Proposed authorization contract** (for CS01/Codex acceptance; no global lock):
   1. **Plan** (non-destructive) from snapshot `A`: candidate items, caps, replacements.
   2. **Mutation block**, on the **bot's own** map thread, synchronous: no yield, no foreign `Player` access. It starts with the final read `B`, and proceeds only if `SameKnownSnapshot(A, B)`. **`B` is the linearization point:** a change ordered after `B` (logout, downgrade, invalidation, marker removal) is ordered after this gear operation, exactly like a command that completed a moment before the change.
-  3. **Post-check:** read `C` right after the mutation. If `!SameKnownSnapshot(B, C)`, PB schedules a **corrective pass** on the bot's next own update. It may only remove or re-cap items above the cap of the then-current `Known` snapshot, and **never grants**. Further gearing is denied until a `Known` snapshot exists.
+  3. **Revised (CS01 6893160859, owner decision #59 6893251347): no next-tick correction.**
+     - PB prepares the replacement set (or the strip plan) **without mutating**.
+     - Immediately before the **irreversible commit** (equip, or strip on a genuine no-suitable-set result), it re-reads the snapshot on the bot's own thread. It commits only if `SameKnownSnapshot(A, final)` holds and the session is still valid.
+     - Changed, unknown or revoked authority means **nothing changes**: gear is preserved, and an explicit failure reason is reported.
+     - IP never strips, re-caps or mutates gear itself.
   4. **Never hold an IP lock** across gear mutation or callbacks. Every IP call is a value copy under a shared lock.
-- **Lease alternative** (if the weaker semantics above are not accepted): a bounded per-character lease that records "broken" when an invalidation happens during it. It can't block GM or IP changes either, so its outcome is the same corrective pass. That's why the post-check variant is proposed as simpler, with no new state in IP.
+- **Bounded per-character arbitration** (if CS01 needs more than the final-read check): a short lease recorded in IP, which an invalidation marks as broken. The commit is refused if it's broken. IP state would be added only when requested.
 - **Composition with #184:** on the combined branch, `CompletePaidExpansionPurchase` invalidates before the confirmed bit is set (lock order is paid → snapshot only).
 
 ## Lifecycle
@@ -66,3 +70,52 @@
 - **Mutations:** W1–W12 and H1–H8 all caught.
 - **Build:** object compile and full worldserver link on the synced stack.
 - **Not covered here:** gameplay, and the PB IP-absent build (Codex's side).
+
+## Rewarded-quest mutation audit and proposed Core hook (CS01 6893262981; design only)
+Core `21ff1973` plus modules. All direct writers of `Player::m_RewardedQuests`:
+
+| Kind | Writer | Callers | Notes |
+|---|---|---|---|
+| insert | `Player::SetRewardedQuest` (`PlayerQuest.cpp:906-910`) | `RewardQuest` (`:849`; already followed by `OnPlayerCompleteQuest`); `Spell::EffectQuestComplete` (`SpellEffects.cpp:5009`, **no hook**); IP `GrantAttunements` (`IndividualProgression.cpp:394`, attunement quests) | `insert` on an existing id is a no-op |
+| erase | `Player::RemoveRewardedQuest` (`PlayerQuest.cpp:1587-1597`) | `Spell::EffectQuestClear` (`SpellEffects.cpp:5382`, **no hook**); GM `.quest remove` (`cs_quest.cpp:173`); IP `ForceUpdateProgressionState` (markers, already invalidated), `CleanUpVanillaPvpTitles` (`:1498`), `OnPlayerCompleteQuest` (`IndividualProgressionPlayer.cpp:706`); PB `DropQuestAction` (3 sites); PB `PlayerbotFactory::ResetQuests` (`:1702`, bots) | a missing id is a no-op |
+| bulk load | `_LoadQuestStatusRewarded` (`PlayerStorage.cpp:6493-6517`) | login load | before the character is in world; the snapshot isn't registered or published until after `OnPlayerLogin` / the first owner update |
+| none | daily/weekly/monthly/seasonal resets | `World.cpp` | they clear other sets, **not** `m_RewardedQuests` |
+
+**Gap:** `OnPlayerCompleteQuest` fires only from `RewardQuest`, after its side effects. `EffectQuestComplete`, `EffectQuestClear`, `.quest remove`, PB drop/reset and module calls have **no** hook. IP's `OnTryExecuteCommand` covers only GM commands.
+
+**Proposed narrow Core hook** (Core lane, for review):
+- `PlayerScript::OnPlayerBeforeRewardedQuestChange(Player* player, uint32 questId, bool rewarded)`.
+- Called inside `SetRewardedQuest` and `RemoveRewardedQuest`, **only when the set actually changes** (`find` first), and **before** the insert or erase.
+- Not called from `_LoadQuestStatusRewarded` (load is not a change).
+- **Threading:** it runs on whichever thread mutates the Player, the same as the mutation itself, so it adds no new cross-thread access.
+- **IP consumer:** `if (IsStageMarkerQuest(questId)) InvalidateStageSnapshot(player->GetGUID())`. It does no Player mutation and takes only the snapshot lock, so it's **reentrancy-safe**; the owner thread republishes afterwards.
+- Once this hook exists, the `OnTryExecuteCommand` text scan and the `OnPlayerCompleteQuest` invalidation become redundant. They can stay as defense in depth.
+- **Not covered:** writes that bypass `Player` (raw SQL on `character_queststatus_rewarded` while the character is online) — none found among the audited runtime writers. PB orphan cleanups are offline/startup.
+
+### Exact Core patch proposal (CS01 Part09, accepted design; not applied to any shared Core branch)
+- **Patch:** `tests/core_patches/rewarded_quest_prechange_hook.patch`, against Core `21ff1973`. 4 files, +23/−1:
+  - `PlayerScript.h`: new hook enum, a virtual with docs, and `#define COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION 1`;
+  - `ScriptMgr.h` / `PlayerScript.cpp`: the dispatcher;
+  - `PlayerQuest.cpp`: `SetRewardedQuest` calls the hook only if the id is absent; `RemoveRewardedQuest` only if it's present, and erases by key afterwards.
+- **IP consumer:** compiled only when the macro exists. It invalidates for markers 66001–66018 only.
+- **Verified:**
+  - both patched Core translation units object-compile;
+  - the IP script compiles against unpatched Core (hook absent; 0 symbols) and patched Core (hook present; 1 symbol);
+  - contracts pass.
+
+**Test matrix for the Core lane (to run once the patch is applied in an isolated Core prototype):**
+
+| # | Case | Expect |
+|---|---|---|
+| 1 | `SetRewardedQuest` on a new id | hook fires once, before the insert (the handler sees the id absent) |
+| 2 | `SetRewardedQuest` on an existing id | no hook |
+| 3 | `RemoveRewardedQuest` on a present id | hook fires once, before the erase (the handler sees the id present) |
+| 4 | `RemoveRewardedQuest` on a missing id | no hook |
+| 5 | `_LoadQuestStatusRewarded` | no hook |
+| 6 | `RewardQuest` (hand-in) | the pre-change hook, then `OnPlayerCompleteQuest` (order) |
+| 7 | `Spell::EffectQuestComplete` / `EffectQuestClear` on a marker | hook fires, and the IP snapshot goes Unknown before the change |
+| 8 | GM `.quest remove 66003` | hook fires (and the command-text invalidation still runs) |
+| 9 | PB `ResetQuests` / `DropQuestAction` on a bot | hook per actual removal; IP invalidates only for markers |
+| 10 | Non-marker quest ids | IP doesn't invalidate |
+| 11 | Handler reentrancy | the IP handler doesn't mutate the set; the erase-by-key path is safe even if a handler did |
+| 12 | Hook disabled (no IP consumer registered) | zero behaviour change (`CALL_ENABLED_HOOKS` skips) |

@@ -147,6 +147,20 @@ class IpWiring(unittest.TestCase):
         bit = c.index("_paidExpansionFlags[guid] |=")
         self.assertTrue(grant < inv < bit)
 
+    def test_prechange_hook_consumer_is_gated_and_invalidate_only(self):
+        raw = read("src/IndividualProgressionStageSnapshotScript.cpp")
+        gate = "#if defined(COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION) && COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION >= 1"
+        self.assertEqual(raw.count(gate), 2)
+        hook = body(code(raw), "void OnPlayerBeforeRewardedQuestChange(Player* player, uint32 questId, bool ) override")
+        self.assertIn("SnapshotApi::IsStageMarkerQuest(questId)", hook)
+        self.assertIn("InvalidateStageSnapshot(player->GetGUID())", hook)
+        for token in ("RemoveRewardedQuest", "SetRewardedQuest", "RewardQuest", "Publish"):
+            self.assertNotIn(token, code(hook), token)
+        patch = read("tests/core_patches/rewarded_quest_prechange_hook.patch")
+        self.assertIn("#define COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION 1", patch)
+        self.assertIn("+    if (m_RewardedQuests.find(quest_id) == m_RewardedQuests.end())\n+        sScriptMgr->OnPlayerBeforeRewardedQuestChange(this, quest_id, true);", patch)
+        self.assertIn("+        sScriptMgr->OnPlayerBeforeRewardedQuestChange(this, questId, false);", patch)
+
     def test_existing_getters_unchanged(self):
         eff = body(EXP, "uint8 IndividualProgression::GetEffectiveProgression(Player* player)")
         self.assertNotIn("Snapshot", eff)
