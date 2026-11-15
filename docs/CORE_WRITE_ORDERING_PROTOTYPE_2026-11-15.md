@@ -104,7 +104,7 @@ Checks per run: 138 at 1 worker (K12 is skipped, see §5), 148 at 2, 149 at 4 an
 ## 4. Mutation check (each mutant must make the harness fail)
 Tooling: `tests/db_harness/run_keyed_mutations.sh` applies each mutant in `tests/db_harness/keyed_mutants.py` to a copy of the header, rebuilds, and runs `keyed 4`.
 
-**30/30 mutants are killed** (22 in revision 2, M24–M28 in revision 3, M29–M31 in revision 4) (`keyed 4`; first failing scenario shown).
+**35/35 mutants are killed** (22 in revision 2, M24–M28 in revision 3, M29–M31 in revision 4, M32–M36 in revision 5) (`keyed 4`; first failing scenario shown).
 
 | Mutant | What it breaks | Killed by |
 |---|---|---|
@@ -138,6 +138,11 @@ Tooling: `tests/db_harness/run_keyed_mutations.sh` applies each mutant in `tests
 | M29 | Blind unfreeze (no proof re-read) | K24 |
 | M30 | Shutdown callback outside `Invoke` | K26 (abort) |
 | M31 | Same-guid duplicate without the earlier write-log proof | K27 |
+| M32 | Resolve ignores the freeze generation | K28 (an older resolve clears a newer freeze) |
+| M33 | Resolve not single-flight | K28 |
+| M34 | Resolve completion not contained | K28 (abort) |
+| M35 | Shutdown leaves a pending resolve unsettled | K28 |
+| M36 | Earlier-duplicate freeze resolved by current-commit proof | K27 (the audit void no longer releases) |
 
 Not mutation-tested, with the reason:
 - **Per-key FIFO itself:** its "mutant" is the unkeyed baseline, `run_harness.sh reverse 2`, which overwrites a confirmed purchase.
@@ -196,3 +201,11 @@ Not mutation-tested, with the reason:
 Production must also validate the receipt in `character_settings` before any grant. That's out of scope for this harness and stays open, together with `_keys` lifetime, byte bounds, prepared binds and log retention.
 
 **Results:** 174/184/185/185 checks at 1/2/4/8 workers; restart 3 + 6; `netloss` 13/13. Verified against the Core `82d340c1` DB layer (unchanged from `21ff1973`).
+
+## 9. Revision 5 (CS01 review 6896262413)
+| Finding | Answer | Evidence |
+|---|---|---|
+| Resolve lifecycle: concurrent resolves; an old callback can clear a newer freeze; `done` uncontained; shutdown and `Idle` ignore a pending resolve | Single-flight resolve token per key. Every freeze bumps a **generation**, and the resolve re-checks the exact generation and kind before unfreezing. Completion goes through `Invoke`, so a throw re-freezes. Shutdown settles a pending resolve exactly once and ignores the late result. `Idle` counts a pending resolve. Freeze kinds never downgrade. | K28; M32–M35 |
+| A duplicate whose earlier journal row lacks proof froze the *current* op, and only current-commit proof could release it | It's a distinct `EarlierDuplicate` freeze. It's released only when the **earlier** journal row is proven by its own write-log row, or an audit voids it. A fabricated current-commit log row doesn't help, and no charge is made. | K27 recovery; M36 |
+
+**Results:** 189/199/200/200 checks at 1/2/4/8 workers; restart 3 + 6; `netloss` 13/13.
