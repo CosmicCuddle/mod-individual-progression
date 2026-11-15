@@ -25,9 +25,13 @@
 - **Proposed authorization contract** (for CS01/Codex acceptance; no global lock):
   1. **Plan** (non-destructive) from snapshot `A`: candidate items, caps, replacements.
   2. **Mutation block**, on the **bot's own** map thread, synchronous: no yield, no foreign `Player` access. It starts with the final read `B`, and proceeds only if `SameKnownSnapshot(A, B)`. **`B` is the linearization point:** a change ordered after `B` (logout, downgrade, invalidation, marker removal) is ordered after this gear operation, exactly like a command that completed a moment before the change.
-  3. **Post-check:** read `C` right after the mutation. If `!SameKnownSnapshot(B, C)`, PB schedules a **corrective pass** on the bot's next own update. It may only remove or re-cap items above the cap of the then-current `Known` snapshot, and **never grants**. Further gearing is denied until a `Known` snapshot exists.
+  3. **Revised (CS01 6893160859, owner decision #59 6893251347): no next-tick correction.**
+     - PB prepares the replacement set (or the strip plan) **without mutating**.
+     - Immediately before the **irreversible commit** (equip, or strip on a genuine no-suitable-set result), it re-reads the snapshot on the bot's own thread. It commits only if `SameKnownSnapshot(A, final)` holds and the session is still valid.
+     - Changed, unknown or revoked authority means **nothing changes**: gear is preserved, and an explicit failure reason is reported.
+     - IP never strips, re-caps or mutates gear itself.
   4. **Never hold an IP lock** across gear mutation or callbacks. Every IP call is a value copy under a shared lock.
-- **Lease alternative** (if the weaker semantics above are not accepted): a bounded per-character lease that records "broken" when an invalidation happens during it. It can't block GM or IP changes either, so its outcome is the same corrective pass. That's why the post-check variant is proposed as simpler, with no new state in IP.
+- **Bounded per-character arbitration** (if CS01 needs more than the final-read check): a short lease recorded in IP, which an invalidation marks as broken. The commit is refused if it's broken. IP state would be added only when requested.
 - **Composition with #184:** on the combined branch, `CompletePaidExpansionPurchase` invalidates before the confirmed bit is set (lock order is paid → snapshot only).
 
 ## Lifecycle
