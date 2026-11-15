@@ -91,3 +91,31 @@ Core `21ff1973` plus modules. All direct writers of `Player::m_RewardedQuests`:
 - **IP consumer:** `if (IsStageMarkerQuest(questId)) InvalidateStageSnapshot(player->GetGUID())`. It does no Player mutation and takes only the snapshot lock, so it's **reentrancy-safe**; the owner thread republishes afterwards.
 - Once this hook exists, the `OnTryExecuteCommand` text scan and the `OnPlayerCompleteQuest` invalidation become redundant. They can stay as defense in depth.
 - **Not covered:** writes that bypass `Player` (raw SQL on `character_queststatus_rewarded` while the character is online) — none found among the audited runtime writers. PB orphan cleanups are offline/startup.
+
+### Exact Core patch proposal (CS01 Part09, accepted design; not applied to any shared Core branch)
+- **Patch:** `tests/core_patches/rewarded_quest_prechange_hook.patch`, against Core `21ff1973`. 4 files, +23/−1:
+  - `PlayerScript.h`: new hook enum, a virtual with docs, and `#define COSMIC_PLAYER_REWARDED_QUEST_HOOK_VERSION 1`;
+  - `ScriptMgr.h` / `PlayerScript.cpp`: the dispatcher;
+  - `PlayerQuest.cpp`: `SetRewardedQuest` calls the hook only if the id is absent; `RemoveRewardedQuest` only if it's present, and erases by key afterwards.
+- **IP consumer:** compiled only when the macro exists. It invalidates for markers 66001–66018 only.
+- **Verified:**
+  - both patched Core translation units object-compile;
+  - the IP script compiles against unpatched Core (hook absent; 0 symbols) and patched Core (hook present; 1 symbol);
+  - contracts pass.
+
+**Test matrix for the Core lane (to run once the patch is applied in an isolated Core prototype):**
+
+| # | Case | Expect |
+|---|---|---|
+| 1 | `SetRewardedQuest` on a new id | hook fires once, before the insert (the handler sees the id absent) |
+| 2 | `SetRewardedQuest` on an existing id | no hook |
+| 3 | `RemoveRewardedQuest` on a present id | hook fires once, before the erase (the handler sees the id present) |
+| 4 | `RemoveRewardedQuest` on a missing id | no hook |
+| 5 | `_LoadQuestStatusRewarded` | no hook |
+| 6 | `RewardQuest` (hand-in) | the pre-change hook, then `OnPlayerCompleteQuest` (order) |
+| 7 | `Spell::EffectQuestComplete` / `EffectQuestClear` on a marker | hook fires, and the IP snapshot goes Unknown before the change |
+| 8 | GM `.quest remove 66003` | hook fires (and the command-text invalidation still runs) |
+| 9 | PB `ResetQuests` / `DropQuestAction` on a bot | hook per actual removal; IP invalidates only for markers |
+| 10 | Non-marker quest ids | IP doesn't invalidate |
+| 11 | Handler reentrancy | the IP handler doesn't mutate the set; the erase-by-key path is safe even if a handler did |
+| 12 | Hook disabled (no IP consumer registered) | zero behaviour change (`CALL_ENABLED_HOOKS` skips) |
