@@ -28,14 +28,28 @@ VALUES (1001, 1, 'Harnessa', 1, 1, 0, 60, 1000), (1002, 1, 'Harnessb', 1, 1, 0, 
 INSERT INTO character_queststatus_rewarded (guid, quest, active)
 VALUES (1001, 66007, 1), (1002, 66007, 1), (1003, 66007, 1), (1004, 66007, 1), (1005, 66007, 1), (1006, 66007, 1), (1007, 66007, 1);
 
--- Keyed save-ordering prototype (keyed_ordering_harness.cpp): per-character
--- write marker (durable transaction sequence), purchase journal (unique
--- purchase id), and an always-failing table for definite statement failures.
-CREATE TABLE harness_write_seq (guid INT UNSIGNED NOT NULL PRIMARY KEY, seq BIGINT UNSIGNED NOT NULL) ENGINE=InnoDB;
+-- Keyed save-ordering prototype rev2 (keyed_ordering_harness.cpp):
+--   harness_write_seq: per-character marker (seq, fence, owner). It changes only by
+--     compare-and-set (trigger): a WRITE keeps fence/owner and sets seq + 1; a CLAIM
+--     keeps seq and sets fence + 1 with a new owner. An older-fence write fails.
+--   harness_write_log: one row per committed keyed write (exact op identity).
+--   harness_purchase_journal: unique purchase id bound to guid + seq + fence + op.
+--   harness_fail: an always-failing table for definite statement failures.
+CREATE TABLE harness_write_seq (guid INT UNSIGNED NOT NULL PRIMARY KEY, seq BIGINT UNSIGNED NOT NULL,
+  fence BIGINT UNSIGNED NOT NULL, owner VARCHAR(64) NOT NULL) ENGINE=InnoDB;
+CREATE TABLE harness_write_log (guid INT UNSIGNED NOT NULL, seq BIGINT UNSIGNED NOT NULL,
+  fence BIGINT UNSIGNED NOT NULL, op VARCHAR(64) NOT NULL, PRIMARY KEY (guid, seq)) ENGINE=InnoDB;
 CREATE TABLE harness_purchase_journal (purchase_id VARCHAR(64) NOT NULL PRIMARY KEY, guid INT UNSIGNED NOT NULL,
-  seq BIGINT UNSIGNED NOT NULL, KEY idx_guid (guid)) ENGINE=InnoDB;
+  seq BIGINT UNSIGNED NOT NULL, fence BIGINT UNSIGNED NOT NULL, op VARCHAR(64) NOT NULL, KEY idx_guid (guid)) ENGINE=InnoDB;
 CREATE TABLE harness_fail (guid INT UNSIGNED NOT NULL) ENGINE=InnoDB;
 DELIMITER //
+CREATE TRIGGER harness_marker_cas BEFORE UPDATE ON harness_write_seq FOR EACH ROW
+BEGIN
+  IF NOT ((NEW.fence = OLD.fence AND NEW.owner = OLD.owner AND NEW.seq = OLD.seq + 1)
+       OR (NEW.fence = OLD.fence + 1 AND NEW.seq = OLD.seq)) THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'harness marker compare-and-set refused';
+  END IF;
+END//
 CREATE TRIGGER harness_fail_always BEFORE INSERT ON harness_fail FOR EACH ROW
 BEGIN
   SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'harness injected failure: keyed definite';
@@ -65,4 +79,16 @@ VALUES (1101, 1, 'Keyed1101', 1, 1, 0, 60, 1000),
        (1134, 1, 'Keyed1134', 1, 1, 0, 60, 1000),
        (1141, 1, 'Keyed1141', 1, 1, 0, 60, 1000),
        (1142, 1, 'Keyed1142', 1, 1, 0, 60, 1000),
-       (1151, 1, 'Keyed1151', 1, 1, 0, 60, 1000);
+       (1151, 1, 'Keyed1151', 1, 1, 0, 60, 1000),
+       (1161, 1, 'Keyed1161', 1, 1, 0, 60, 1000),
+       (1162, 1, 'Keyed1162', 1, 1, 0, 60, 1000),
+       (1163, 1, 'Keyed1163', 1, 1, 0, 60, 1000),
+       (1164, 1, 'Keyed1164', 1, 1, 0, 60, 1000),
+       (1165, 1, 'Keyed1165', 1, 1, 0, 60, 1000),
+       (1166, 1, 'Keyed1166', 1, 1, 0, 60, 1000),
+       (1167, 1, 'Keyed1167', 1, 1, 0, 60, 1000),
+       (1168, 1, 'Keyed1168', 1, 1, 0, 60, 1000),
+       (1169, 1, 'Keyed1169', 1, 1, 0, 60, 1000),
+       (1170, 1, 'Keyed1170', 1, 1, 0, 60, 1000),
+       (1171, 1, 'Keyed1171', 1, 1, 0, 60, 1000),
+       (1172, 1, 'Keyed1172', 1, 1, 0, 60, 1000);

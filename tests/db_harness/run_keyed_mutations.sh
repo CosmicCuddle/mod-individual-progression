@@ -1,5 +1,5 @@
 #!/bin/bash
-# Mutation check for the keyed save-ordering prototype. THROWAWAY DB ONLY.
+# Mutation check for the keyed save-ordering prototype (rev2). THROWAWAY DB ONLY.
 # Usage: run_keyed_mutations.sh <core_src_root> <core_build_dir> <mysql_socket> <compile_cmd_prefix_file>
 # Run run_keyed_harness.sh first (it creates the harness DB and sets innodb_lock_wait_timeout=1).
 # Optional: NAMES="M2_... M3_..." to run a subset. Prints KILLED/SURVIVED per mutant; exit 1 if any survived.
@@ -25,11 +25,7 @@ PY
     $BUILD/deps/argon2/libargon2.a $BUILD/deps/SFMT/libsfmt.a $BUILD/deps/g3dlite/libg3dlib.a \
     -lmysqlclient -lssl -lcrypto -lboost_system -lboost_filesystem -lboost_program_options \
     -lboost_iostreams -lboost_thread -lz -lpthread -ldl" > "$D/build.log" 2>&1 || { echo "$name BUILD-FAIL"; survived=1; continue; }
-  if [ "$name" = M4_init_plain_read ]; then
-    timeout 120 "$D/keyed" "$CONN" restart1 > "$D/run.log" 2>&1; timeout 120 "$D/keyed" "$CONN" restart2 >> "$D/run.log" 2>&1; rc=$?
-  else
-    timeout 300 "$D/keyed" "$CONN" keyed 4 > "$D/run.log" 2>&1; rc=$?
-  fi
+  timeout 400 "$D/keyed" "$CONN" keyed 4 > "$D/run.log" 2>&1; rc=$?
   if [ $rc -ne 0 ]; then echo "$name KILLED rc=$rc first: $(grep -m1 '^FAIL' "$D/run.log" | sed 's/.*harness.cpp://')"
   else echo "$name SURVIVED"; survived=1; fi
   sleep 5 # let any external lock holder finish

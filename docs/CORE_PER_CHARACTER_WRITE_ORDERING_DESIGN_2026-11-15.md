@@ -144,3 +144,12 @@ An older autosave (pre-purchase state, `DO SLEEP(1.5)` before its first statemen
 - build exceptions.
 
 All checks pass, and a mutation run kills every mutant listed there. No Core runtime change is made. The marker and journal tables exist only in the harness DB, and adding them to a real DB is an open owner decision.
+
+**Revision 2 of the prototype** (CS01 review 6894208993) adds:
+- a fenced compare-and-set marker, an exact per-op write log and a guid-bound journal;
+- reconciliation by claim;
+- callbacks that run before the next dispatch;
+- capped, same-session-only coalescing;
+- a real COMMIT network-loss test.
+
+See §6 of the prototype doc.

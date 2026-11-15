@@ -30,5 +30,16 @@ done
 # K11: a real process restart between the two halves.
 rc=0; timeout 120 "$OUT/keyed" "$CONN" restart1 || rc=$?; echo "restart1 exit=$rc"; [ $rc -eq 0 ] || rc_all=1
 rc=0; timeout 120 "$OUT/keyed" "$CONN" restart2 || rc=$?; echo "restart2 exit=$rc"; [ $rc -eq 0 ] || rc_all=1
+# K22: real network loss at COMMIT through a local proxy (no TLS on that path; a
+# native-password user so a cold server-side auth cache cannot block the login).
+$M -e "CREATE USER IF NOT EXISTS 'harness_np'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY 'harness';
+       GRANT ALL ON $DB.* TO 'harness_np'@'127.0.0.1';"
+PPORT=${PROXY_PORT:-33317}
+python3 "$HERE/commit_drop_proxy.py" "$PPORT" "$PORT" > "$OUT/proxy.log" 2>&1 & PROXY=$!
+sleep 1
+rc=0; timeout 180 "$OUT/keyed" "127.0.0.1;$PPORT;harness_np;harness;$DB;nossl" netloss || rc=$?
+kill $PROXY 2>/dev/null || true; wait $PROXY 2>/dev/null || true
+echo "netloss exit=$rc"; [ $rc -eq 0 ] || rc_all=1
+grep "proxy:" "$OUT/proxy.log" | sed 's/^/  /'
 echo "outputs in $OUT"
 exit $rc_all

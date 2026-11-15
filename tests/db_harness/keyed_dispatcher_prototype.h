@@ -1,43 +1,38 @@
-// ISOLATED PROTOTYPE of design C rev2 (docs/CORE_PER_CHARACTER_WRITE_ORDERING_DESIGN_2026-11-15.md):
-// a per-character keyed dispatcher, layered ABOVE Core's real DatabaseWorkerPool
-// (CharacterDatabase.AsyncCommitTransaction / AsyncQuery). Test-only. It is NOT a
-// Core change and is not compiled into the module or the worldserver.
+// ISOLATED PROTOTYPE (revision 2) of design C rev2
+// (docs/CORE_PER_CHARACTER_WRITE_ORDERING_DESIGN_2026-11-15.md): a per-character
+// keyed dispatcher layered ABOVE Core's real DatabaseWorkerPool
+// (CharacterDatabase.AsyncCommitTransaction / AsyncQuery). Test-only: not compiled
+// into the module or the worldserver, and not a Core change.
 //
-// What it proves (on a throwaway MySQL, see keyed_ordering_harness.cpp):
-//   - per-key FIFO: an op for a character starts only after every earlier op for
-//     that character FINISHED (committed, failed, reconciled or cancelled);
-//     independent characters run in parallel across all async workers;
-//   - durable transaction id: every keyed write carries a per-character sequence
-//     number written as its FIRST statement (marker row, row lock held for the
-//     whole transaction); a purchase also inserts its unique purchase id into a
-//     journal inside the same transaction;
-//   - ambiguous outcome: any "false" from Core (definite failure, connection lost
-//     during COMMIT, deadlock retries exhausted) puts the key into Uncertain; the
-//     key does not advance until a LOCKING read of the marker row (FOR SHARE, which
-//     waits for any still-running server-side transaction) proves the outcome;
-//     no automatic replay and no grant without proof;
-//   - duplicate purchase: a replayed purchase id fails on the journal's primary
-//     key, and reconciliation reports DuplicatePurchase (DB charged once);
-//   - restart: a new process re-reads the marker (locking) before admitting
-//     writes, so sequence numbers continue, and the journal answers whether a
-//     purchase left Unresolved at shutdown committed;
-//   - admission lease: BeginSession issues a new session epoch; submits from an
-//     older epoch are refused (ops already queued by the older session still run,
-//     in order, BEFORE the new session's login read);
-//   - bounded queues: whole-state saves coalesce into the pending (not yet
-//     dispatched) write of the same key; a per-key depth cap and a global op cap
-//     refuse with Backpressure (the caller keeps memory dirty and retries; nothing
-//     already admitted is ever dropped);
-//   - cancellation (session gone) and an exception while building a transaction
-//     both still advance the key;
-//   - shutdown stops admission and drains every key; a key still Uncertain at the
-//     drain deadline reports Unresolved (the next process reconciles it).
+// Revision 2 answers CS01 review 6894208993:
+//   H1 exact operation identity + monotonic fencing:
+//     - the marker row (guid, seq, fence, owner) only changes by compare-and-set:
+//       a write sets seq = n, fence = F and the harness trigger refuses anything
+//       but (same fence, same owner, seq + 1); a CLAIM sets fence + 1 with a new
+//       owner token and the same seq. A write of an older fence therefore fails.
+//     - every keyed write inserts (guid, seq, fence, op token) into a write log;
+//       a purchase also inserts (purchase_id, guid, seq, fence, op token) into
+//       the journal. Committed means: the log row for (guid, n) carries THIS
+//       op's fence and token. A higher marker alone proves nothing.
+//     - reconciliation first CLAIMS the key (an UPDATE that waits for any
+//       in-flight transaction on the marker row and then kills the old fence),
+//       then reads the log/journal. After the claim no transaction of the old
+//       fence can ever commit, so the read is final.
+//     - a duplicate purchase id is DuplicatePurchase only when the journal row
+//       belongs to the SAME character; another character's row is IdConflict.
+//     - if another claimant moved the fence, the key is Fenced: writes are
+//       refused until a new session re-claims it.
+//   H2 callbacks first: an op's waiters are called BEFORE the key advances, so
+//     a queued lazy builder sees the state the callback restored. Builder
+//     failures are delivered from Process(), never inside a Submit call.
+//   H3 bounded coalescing: caps are checked first (global waiter cap, per-op
+//     waiter cap, per-key depth, global depth); only saves of the SAME session
+//     epoch coalesce; purchases never coalesce in either direction.
 //
 // Threading: every public call and every callback runs on ONE owner thread (the
-// harness main thread, standing in for the world thread). Builders run at
-// DISPATCH time on that thread, so a coalesced save writes the newest memory.
-// In Core the same state machine would live inside DatabaseWorkerPool under its
-// mutex; that move is the Core lane's (CS01) and is not attempted here.
+// harness main thread standing in for the world thread). Builders run at
+// DISPATCH time on that thread. In Core the state machine would live inside
+// DatabaseWorkerPool under its mutex; that move is the Core lane's (CS01).
 #pragma once
 
 #include "DatabaseEnv.h"
@@ -50,8 +45,9 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
-#include <thread>
+#include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -60,9 +56,9 @@ namespace KeyedProto
 {
     using Clock = std::chrono::steady_clock;
 
-    enum class Admit { Queued, Coalesced, StaleEpoch, NoSession, Backpressure, ShuttingDown, PurchaseInFlight };
-    enum class Outcome { Committed, NotCommitted, DuplicatePurchase, BuildFailed, Unresolved };
-    enum class KeyState { Idle, Initializing, Running, Uncertain, Reconciling };
+    enum class Admit { Queued, Coalesced, StaleEpoch, NoSession, Backpressure, ShuttingDown, PurchaseInFlight, Fenced };
+    enum class Outcome { Committed, NotCommitted, DuplicatePurchase, IdConflict, BuildFailed, Unresolved };
+    enum class KeyState { Idle, Claiming, Running, Uncertain, Delivering };
 
     inline char const* Name(Admit a)
     {
@@ -75,6 +71,7 @@ namespace KeyedProto
             case Admit::Backpressure: return "Backpressure";
             case Admit::ShuttingDown: return "ShuttingDown";
             case Admit::PurchaseInFlight: return "PurchaseInFlight";
+            case Admit::Fenced: return "Fenced";
         }
         return "?";
     }
@@ -86,6 +83,7 @@ namespace KeyedProto
             case Outcome::Committed: return "Committed";
             case Outcome::NotCommitted: return "NotCommitted";
             case Outcome::DuplicatePurchase: return "DuplicatePurchase";
+            case Outcome::IdConflict: return "IdConflict";
             case Outcome::BuildFailed: return "BuildFailed";
             case Outcome::Unresolved: return "Unresolved";
         }
@@ -98,62 +96,80 @@ namespace KeyedProto
 
     struct Limits
     {
-        std::size_t maxPendingPerKey = 4;  // queued (not running) ops per key
-        std::size_t maxTotalPending = 256; // queued ops over all keys (global cap)
-        uint32_t reconcileRetryMs = 50;    // between failed reconciliation reads
-        uint32_t stallMs = 2000;           // Uncertain this long -> onStalled (login refused)
+        std::size_t maxPendingPerKey = 4;   // queued (not running) ops per key
+        std::size_t maxTotalPending = 256;  // queued ops over all keys
+        std::size_t maxWaitersPerOp = 16;   // callbacks merged into one op
+        std::size_t maxTotalWaiters = 1024; // callbacks held over all keys
+        uint32_t retryMs = 50;              // between failed claim / verify steps
+        uint32_t stallMs = 2000;            // claiming this long -> onStalled (login refused)
+    };
+
+    // What the dispatcher knows about an uncertain write (test hooks only).
+    struct InFlight
+    {
+        uint32_t guid = 0;
+        uint64_t seq = 0;
+        uint64_t fence = 0;
+        std::string op;
+        std::string purchaseId;
     };
 
     struct Hooks
     {
-        // Test only: report a COMMITTED write to the dispatcher as "false"
-        // (models a connection lost during COMMIT after the server committed).
+        // Test only: report a COMMITTED write to the dispatcher as "false".
         std::function<bool(uint32_t guid, uint64_t seq)> loseAck;
-        // Test only: runs right before each reconciliation read is queued.
-        std::function<void(uint32_t guid)> beforeReconcile;
-        // A key stayed Uncertain past Limits::stallMs (fail closed; still retrying).
+        // Test only: runs once when reconciliation of an uncertain write starts.
+        std::function<void(InFlight const&)> beforeReconcile;
+        // A claim (init or reconciliation) took longer than Limits::stallMs.
         std::function<void(uint32_t guid)> onStalled;
     };
 
     struct Stats
     {
-        uint64_t writesDispatched = 0, readsDispatched = 0, reconcileReads = 0, coalesced = 0,
-                 backpressure = 0, staleEpoch = 0, cancelled = 0, buildFailures = 0, maxQueuedPerKey = 0;
+        uint64_t writesDispatched = 0, readsDispatched = 0, reconciliations = 0, claimAttempts = 0, coalesced = 0,
+                 backpressure = 0, staleEpoch = 0, cancelled = 0, buildFailures = 0, fencedOut = 0,
+                 idConflicts = 0, maxQueuedPerKey = 0, maxWaitersSeen = 0;
     };
 
     class Dispatcher
     {
     public:
-        // Tables (throwaway harness DB): marker(guid PK, seq), journal(purchase_id PK, guid, seq).
-        Dispatcher(Limits limits, Hooks hooks, std::string markerTable = "harness_write_seq",
-            std::string journalTable = "harness_purchase_journal")
-            : _limits(limits), _hooks(std::move(hooks)), _marker(std::move(markerTable)), _journal(std::move(journalTable)) { }
+        // Harness tables: marker harness_write_seq(guid PK, seq, fence, owner) with
+        // the CAS trigger, harness_write_log(guid, seq PK, fence, op) and
+        // harness_purchase_journal(purchase_id PK, guid, seq, fence, op).
+        Dispatcher(Limits limits, Hooks hooks)
+            : _limits(limits), _hooks(std::move(hooks)),
+              _nonce(std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::system_clock::now().time_since_epoch()).count()))
+        {
+        }
 
         Dispatcher(Dispatcher const&) = delete;
         Dispatcher& operator=(Dispatcher const&) = delete;
 
-        // Login admission: a new lease epoch (0 = refused: shutting down or over the global cap).
-        // The first session of a key in this process queues the marker initialisation.
+        // Login admission: a new lease epoch (0 = refused: shutting down or over a
+        // global cap). A key this process does not own (first session, or Fenced)
+        // queues a claim before anything else.
         uint64_t BeginSession(uint32_t guid)
         {
-            if (_shuttingDown || TotalPending() >= _limits.maxTotalPending)
+            if (_shuttingDown || TotalPending() >= _limits.maxTotalPending || _totalWaiters >= _limits.maxTotalWaiters)
                 return 0;
             Key& k = _keys[guid];
             k.leaseEpoch = ++_epochCounter;
             k.leaseOpen = true;
-            if (!k.seqKnown && !k.initQueued)
+            if (!k.owned && !k.claimQueued)
             {
-                Op init;
-                init.kind = OpKind::Init;
-                init.ticket = ++_ticketCounter;
-                k.queue.push_back(std::move(init));
-                k.initQueued = true;
+                Op claim;
+                claim.kind = OpKind::Claim;
+                claim.ticket = ++_ticketCounter;
+                k.queue.push_back(std::move(claim));
+                k.claimQueued = true;
+                k.fenced = false; // the queued claim decides ownership again
                 Pump(guid, k);
             }
             return k.leaseEpoch;
         }
 
-        // Logout: the lease closes. Ops the session already queued still run in order.
         void EndSession(uint32_t guid, uint64_t epoch)
         {
             auto it = _keys.find(guid);
@@ -171,21 +187,18 @@ namespace KeyedProto
             return SubmitWrite(guid, epoch, std::move(purchaseId), std::move(builder), std::move(done));
         }
 
-        // A read ordered behind every earlier op of the key (the login holder).
         Admit SubmitRead(uint32_t guid, uint64_t epoch, std::string sql, ReadDone done, uint64_t* ticket = nullptr)
         {
-            Admit const a = CheckAdmission(guid, epoch);
+            Admit const a = CheckAdmission(guid, epoch, false);
             if (a != Admit::Queued)
                 return a;
             Key& k = _keys[guid];
             if (k.queue.size() >= _limits.maxPendingPerKey || TotalPending() >= _limits.maxTotalPending)
-            {
-                ++_stats.backpressure;
-                return Admit::Backpressure;
-            }
+                return Refuse();
             Op op;
             op.kind = OpKind::Read;
             op.ticket = ++_ticketCounter;
+            op.epoch = epoch;
             op.sql = std::move(sql);
             op.readDone = std::move(done);
             if (ticket)
@@ -223,22 +236,38 @@ namespace KeyedProto
             return false;
         }
 
-        // Owner-thread pump: completes DB callbacks, drives Uncertain keys.
+        // Owner-thread pump: completes DB callbacks, runs due retry steps,
+        // delivers deferred results. Keys are visited by id, so a callback that
+        // adds a key (BeginSession) cannot invalidate the walk.
         void Process()
         {
-            std::vector<std::function<void()>> deferred;
-            deferred.swap(_deferred);
-            for (auto& fn : deferred)
-                fn();
             _txCallbacks.ProcessReadyCallbacks();
             _queryCallbacks.ProcessReadyCallbacks();
+            std::vector<uint32_t> ids;
+            ids.reserve(_keys.size());
+            for (auto const& [guid, k] : _keys)
+                ids.push_back(guid);
             Clock::time_point const now = Clock::now();
-            for (auto& [guid, k] : _keys)
+            for (uint32_t guid : ids)
             {
-                if (k.state == KeyState::Uncertain && now >= k.reconcileNotBefore)
-                    StartReconcile(guid, k);
-                if ((k.state == KeyState::Uncertain || k.state == KeyState::Reconciling) && !k.stallReported
-                    && now - k.uncertainSince >= std::chrono::milliseconds(_limits.stallMs))
+                Key& k = _keys.at(guid);
+                if (k.abandoned)
+                    continue;
+                if (k.deferredOutcome)
+                {
+                    Outcome const o = *k.deferredOutcome;
+                    k.deferredOutcome.reset();
+                    DeliverAndAdvance(guid, k, o, o);
+                    continue;
+                }
+                if (k.step && now >= k.stepNotBefore)
+                {
+                    std::function<void()> step = std::move(k.step);
+                    k.step = nullptr;
+                    step();
+                }
+                if (k.state == KeyState::Claiming && !k.stallReported
+                    && now - k.claimSince >= std::chrono::milliseconds(_limits.stallMs))
                 {
                     k.stallReported = true;
                     if (_hooks.onStalled)
@@ -247,17 +276,15 @@ namespace KeyedProto
             }
         }
 
-        // Login fence helper: a new login for this key must be refused now.
         bool LoginBlocked(uint32_t guid) const
         {
             auto it = _keys.find(guid);
             return it != _keys.end() && it->second.stallReported;
         }
 
-        // Stop admission, then drain. Keys still Uncertain/Reconciling at the
-        // deadline (and the ops queued behind them) report Unresolved; the next
-        // process reconciles them from the marker and journal (restart path).
-        // Returns true when everything drained.
+        // Stop admission, then drain. Keys still claiming at the deadline (and
+        // the ops queued behind them) report Unresolved; the next process
+        // reconciles them from the marker, log and journal.
         bool Shutdown(uint32_t drainMs)
         {
             _shuttingDown = true;
@@ -271,30 +298,24 @@ namespace KeyedProto
                 return true;
             for (auto& [guid, k] : _keys)
             {
+                k.abandoned = true; // late DB callbacks are ignored from here on
                 if (k.running)
-                {
-                    for (auto& w : k.current.waiters)
+                    for (auto& w : TakeWaiters(k.current))
                         if (w.done)
                             w.done(Outcome::Unresolved);
-                    k.current.waiters.clear();
-                    k.current.readDone = nullptr;
-                }
                 for (Op& op : k.queue)
-                    for (auto& w : op.waiters)
+                    for (auto& w : TakeWaiters(op))
                         if (w.done)
                             w.done(Outcome::Unresolved);
                 k.queue.clear();
-                k.abandoned = true; // late DB callbacks are ignored
             }
             return false;
         }
 
         bool Idle() const
         {
-            if (!_deferred.empty())
-                return false;
             for (auto const& [guid, k] : _keys)
-                if (k.running || !k.queue.empty() || k.state != KeyState::Idle)
+                if (!k.abandoned && (k.running || !k.queue.empty() || k.state != KeyState::Idle || k.deferredOutcome))
                     return false;
             return true;
         }
@@ -311,20 +332,33 @@ namespace KeyedProto
             return it == _keys.end() ? 0 : it->second.lastSeq;
         }
 
+        uint64_t Fence(uint32_t guid) const
+        {
+            auto it = _keys.find(guid);
+            return it == _keys.end() ? 0 : it->second.fence;
+        }
+
+        bool Owned(uint32_t guid) const
+        {
+            auto it = _keys.find(guid);
+            return it != _keys.end() && it->second.owned;
+        }
+
         std::size_t Queued(uint32_t guid) const
         {
             auto it = _keys.find(guid);
             return it == _keys.end() ? 0 : it->second.queue.size();
         }
 
+        std::size_t TotalWaiters() const { return _totalWaiters; }
         Stats const& GetStats() const { return _stats; }
 
     private:
-        enum class OpKind { Init, Write, Read };
+        enum class OpKind { Claim, Write, Read };
 
         struct Waiter
         {
-            std::string purchaseId; // empty for a save
+            bool purchase = false;
             Done done;
         };
 
@@ -332,13 +366,16 @@ namespace KeyedProto
         {
             OpKind kind = OpKind::Write;
             uint64_t ticket = 0;
-            Builder builder;               // newest whole-state builder (coalescing keeps the last)
-            std::string purchaseId;        // at most one purchase per op
+            uint64_t epoch = 0;
+            Builder builder;               // newest whole-state builder (same-epoch saves only)
+            std::string purchaseId;        // a purchase op never merges with anything
             std::vector<Waiter> waiters;
             std::string sql;               // Read
             ReadDone readDone;             // Read
             bool discard = false;          // Read cancelled while running
             uint64_t seq = 0;              // Write: assigned at dispatch
+            uint64_t fence = 0;            // Write: fence at dispatch
+            std::string opToken;           // Write: unique op identity
             bool dispatched = false;
         };
 
@@ -350,16 +387,26 @@ namespace KeyedProto
             KeyState state = KeyState::Idle;
             uint64_t leaseEpoch = 0;
             bool leaseOpen = false;
-            bool seqKnown = false;
-            bool initQueued = false;
+            bool owned = false;            // this process holds the marker fence
+            bool fenced = false;           // another claimant took the fence: refuse writes
+            bool claimQueued = false;
+            uint64_t fence = 0;
             uint64_t lastSeq = 0;
-            Clock::time_point uncertainSince{};
-            Clock::time_point reconcileNotBefore{};
+            std::function<void()> step;    // a delayed retry step
+            Clock::time_point stepNotBefore{};
+            Clock::time_point claimSince{};
             bool stallReported = false;
             bool abandoned = false;
+            std::optional<Outcome> deferredOutcome; // delivered from Process()
         };
 
-        Admit CheckAdmission(uint32_t guid, uint64_t epoch)
+        Admit Refuse()
+        {
+            ++_stats.backpressure;
+            return Admit::Backpressure;
+        }
+
+        Admit CheckAdmission(uint32_t guid, uint64_t epoch, bool write)
         {
             if (_shuttingDown)
                 return Admit::ShuttingDown;
@@ -373,6 +420,8 @@ namespace KeyedProto
             }
             if (!it->second.leaseOpen)
                 return Admit::NoSession;
+            if (write && it->second.fenced)
+                return Admit::Fenced;
             return Admit::Queued;
         }
 
@@ -388,39 +437,59 @@ namespace KeyedProto
 
         Admit SubmitWrite(uint32_t guid, uint64_t epoch, std::string purchaseId, Builder builder, Done done)
         {
-            Admit const a = CheckAdmission(guid, epoch);
+            Admit const a = CheckAdmission(guid, epoch, true);
             if (a != Admit::Queued)
                 return a;
             Key& k = _keys[guid];
-            if (!purchaseId.empty() && HasPurchase(k))
+            bool const purchase = !purchaseId.empty();
+            if (purchase && HasPurchase(k))
                 return Admit::PurchaseInFlight;
-            // Coalesce into the pending tail write: it is not dispatched yet and
-            // its builder is lazy, so the merged op writes the newest whole state.
-            if (!k.queue.empty() && k.queue.back().kind == OpKind::Write && !k.queue.back().dispatched)
+            // Caps first: every admitted callback is held until delivered.
+            if (_totalWaiters >= _limits.maxTotalWaiters)
+                return Refuse();
+            // Coalesce only a save into a pending save of the SAME session epoch.
+            if (!purchase && !k.queue.empty())
             {
                 Op& tail = k.queue.back();
-                tail.builder = std::move(builder);
-                if (!purchaseId.empty())
-                    tail.purchaseId = purchaseId;
-                tail.waiters.push_back(Waiter{std::move(purchaseId), std::move(done)});
-                ++_stats.coalesced;
-                return Admit::Coalesced;
+                if (tail.kind == OpKind::Write && !tail.dispatched && tail.purchaseId.empty() && tail.epoch == epoch)
+                {
+                    if (tail.waiters.size() >= _limits.maxWaitersPerOp)
+                        return Refuse();
+                    tail.builder = std::move(builder);
+                    AddWaiter(tail, Waiter{false, std::move(done)});
+                    ++_stats.coalesced;
+                    return Admit::Coalesced;
+                }
             }
             if (k.queue.size() >= _limits.maxPendingPerKey || TotalPending() >= _limits.maxTotalPending)
-            {
-                ++_stats.backpressure;
-                return Admit::Backpressure;
-            }
+                return Refuse();
             Op op;
             op.kind = OpKind::Write;
             op.ticket = ++_ticketCounter;
+            op.epoch = epoch;
             op.builder = std::move(builder);
-            op.purchaseId = purchaseId;
-            op.waiters.push_back(Waiter{std::move(purchaseId), std::move(done)});
+            op.purchaseId = std::move(purchaseId);
+            AddWaiter(op, Waiter{purchase, std::move(done)});
             k.queue.push_back(std::move(op));
             NoteDepth(k);
             Pump(guid, k);
             return Admit::Queued;
+        }
+
+        void AddWaiter(Op& op, Waiter w)
+        {
+            op.waiters.push_back(std::move(w));
+            ++_totalWaiters;
+            if (op.waiters.size() > _stats.maxWaitersSeen)
+                _stats.maxWaitersSeen = op.waiters.size();
+        }
+
+        std::vector<Waiter> TakeWaiters(Op& op)
+        {
+            std::vector<Waiter> w = std::move(op.waiters);
+            op.waiters.clear();
+            _totalWaiters -= w.size();
+            return w;
         }
 
         std::size_t TotalPending() const
@@ -447,16 +516,22 @@ namespace KeyedProto
                 k.running = true;
                 switch (k.current.kind)
                 {
-                    case OpKind::Init: DispatchInit(guid, k); break;
+                    case OpKind::Claim: StartClaim(guid, k, false); break;
                     case OpKind::Read: DispatchRead(guid, k); break;
                     case OpKind::Write: DispatchWrite(guid, k); break;
                 }
             }
         }
 
-        // RAII-style release: every path that ends an op goes through here.
-        void Finish(uint32_t guid, Key& k)
+        // The ONLY way an op ends: its waiters are called first (state
+        // Delivering: anything they submit queues behind), then the key advances.
+        void DeliverAndAdvance(uint32_t guid, Key& k, Outcome forSaves, Outcome forPurchase)
         {
+            k.state = KeyState::Delivering;
+            std::vector<Waiter> waiters = TakeWaiters(k.current);
+            for (auto& w : waiters)
+                if (w.done)
+                    w.done(w.purchase ? forPurchase : forSaves);
             k.running = false;
             k.current = Op();
             k.state = KeyState::Idle;
@@ -464,38 +539,149 @@ namespace KeyedProto
             Pump(guid, k);
         }
 
-        void DispatchInit(uint32_t guid, Key& k)
+        void Schedule(Key& k, std::function<void()> step)
         {
-            k.state = KeyState::Initializing;
-            CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
-            trans->Append(Acore::StringFormat("INSERT IGNORE INTO {} (guid, seq) VALUES ({}, 0)", _marker, guid));
-            _txCallbacks.AddCallback(CharacterDatabase.AsyncCommitTransaction(trans)).AfterComplete(
-                [this, guid](bool)
-                {
-                    // Whatever the insert reported, the locking read below is the truth.
-                    InitRead(guid);
-                });
+            k.step = std::move(step);
+            k.stepNotBefore = Clock::now() + std::chrono::milliseconds(_limits.retryMs);
         }
 
-        void InitRead(uint32_t guid)
+        // ---- claim: take the marker fence (init) or kill the old fence (reconcile)
+        void StartClaim(uint32_t guid, Key& k, bool reconcile)
         {
+            k.state = KeyState::Claiming;
+            k.claimSince = Clock::now();
+            if (reconcile)
+            {
+                ClaimUpdate(guid, k.current.fence, true);
+                return;
+            }
+            CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+            trans->Append(Acore::StringFormat(
+                "INSERT IGNORE INTO harness_write_seq (guid, seq, fence, owner) VALUES ({}, 0, 0, '')", guid));
+            _txCallbacks.AddCallback(CharacterDatabase.AsyncCommitTransaction(trans)).AfterComplete(
+                [this, guid](bool) { ClaimObserve(guid); });
+        }
+
+        void ClaimObserve(uint32_t guid)
+        {
+            if (_keys[guid].abandoned)
+                return;
             _queryCallbacks.AddCallback(CharacterDatabase.AsyncQuery(Acore::StringFormat(
-                "SELECT seq FROM {} WHERE guid = {} FOR SHARE", _marker, guid))).WithCallback(
+                "SELECT fence FROM harness_write_seq WHERE guid = {}", guid))).WithCallback(
                 [this, guid](QueryResult r)
                 {
-                    Key& k = _keys[guid];
-                    if (k.abandoned)
+                    Key& key = _keys[guid];
+                    if (key.abandoned)
                         return;
                     if (!r)
                     {
-                        // Error or missing row (indistinguishable): retry; writes stay blocked.
-                        DispatchInit(guid, k);
+                        Schedule(key, [this, guid] { ClaimObserve(guid); });
                         return;
                     }
-                    k.lastSeq = r->Fetch()[0].Get<uint64_t>();
-                    k.seqKnown = true;
-                    k.initQueued = false;
-                    Finish(guid, k);
+                    ClaimUpdate(guid, r->Fetch()[0].Get<uint64_t>(), false);
+                });
+        }
+
+        // The UPDATE takes the row lock: it waits for any in-flight transaction on
+        // the marker, and once it commits no transaction of `expected` can commit.
+        void ClaimUpdate(uint32_t guid, uint64_t expected, bool reconcile)
+        {
+            ++_stats.claimAttempts;
+            std::string const token = Acore::StringFormat("{}:c{}", _nonce, ++_claimCounter);
+            CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+            trans->Append(Acore::StringFormat(
+                "UPDATE harness_write_seq SET fence = fence + 1, owner = '{}' WHERE guid = {} AND fence = {}",
+                token, guid, expected));
+            _txCallbacks.AddCallback(CharacterDatabase.AsyncCommitTransaction(trans)).AfterComplete(
+                [this, guid, expected, token, reconcile](bool) { ClaimVerify(guid, expected, token, reconcile); });
+        }
+
+        // Whatever the claim reported, this read decides. The log and journal
+        // columns are only used for a reconciliation (n > 0).
+        void ClaimVerify(uint32_t guid, uint64_t expected, std::string token, bool reconcile)
+        {
+            Key& k = _keys[guid];
+            if (k.abandoned)
+                return;
+            uint64_t const n = reconcile ? k.current.seq : 0;
+            std::string const pid = reconcile ? k.current.purchaseId : std::string();
+            std::string const sql = Acore::StringFormat(
+                "SELECT m.seq, m.fence, m.owner, l.fence, l.op, j.guid, j.seq, j.op FROM harness_write_seq m "
+                "LEFT JOIN harness_write_log l ON l.guid = m.guid AND l.seq = {} "
+                "LEFT JOIN harness_purchase_journal j ON j.purchase_id = '{}' WHERE m.guid = {}", n, pid, guid);
+            _queryCallbacks.AddCallback(CharacterDatabase.AsyncQuery(sql)).WithCallback(
+                [this, guid, expected, token, reconcile](QueryResult r)
+                {
+                    Key& key = _keys[guid];
+                    if (key.abandoned)
+                        return;
+                    if (!r)
+                    {
+                        Schedule(key, [this, guid, expected, token, reconcile] { ClaimVerify(guid, expected, token, reconcile); });
+                        return;
+                    }
+                    Field* f = r->Fetch();
+                    uint64_t const seq = f[0].Get<uint64_t>();
+                    uint64_t const fence = f[1].Get<uint64_t>();
+                    std::string const owner = f[2].Get<std::string>();
+                    if (owner != token && fence == expected)
+                    {
+                        // The claim did not apply (lock wait timeout, lost, ...): retry it.
+                        Schedule(key, [this, guid, expected, reconcile] { ClaimUpdate(guid, expected, reconcile); });
+                        return;
+                    }
+                    bool const mine = owner == token;
+                    if (!reconcile)
+                    {
+                        if (!mine)
+                        {
+                            // Another claimant moved the fence first: claim again from what is there now.
+                            Schedule(key, [this, guid] { ClaimObserve(guid); });
+                            return;
+                        }
+                        key.owned = true;
+                        key.fenced = false;
+                        key.fence = fence;
+                        key.lastSeq = seq;
+                        key.claimQueued = false;
+                        DeliverAndAdvance(guid, key, Outcome::Committed, Outcome::Committed);
+                        return;
+                    }
+                    // Reconciliation: the old fence is dead (we or another claimant moved
+                    // it), so the write log and journal are final for this op.
+                    Op const& op = key.current;
+                    bool const logMine = !f[3].IsNull() && f[3].Get<uint64_t>() == op.fence
+                        && f[4].Get<std::string>() == op.opToken;
+                    Outcome forPurchase = Outcome::NotCommitted;
+                    if (logMine)
+                    {
+                        bool const journalMine = op.purchaseId.empty() || (!f[5].IsNull() && f[5].Get<uint32_t>() == guid
+                            && f[6].Get<uint64_t>() == op.seq && f[7].Get<std::string>() == op.opToken);
+                        forPurchase = journalMine ? Outcome::Committed : Outcome::Unresolved;
+                    }
+                    else if (!op.purchaseId.empty() && !f[5].IsNull())
+                    {
+                        if (f[5].Get<uint32_t>() == guid)
+                            forPurchase = Outcome::DuplicatePurchase;
+                        else
+                        {
+                            forPurchase = Outcome::IdConflict; // never attribute another character's charge
+                            ++_stats.idConflicts;
+                        }
+                    }
+                    Outcome const forSaves = logMine ? Outcome::Committed : Outcome::NotCommitted;
+                    if (mine)
+                    {
+                        key.fence = fence;
+                        key.lastSeq = seq;
+                    }
+                    else
+                    {
+                        key.owned = false;
+                        key.fenced = true; // fail closed until a new session re-claims
+                        ++_stats.fencedOut;
+                    }
+                    DeliverAndAdvance(guid, key, forSaves, forPurchase);
                 });
         }
 
@@ -509,28 +695,38 @@ namespace KeyedProto
                     Key& key = _keys[guid];
                     if (key.abandoned)
                         return;
-                    ReadDone done = std::move(key.current.readDone);
-                    bool const discard = key.current.discard;
-                    Finish(guid, key);
-                    if (!discard && done)
-                        done(r);
+                    key.state = KeyState::Delivering;
+                    if (!key.current.discard && key.current.readDone)
+                        key.current.readDone(r);
+                    DeliverAndAdvance(guid, key, Outcome::Committed, Outcome::Committed);
                 });
         }
 
         void DispatchWrite(uint32_t guid, Key& k)
         {
             Op& op = k.current;
+            k.state = KeyState::Running;
+            if (!k.owned)
+            {
+                // Fenced while queued: never write without the fence.
+                k.deferredOutcome = Outcome::NotCommitted;
+                return;
+            }
             op.dispatched = true;
             op.seq = k.lastSeq + 1;
+            op.fence = k.fence;
+            op.opToken = Acore::StringFormat("{}:w{}", _nonce, op.ticket);
             CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
-            // Marker FIRST: the row lock is held for the whole transaction, so a
-            // reconciliation FOR SHARE read waits for a still-running commit.
+            // Marker FIRST (row lock for the whole transaction); the CAS trigger
+            // refuses anything but (same fence, same owner, seq + 1).
+            trans->Append(Acore::StringFormat("UPDATE harness_write_seq SET seq = {}, fence = {} WHERE guid = {}",
+                op.seq, op.fence, guid));
             trans->Append(Acore::StringFormat(
-                "INSERT INTO {} (guid, seq) VALUES ({}, {}) ON DUPLICATE KEY UPDATE seq = VALUES(seq)",
-                _marker, guid, op.seq));
+                "INSERT INTO harness_write_log (guid, seq, fence, op) VALUES ({}, {}, {}, '{}')",
+                guid, op.seq, op.fence, op.opToken));
             if (!op.purchaseId.empty())
-                trans->Append(Acore::StringFormat("INSERT INTO {} (purchase_id, guid, seq) VALUES ('{}', {}, {})",
-                    _journal, op.purchaseId, guid, op.seq));
+                trans->Append(Acore::StringFormat("INSERT INTO harness_purchase_journal (purchase_id, guid, seq, fence, op) "
+                    "VALUES ('{}', {}, {}, {}, '{}')", op.purchaseId, guid, op.seq, op.fence, op.opToken));
             try
             {
                 if (op.builder)
@@ -538,17 +734,12 @@ namespace KeyedProto
             }
             catch (...)
             {
-                // Nothing was sent; memory stays dirty for the next save. The key advances.
-                // Callbacks are deferred to the next Process(): a build can run
-                // inside a Submit call, which must never re-enter caller code.
+                // Nothing was sent. Delivered from Process() (never inside a
+                // Submit call); the key advances after delivery.
                 ++_stats.buildFailures;
-                for (auto& w : op.waiters)
-                    if (w.done)
-                        _deferred.push_back([done = std::move(w.done)] { done(Outcome::BuildFailed); });
-                Finish(guid, k);
+                k.deferredOutcome = Outcome::BuildFailed;
                 return;
             }
-            k.state = KeyState::Running;
             ++_stats.writesDispatched;
             uint64_t const seq = op.seq;
             _txCallbacks.AddCallback(CharacterDatabase.AsyncCommitTransaction(trans)).AfterComplete(
@@ -562,82 +753,27 @@ namespace KeyedProto
                     if (committed)
                     {
                         key.lastSeq = seq;
-                        Resolve(guid, key, true, false);
+                        DeliverAndAdvance(guid, key, Outcome::Committed, Outcome::Committed);
                         return;
                     }
                     key.state = KeyState::Uncertain;
-                    key.uncertainSince = Clock::now();
-                    key.reconcileNotBefore = key.uncertainSince;
-                    StartReconcile(guid, key);
+                    ++_stats.reconciliations;
+                    if (_hooks.beforeReconcile)
+                        _hooks.beforeReconcile(InFlight{guid, key.current.seq, key.current.fence, key.current.opToken,
+                            key.current.purchaseId});
+                    StartClaim(guid, key, true);
                 });
-        }
-
-        void StartReconcile(uint32_t guid, Key& k)
-        {
-            if (k.state != KeyState::Uncertain)
-                return;
-            k.state = KeyState::Reconciling;
-            ++_stats.reconcileReads;
-            if (_hooks.beforeReconcile)
-                _hooks.beforeReconcile(guid);
-            std::string const& pid = k.current.purchaseId;
-            // The marker read is LOCKING (waits for any in-flight transaction on
-            // the row, then reads the latest committed version). The journal is a
-            // plain read: it only decides DuplicatePurchase when the marker
-            // already proves THIS transaction did not commit.
-            std::string const sql = pid.empty()
-                ? Acore::StringFormat("SELECT seq, NULL FROM {} WHERE guid = {} FOR SHARE", _marker, guid)
-                : Acore::StringFormat("SELECT w.seq, (SELECT j.seq FROM {} j WHERE j.purchase_id = '{}') "
-                    "FROM {} w WHERE w.guid = {} FOR SHARE OF w", _journal, pid, _marker, guid);
-            _queryCallbacks.AddCallback(CharacterDatabase.AsyncQuery(sql)).WithCallback(
-                [this, guid](QueryResult r)
-                {
-                    Key& key = _keys[guid];
-                    if (key.abandoned)
-                        return;
-                    if (!r)
-                    {
-                        // Lock wait timeout / connection error: stay Uncertain, retry later.
-                        key.state = KeyState::Uncertain;
-                        key.reconcileNotBefore = Clock::now() + std::chrono::milliseconds(_limits.reconcileRetryMs);
-                        return;
-                    }
-                    Field* f = r->Fetch();
-                    uint64_t const dbSeq = f[0].Get<uint64_t>();
-                    bool const journalHasId = !f[1].IsNull();
-                    uint64_t const seq = key.current.seq;
-                    bool const committed = dbSeq >= seq;
-                    key.lastSeq = committed ? seq : dbSeq;
-                    Resolve(guid, key, committed, !committed && journalHasId);
-                });
-        }
-
-        void Resolve(uint32_t guid, Key& k, bool committed, bool duplicate)
-        {
-            std::vector<Waiter> waiters = std::move(k.current.waiters);
-            Finish(guid, k);
-            for (auto& w : waiters)
-            {
-                if (!w.done)
-                    continue;
-                if (committed)
-                    w.done(Outcome::Committed);
-                else if (duplicate && !w.purchaseId.empty())
-                    w.done(Outcome::DuplicatePurchase);
-                else
-                    w.done(Outcome::NotCommitted);
-            }
         }
 
         Limits _limits;
         Hooks _hooks;
-        std::string _marker, _journal;
+        std::string _nonce;
         std::unordered_map<uint32_t, Key> _keys;
         AsyncCallbackProcessor<TransactionCallback> _txCallbacks;
         AsyncCallbackProcessor<QueryCallback> _queryCallbacks;
-        uint64_t _epochCounter = 0, _ticketCounter = 0;
+        uint64_t _epochCounter = 0, _ticketCounter = 0, _claimCounter = 0;
+        std::size_t _totalWaiters = 0;
         bool _shuttingDown = false;
-        std::vector<std::function<void()>> _deferred;
         Stats _stats;
     };
 }
