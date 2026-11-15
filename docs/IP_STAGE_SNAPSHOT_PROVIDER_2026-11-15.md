@@ -119,3 +119,28 @@ Core `21ff1973` plus modules. All direct writers of `Player::m_RewardedQuests`:
 | 10 | Non-marker quest ids | IP doesn't invalidate |
 | 11 | Handler reentrancy | the IP handler doesn't mutate the set; the erase-by-key path is safe even if a handler did |
 | 12 | Hook disabled (no IP consumer registered) | zero behaviour change (`CALL_ENABLED_HOOKS` skips) |
+
+## PB59 authority mapping fixture (CS01 6895011029)
+- **Files:** `tests/pb59_authority_mapping/`. It drives CS01's test-only `CombinedAuthorityPrototype.h` with the real `Registry` from `src/IndividualProgressionStageSnapshot.h`, through the proposed 1:1 mapping:
+
+  | CS01 field | IP v1 field |
+  |---|---|
+  | `known` | `status == Known` |
+  | `guid` | full GUID raw value |
+  | `session` | `sessionEpoch` |
+  | `revision`, `generation`, `rawStage`, `effectiveStage`, `gatedHuman` | the same-named field |
+
+- **Pinned copy:** the CS01 header is pinned by git blob `e4780c36643fd341e60b9ac7be6a60bda3b8d769`, and `run.sh` refuses to run if the copy drifts.
+- **Result:** 25/25 with g++ and clang++ (C++20, `-Werror`).
+- **Cases covered:**
+  - unpublished login;
+  - published Known;
+  - same-value republish (new revision);
+  - invalidation between the bracketing reads;
+  - paid confirmation;
+  - config reload (generation);
+  - relog with a stale equipment epoch;
+  - wrong high GUID;
+  - IP disabled;
+  - paid and unpaid being indistinguishable at raw = effective.
+- **Not a dependency:** it's a pure test; no runtime code uses it.
