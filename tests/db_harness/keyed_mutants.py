@@ -1,31 +1,60 @@
-# Mutants of keyed_dispatcher_prototype.h for run_keyed_mutations.sh: name -> [(old, new)].
-# Every old text must occur; each mutant must make the keyed harness fail.
+# Mutants of keyed_dispatcher_prototype.h (revision 2) for run_keyed_mutations.sh:
+# name -> [(old, new)]. Every old text must occur (all occurrences are replaced);
+# each mutant must make the keyed harness fail.
+UNCERTAIN = """                    key.state = KeyState::Uncertain;
+                    ++_stats.reconciliations;"""
+DELIVER = """            k.state = KeyState::Delivering;
+            std::vector<Waiter> waiters = TakeWaiters(k.current);
+            for (auto& w : waiters)
+                if (w.done)
+                    w.done(w.purchase ? forPurchase : forSaves);
+            k.running = false;
+            k.current = Op();
+            k.state = KeyState::Idle;
+            k.stallReported = false;
+            Pump(guid, k);"""
+DELIVER_LATE = """            std::vector<Waiter> waiters = TakeWaiters(k.current);
+            k.running = false;
+            k.current = Op();
+            k.state = KeyState::Idle;
+            k.stallReported = false;
+            Pump(guid, k);
+            for (auto& w : waiters)
+                if (w.done)
+                    w.done(w.purchase ? forPurchase : forSaves);"""
 M = {
- "M2_advance_on_ambiguous": [("""key.state = KeyState::Uncertain;
-                    key.uncertainSince = Clock::now();
-                    key.reconcileNotBefore = key.uncertainSince;
-                    StartReconcile(guid, key);""", "Resolve(guid, key, false, false);")],
- "M3_reconcile_plain_read": [('WHERE guid = {} FOR SHARE", _marker, guid)\n                : ', 'WHERE guid = {}", _marker, guid)\n                : '),
-                             ('FOR SHARE OF w"', '"')],
- "M4_init_plain_read": [('"SELECT seq FROM {} WHERE guid = {} FOR SHARE"', '"SELECT seq FROM {} WHERE guid = {}"')],
+ # ambiguity / proof (H1)
+ "M2_advance_on_ambiguous": [(UNCERTAIN, "                    DeliverAndAdvance(guid, key, Outcome::NotCommitted, Outcome::NotCommitted);\n                    return;")],
+ "M3_reconcile_without_claim": [("                ClaimUpdate(guid, k.current.fence, true);\n                return;",
+                                 "                ClaimVerify(guid, k.current.fence, std::string(\"none\"), true);\n                return;"),
+                                ("if (owner != token && fence == expected)", "if (!reconcile && owner != token && fence == expected)")],
+ "M4_higher_marker_is_proof": [("""bool const logMine = !f[3].IsNull() && f[3].Get<uint64_t>() == op.fence
+                        && f[4].Get<std::string>() == op.opToken;""", "bool const logMine = seq >= op.seq;")],
+ "M14_assume_committed_on_false": [(UNCERTAIN, "                    key.lastSeq = seq;\n                    DeliverAndAdvance(guid, key, Outcome::Committed, Outcome::Committed);\n                    return;")],
+ "M22_write_without_fence": [('"UPDATE harness_write_seq SET seq = {}, fence = {} WHERE guid = {}",\n                op.seq, op.fence, guid)',
+                              '"UPDATE harness_write_seq SET seq = {} WHERE guid = {}",\n                op.seq, guid)')],
+ "M23_fenced_admission_ignored": [("if (write && it->second.fenced)\n                return Admit::Fenced;", "")],
+ # duplicate purchase / id ownership
+ "M7_no_duplicate_detection": [("forPurchase = Outcome::DuplicatePurchase;", "forPurchase = Outcome::NotCommitted;")],
+ "M7b_other_character_id_attributed": [("if (f[5].Get<uint32_t>() == guid)", "if (true)")],
+ # lease / session
  "M6_no_epoch_check": [("if (it->second.leaseEpoch != epoch)", "if (false)")],
- "M7_no_duplicate_detection": [("Resolve(guid, key, committed, !committed && journalHasId);", "Resolve(guid, key, committed, false);")],
+ "M16_closed_lease_ignored": [("if (!it->second.leaseOpen)\n                return Admit::NoSession;", "")],
+ # callbacks before next dispatch (H2)
+ "M17_deliver_after_advance": [(DELIVER, DELIVER_LATE)],
+ # caps / coalescing (H3)
+ "M11_no_per_key_cap": [("k.queue.size() >= _limits.maxPendingPerKey ||", "false ||")],
+ "M12_no_global_cap": [("|| TotalPending() >= _limits.maxTotalPending)", "|| false)"),
+                       ("_shuttingDown || TotalPending() >= _limits.maxTotalPending ||", "_shuttingDown ||")],
+ "M13_no_coalescing": [("if (tail.kind == OpKind::Write && !tail.dispatched && tail.purchaseId.empty() && tail.epoch == epoch)", "if (false)")],
+ "M18_no_per_op_waiter_cap": [("if (tail.waiters.size() >= _limits.maxWaitersPerOp)", "if (false)")],
+ "M19_no_global_waiter_cap": [("            if (_totalWaiters >= _limits.maxTotalWaiters)\n                return Refuse();\n", "")],
+ "M20_cross_session_coalescing": [(" && tail.epoch == epoch)", ")")],
+ "M21_purchase_coalescing": [("if (!purchase && !k.queue.empty())", "if (!k.queue.empty())"),
+                             (" && tail.purchaseId.empty() && ", " && ")],
+ # lifecycle
  "M8_no_shutdown_drain": [("while (!Idle() && Clock::now() < deadline)", "while (false)")],
  "M9_running_cancel_ignored": [("k.current.discard = true;", "k.current.discard = false;")],
- "M10_build_failure_no_advance": [("""                Finish(guid, k);
-                return;
-            }
-            k.state = KeyState::Running;""", """                k.state = KeyState::Running;
-                return;
-            }
-            k.state = KeyState::Running;""")],
- "M11_no_per_key_cap": [("k.queue.size() >= _limits.maxPendingPerKey ||", "false ||")],
- "M12_no_global_cap": [("|| TotalPending() >= _limits.maxTotalPending)", "|| false)")],
- "M13_no_coalescing": [("if (!k.queue.empty() && k.queue.back().kind == OpKind::Write && !k.queue.back().dispatched)", "if (false)")],
- "M14_assume_committed_on_false": [("""key.state = KeyState::Uncertain;
-                    key.uncertainSince = Clock::now();
-                    key.reconcileNotBefore = key.uncertainSince;
-                    StartReconcile(guid, key);""", "key.lastSeq = seq; Resolve(guid, key, true, false);")],
+ "M10_build_failure_no_advance": [("                k.deferredOutcome = Outcome::BuildFailed;\n", "")],
  "M15_no_stall_report": [("k.stallReported = true;\n", "\n")],
- "M16_closed_lease_ignored": [("if (!it->second.leaseOpen)\n                return Admit::NoSession;", "")],
 }
