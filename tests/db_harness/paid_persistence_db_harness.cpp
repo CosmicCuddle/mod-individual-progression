@@ -300,6 +300,32 @@ namespace
         return loginSawSave && syncSawSave ? 0 : 1;
     }
 
+    // Reversed completion: an OLDER save (pre-purchase state) is delayed
+    // before its first statement (models worker scheduling / a deadlock
+    // retry), then the NEWER purchase transaction commits and is confirmed.
+    // Returns 5 if the confirmed purchase was overwritten by the older save.
+    int ScenarioReversedCompletion(uint32 guid, unsigned asyncThreads)
+    {
+        Reset(guid, 1000);
+        Player p = Login(guid);
+        Player const older = p;                               // autosave snapshot
+        CharacterDatabaseTransaction old = CharacterDatabase.BeginTransaction();
+        old->Append("DO SLEEP(1.5)");
+        AppendSave(old, older);
+        CharacterDatabase.CommitTransaction(old);             // fire-and-forget autosave
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        bool done = false, committed = false;
+        Purchase(p, 400, done, committed);                    // newer state, confirmed by callback
+        Pump(done);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2500)); // let the old save finish
+        DbState const s = ReadDb(guid);
+        bool const overwritten = committed && !(s.money == 600 && DbPaid(s));
+        std::printf("REVERSE async_threads=%u: purchase_callback=%d final_db money=%lld paid=%d -> %s\n",
+            asyncThreads, committed, (long long)s.money, DbPaid(s),
+            overwritten ? "CONFIRMED PURCHASE OVERWRITTEN BY OLDER SAVE" : "newest state kept");
+        return overwritten ? 5 : 0;
+    }
+
     void ScenarioMalformedNeverOverwritten(uint32 guid)
     {
         Reset(guid, 1000);
@@ -319,18 +345,26 @@ namespace
 int main(int argc, char** argv)
 {
     bool const ordering = (argc == 4 || argc == 5) && std::string(argv[2]) == "ordering";
-    if (argc != 2 && !ordering)
+    bool const reverse = argc == 4 && std::string(argv[2]) == "reverse";
+    if (argc != 2 && !ordering && !reverse)
     {
         std::printf("usage: %s \"host;port;user;password;database\" [ordering <asyncThreads> [syncDelayMs]]\n", argv[0]);
         return 2;
     }
-    unsigned const asyncThreads = ordering ? static_cast<unsigned>(std::stoul(argv[3])) : 1;
+    unsigned const asyncThreads = (ordering || reverse) ? static_cast<unsigned>(std::stoul(argv[3])) : 1;
     MySQL::Library_Init();
     CharacterDatabase.SetConnectionInfo(argv[1], static_cast<uint8>(asyncThreads), 1);
     if (CharacterDatabase.Open() || !CharacterDatabase.PrepareStatements())
     {
         std::printf("cannot open/prepare the throwaway character database\n");
         return 2;
+    }
+    if (reverse)
+    {
+        int const result = ScenarioReversedCompletion(1007, asyncThreads);
+        CharacterDatabase.Close();
+        MySQL::Library_End();
+        return result; // 0 newest kept, 5 confirmed purchase overwritten (a finding)
     }
     if (ordering)
     {

@@ -27,6 +27,11 @@ for args in "1 0" "2 0" "1 2500" "2 2500"; do
   rc=0; timeout 120 "$OUT/dbh" "127.0.0.1;$PORT;harness;harness;$DB" ordering $args || rc=$?
   echo "ordering threads/sync_delay=$args exit=$rc (0 fresh, 3 stale, 4 divergent)"
 done
+# Reversed completion (finding, not pass/fail): older save delayed, newer purchase confirmed.
+for threads in 1 2; do
+  rc=0; timeout 120 "$OUT/dbh" "127.0.0.1;$PORT;harness;harness;$DB" reverse $threads || rc=$?
+  echo "reverse async_threads=$threads exit=$rc (0 newest kept, 5 confirmed purchase overwritten)"
+done
 # The release audit over the DB the harness left behind (read-only exports).
 for q in audit anomalies schema; do
   $M -B --skip-column-names $DB < "$IP/tools/ip_paid_receipt_$q.sql" > "$OUT/$q.tsv"

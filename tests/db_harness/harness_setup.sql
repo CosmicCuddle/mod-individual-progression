@@ -24,6 +24,6 @@ SET SESSION sql_mode = '';
 INSERT INTO characters (guid, account, name, race, class, gender, level, money)
 VALUES (1001, 1, 'Harnessa', 1, 1, 0, 60, 1000), (1002, 1, 'Harnessb', 1, 1, 0, 60, 1000),
        (1003, 1, 'Harnessc', 1, 1, 0, 60, 1000), (1004, 1, 'Harnessd', 1, 1, 0, 60, 1000),
-       (1005, 1, 'Harnesse', 1, 1, 0, 60, 1000), (1006, 1, 'Harnessf', 1, 1, 0, 60, 1000);
+       (1005, 1, 'Harnesse', 1, 1, 0, 60, 1000), (1006, 1, 'Harnessf', 1, 1, 0, 60, 1000), (1007, 1, 'Harnessg', 1, 1, 0, 60, 1000);
 INSERT INTO character_queststatus_rewarded (guid, quest, active)
-VALUES (1001, 66007, 1), (1002, 66007, 1), (1003, 66007, 1), (1004, 66007, 1), (1005, 66007, 1), (1006, 66007, 1);
+VALUES (1001, 66007, 1), (1002, 66007, 1), (1003, 66007, 1), (1004, 66007, 1), (1005, 66007, 1), (1006, 66007, 1), (1007, 66007, 1);
