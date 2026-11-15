@@ -1,5 +1,7 @@
 # Core per-character write ordering and login fence: design for review (15 Nov 2026)
 
+**Revision 2 (CS01 6892952406):** keyed FIFO direction **accepted, not authorized**. Phase 1 may only be an isolated prototype. Implementation would sit in a separate Core lane under CS01; CS03-IP stays IP owner and supplies the harness and adapter. No Core runtime edits until the owner's final approval. See §8 for the amendments.
+
 **Status:**
 - **Design only (option C).** It requested by CS01 in Issue #13 comments 6892637976 and 6892656707, and supersedes the timer-based option B in `IP_PAID_SAVE_LOGIN_BARRIER_DESIGN_2026-11-15.md`.
 - **No Core runtime change** until review and owner approval of a new Core feature.
@@ -98,3 +100,31 @@ An older autosave (pre-purchase state, `DO SLEEP(1.5)` before its first statemen
 - whether the owner wants this Core feature at all, or wants to keep `WorkerThreads = 1` as the documented, enforced configuration;
 - the default for the login fence timeout;
 - whether to key every partial-save path in one change, or start with `SaveToDB`, login, logout and purchase, and audit the rest.
+
+## 8. Amendments (revision 2, CS01 6892952406)
+1. **Release gate: every writer.** Paid can't release while any unkeyed writer touches money, settings or inventory. The inventory is in `CORE_WRITE_ORDERING_WRITER_AUDIT_2026-11-15.md` (70 prepared statements in 27 files, plus raw SQL). Each needs a key, an explicit "startup only, before admission" classification, or a documented exclusion. Multi-character writers (trade, mail, auction house, guild bank, GM commands on others) need key sets.
+2. **Login fence through session admission:** `IsKeyBusy` is **dropped** (it's time-of-check/time-of-use). Instead:
+   - **Admission lease:** login takes a per-character **lease** with a session epoch. While a lease is held, writes from an older session epoch for that GUID are rejected or quarantined, and only the leased session's writes are admitted after the holder.
+   - **One ordered snapshot:** the IP receipt is loaded **inside the same keyed login holder** (an added holder query), so Core's state and IP's receipt come from one ordered snapshot. There's **no second independent sync read**. IP's `LoadPaidExpansionEntitlement` consumes the holder result.
+3. **Ambiguous COMMIT is not benign:**
+   - A "lost during COMMIT" outcome puts the key into **Uncertain**. The key does **not** advance until reconciliation proves the server-side outcome: wait for the server to finish the transaction, verify the connection, then read back a per-transaction marker row or version written inside the transaction.
+   - While a key is Uncertain, every later op for it waits. On timeout, login is refused and IP fails closed (Unknown).
+   - **No automatic replay or grant.**
+4. **Dispatcher correctness:**
+   - capture the keys (by value) **before** `operation->call()`, because the op is deleted after it;
+   - exceptions inside `call()` still release the key (RAII);
+   - cancellation of a queued keyed op (session gone) still advances the key;
+   - callbacks complete on their processors as today;
+   - **shutdown** drains the keyed queues **before** the main queue shuts down, then closes connections;
+   - **bounded queues and backpressure:** a per-key depth cap and a global keyed-op cap, with a warning plus refusal of new logins when exceeded (never dropping writes).
+5. **Login fence timeout:** refuse only. It's configurable, and **120 s is proposed for testing only**, not as a production approval.
+6. **`WorkerThreads = 1`:** a **documented interim mitigation**. It needs a read-only verification of the live value; the owner hasn't approved enforcing or changing config.
+7. **Lane:** Core implementation in a separate Core lane under CS01 (Codex only after its current PB tasks, or by separate assignment). CS03-IP supplies the harness extensions (writer, cancellation, uncertain-commit, backlog, admission-lease scenarios) and the IP adapter (holder-sourced receipt, keyed purchase commit).
+
+**Revised tests** (in addition to §5):
+- a stale-epoch write rejected after relog;
+- the receipt from the holder equals Core's loaded settings;
+- an Uncertain key blocks later ops until reconciliation, and a timeout refuses login;
+- an exception or cancellation inside a keyed op still advances its key;
+- backpressure caps are hit without dropping writes;
+- shutdown with a mid-reconciliation key.
