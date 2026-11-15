@@ -66,3 +66,24 @@
 - **Mutations:** W1–W12 and H1–H8 all caught.
 - **Build:** object compile and full worldserver link on the synced stack.
 - **Not covered here:** gameplay, and the PB IP-absent build (Codex's side).
+
+## Rewarded-quest mutation audit and proposed Core hook (CS01 6893262981; design only)
+Core `21ff1973` plus modules. All direct writers of `Player::m_RewardedQuests`:
+
+| Kind | Writer | Callers | Notes |
+|---|---|---|---|
+| insert | `Player::SetRewardedQuest` (`PlayerQuest.cpp:906-910`) | `RewardQuest` (`:849`; already followed by `OnPlayerCompleteQuest`); `Spell::EffectQuestComplete` (`SpellEffects.cpp:5009`, **no hook**); IP `GrantAttunements` (`IndividualProgression.cpp:394`, attunement quests) | `insert` on an existing id is a no-op |
+| erase | `Player::RemoveRewardedQuest` (`PlayerQuest.cpp:1587-1597`) | `Spell::EffectQuestClear` (`SpellEffects.cpp:5382`, **no hook**); GM `.quest remove` (`cs_quest.cpp:173`); IP `ForceUpdateProgressionState` (markers, already invalidated), `CleanUpVanillaPvpTitles` (`:1498`), `OnPlayerCompleteQuest` (`IndividualProgressionPlayer.cpp:706`); PB `DropQuestAction` (3 sites); PB `PlayerbotFactory::ResetQuests` (`:1702`, bots) | a missing id is a no-op |
+| bulk load | `_LoadQuestStatusRewarded` (`PlayerStorage.cpp:6493-6517`) | login load | before the character is in world; the snapshot isn't registered or published until after `OnPlayerLogin` / the first owner update |
+| none | daily/weekly/monthly/seasonal resets | `World.cpp` | they clear other sets, **not** `m_RewardedQuests` |
+
+**Gap:** `OnPlayerCompleteQuest` fires only from `RewardQuest`, after its side effects. `EffectQuestComplete`, `EffectQuestClear`, `.quest remove`, PB drop/reset and module calls have **no** hook. IP's `OnTryExecuteCommand` covers only GM commands.
+
+**Proposed narrow Core hook** (Core lane, for review):
+- `PlayerScript::OnPlayerBeforeRewardedQuestChange(Player* player, uint32 questId, bool rewarded)`.
+- Called inside `SetRewardedQuest` and `RemoveRewardedQuest`, **only when the set actually changes** (`find` first), and **before** the insert or erase.
+- Not called from `_LoadQuestStatusRewarded` (load is not a change).
+- **Threading:** it runs on whichever thread mutates the Player, the same as the mutation itself, so it adds no new cross-thread access.
+- **IP consumer:** `if (IsStageMarkerQuest(questId)) InvalidateStageSnapshot(player->GetGUID())`. It does no Player mutation and takes only the snapshot lock, so it's **reentrancy-safe**; the owner thread republishes afterwards.
+- Once this hook exists, the `OnTryExecuteCommand` text scan and the `OnPlayerCompleteQuest` invalidation become redundant. They can stay as defense in depth.
+- **Not covered:** writes that bypass `Player` (raw SQL on `character_queststatus_rewarded` while the character is online) — none found among the audited runtime writers. PB orphan cleanups are offline/startup.
