@@ -94,6 +94,36 @@ python3 tools/ip_paid_receipt_audit.py receipts.tsv --anomalies anomalies.tsv --
   - Mutations A1–A7 and B1–B11 are all caught.
 - **Out of scope:** account names are in the auth DB, so bot and excluded accounts are listed by account id.
 
+### Injected persistence-failure harness (real Core DB layer)
+`tests/db_harness/` (`paid_persistence_db_harness.cpp`, `harness_setup.sql`, `run_harness.sh`).
+
+**What's real and what's modelled:**
+- **Real:** Core `21ff1973`'s `DatabaseWorkerPool` (`CharacterDatabase`), `Transaction`/`TransactionWithResultTask`, `AsyncCommitTransaction`, `AsyncCallbackProcessor<TransactionCallback>` and the prepared `CHAR_REP_CHAR_SETTINGS`, all linked from the synced build's `libdatabase`/`libcommon`. Also real: the IP `IndividualProgressionReceiptPolicy.h` and `IndividualProgressionPaidPurchaseState.h`, and a **MySQL 8.0.46** server loaded with Core's base `db_characters` schema.
+- **Modelled:** the Player object, and the parts of `Player::SaveToDB` the rule relies on: one transaction holding `characters.money`, then the settings `REPLACE`, then later statements.
+
+**Failure injection:** `BEFORE UPDATE`/`BEFORE INSERT` triggers `SIGNAL` while `harness_ctl.fail_stage` is set. Stage 1 fails the first statement; stage 2 fails a statement **after** the receipt `REPLACE`.
+
+**Results (14 Nov 2026; MySQL 8.0.46, throwaway local DB): 26/26.**
+
+| Scenario | Result |
+|---|---|
+| S1 success | callback `true`; DB money 1000→600 and receipt `1 0 0 1 400 1800000000 0 0 ` together; a duplicate submit while pending was refused |
+| S2 first commit fails, later ordinary save succeeds | callback `false` → Unconfirmed, no refund and no access; DB unchanged (1000, no row); a second purchase was refused; the later fire-and-forget save persisted money 600 **and** a paid receipt together; relog reads paid |
+| S3 failure after the receipt statement | callback `false`; the `REPLACE` was **rolled back** (DB 1000, no row) |
+| S4 both fail | DB unchanged. After relog a purchase succeeds, and the DB was charged **exactly once** (600) |
+| S5 legacy `1 0 0 ` row | refused; the row is byte-for-byte unchanged |
+
+**Release audit over the resulting DB:** `RELEASE AUDIT: PASS`, key `guid,source`, with 3 valid paid, 1 absent (the rolled-back S3) and 1 needing repair (the S5 legacy row).
+
+**Harness mutations:** D1 (receipt written outside the transaction) 19/26; D2 (refund on failure) 23/26; D3 (grant on failure) 25/26. All three are caught.
+
+**Environment note:** Core's `DatabaseIncompatibleVersion` parses the server version one character at a time. A **MariaDB 10.x** server therefore reads as older than "8.0.0" and is refused, so this harness needs MySQL 8.
+
+**Not covered:**
+- the full `Player::SaveToDB` statement list and the world-session update loop;
+- a real network or connection-loss failure;
+- gameplay.
+
 ## B3: account bypass
 - The purchase path is per-character: `CanPurchaseExpansion`, `PurchaseExpansion`, the callback, the entitlement and effective-stage APIs, and `GetPaidPurchaseState` read no account data. Contracts and a model test now pin this.
 - `GetAccountEffectiveProgression` is unchanged. It is used only by the established upstream **Blood Elf/Draenei/Death Knight creation unlock** and the **TBC-race starting-zone teleport**. It never opens an era for an existing character.

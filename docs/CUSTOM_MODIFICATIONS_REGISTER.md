@@ -1338,3 +1338,4 @@ Focused native tests require every completeness family independently, exercise t
 - **Release gates:** a DB failure test; CS v2 consumer; owner commissioning decision; backup/rollback.
 - **Rollback:** keep the options at 0, or revert.
 - **Receipt audit tool (14 Nov 2026):** `tools/ip_paid_receipt_audit.sql` is a single read-only `SELECT`. `tools/ip_paid_receipt_audit.py` is an offline classifier at C++ `DecodeRaw` parity (differential test). Run it against a backup or replica only. It's a prerequisite for the commissioning decision and changes no runtime.
+- **Persistence-failure harness (14 Nov 2026):** `tests/db_harness/` runs Core's real DB layer (`AsyncCommitTransaction` + callback processor) against a throwaway MySQL 8 with trigger-injected failures: 26/26, and D1–D3 caught. Test-only; it never touches an owner DB.
