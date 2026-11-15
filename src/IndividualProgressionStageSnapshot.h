@@ -91,12 +91,16 @@ namespace IndividualProgressionStageSnapshot
         bool gatedHuman = false;         // normal (non-bot, non-excluded) account
         std::uint64_t sessionEpoch = 0;  // login session that owns this value (0 = none)
         std::uint32_t generation = 0;    // registry generation the value was published under
+        std::uint64_t revision = 0;      // process-unique: changes on EVERY publish and invalidation
     };
 
-    // True only if both reads are Known and describe the same publication.
+    // True only if both reads are Known and describe the SAME publication
+    // (same revision): a republish of identical values, an invalidation, a
+    // reload or a new session all change the revision.
     constexpr bool SameKnownSnapshot(Snapshot const& a, Snapshot const& b)
     {
         return a.status == Status::Known && b.status == Status::Known &&
+            a.revision != 0 && a.revision == b.revision &&
             a.sessionEpoch == b.sessionEpoch && a.generation == b.generation &&
             a.rawStage == b.rawStage && a.effectiveStage == b.effectiveStage &&
             a.gatedHuman == b.gatedHuman;
@@ -184,6 +188,7 @@ namespace IndividualProgressionStageSnapshot
             Entry e;
             e.snapshot.sessionEpoch = epoch;
             e.snapshot.generation = _generation;
+            e.snapshot.revision = ++_nextRevision;
             _entries[guid] = e;
             return epoch;
         }
@@ -214,6 +219,7 @@ namespace IndividualProgressionStageSnapshot
             if (ticket.invalidations != it->second.invalidations)
                 return PublishResult::RejectedInvalidatedSince;
             it->second.snapshot = Make(in, ticket.epoch, _generation);
+            it->second.snapshot.revision = ++_nextRevision;
             // An unresolved account is retried by the owner on a later update
             // (the account cache is re-warmed outside this registry).
             it->second.dirty = it->second.snapshot.reason == UnknownReason::AccountUnresolved;
@@ -233,6 +239,7 @@ namespace IndividualProgressionStageSnapshot
             s.effectiveStage = 0;
             s.gatedHuman = false;
             s.generation = _generation;
+            s.revision = ++_nextRevision;
             ++it->second.invalidations;
             it->second.dirty = true;
         }
@@ -250,6 +257,7 @@ namespace IndividualProgressionStageSnapshot
                 entry.snapshot.effectiveStage = 0;
                 entry.snapshot.gatedHuman = false;
                 entry.snapshot.generation = _generation;
+                entry.snapshot.revision = ++_nextRevision;
                 ++entry.invalidations;
                 entry.dirty = true;
             }
@@ -263,6 +271,7 @@ namespace IndividualProgressionStageSnapshot
     private:
         std::unordered_map<std::uint64_t, Entry> _entries;
         std::uint64_t _nextEpoch = 0;
+        std::uint64_t _nextRevision = 0;
         std::uint32_t _generation = 1;
     };
 }

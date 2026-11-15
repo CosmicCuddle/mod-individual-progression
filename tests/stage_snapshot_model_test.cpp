@@ -161,6 +161,7 @@ namespace
     void TestSameKnownSnapshot()
     {
         S::Snapshot a = S::Make(Human(7, 7), 4, 2);
+        a.revision = 11;
         S::Snapshot b = a;
         CHECK(S::SameKnownSnapshot(a, b));
         b.sessionEpoch = 5;
@@ -171,8 +172,52 @@ namespace
         CHECK(!S::SameKnownSnapshot(a, b));
         b = a; b.effectiveStage = 6;
         CHECK(!S::SameKnownSnapshot(a, b));
+        b = a; b.revision = 12;
+        CHECK(!S::SameKnownSnapshot(a, b));
+        b = a; b.revision = 0; a.revision = 0;
+        CHECK(!S::SameKnownSnapshot(a, b));                   // unstamped never matches
         S::Snapshot u;
         CHECK(!S::SameKnownSnapshot(u, u));
+    }
+
+    // Codex #59 6892932909 / CS01 6892952406: authorization linearization.
+    void TestRevisionAuthorization()
+    {
+        S::Registry r;
+        std::uint64_t const e = r.Register(G1);
+        PublishNow(r, G1, e, Human(5, 5));
+        S::Snapshot const auth = r.Get(G1);                    // PB final read
+        CHECK(S::SameKnownSnapshot(auth, r.Get(G1)));
+        // Same-value republish after an invalidation: values equal, revision not.
+        r.Invalidate(G1);
+        PublishNow(r, G1, e, Human(5, 5));
+        S::Snapshot const again = r.Get(G1);
+        CHECK(again.rawStage == auth.rawStage && again.effectiveStage == auth.effectiveStage &&
+              again.sessionEpoch == auth.sessionEpoch && again.generation == auth.generation);
+        CHECK(!S::SameKnownSnapshot(auth, again));
+        // Invalidation after the last read: the post-mutation check sees it.
+        S::Snapshot const last = r.Get(G1);
+        r.Invalidate(G1);
+        CHECK(!S::SameKnownSnapshot(last, r.Get(G1)));
+        // Logout / relogin to identical values: new epoch and revision.
+        PublishNow(r, G1, e, Human(5, 5));
+        S::Snapshot const beforeLogout = r.Get(G1);
+        r.Erase(G1);
+        std::uint64_t const e2 = r.Register(G1);
+        PublishNow(r, G1, e2, Human(5, 5));
+        CHECK(!S::SameKnownSnapshot(beforeLogout, r.Get(G1)));
+        // External marker removal (command hook -> InvalidateAll).
+        S::Snapshot const beforeCmd = r.Get(G1);
+        r.InvalidateAll();
+        CHECK(!S::SameKnownSnapshot(beforeCmd, r.Get(G1)));
+        // Revisions strictly increase across every change.
+        std::uint64_t prev = r.Get(G1).revision;
+        for (int i = 0; i < 50; ++i)
+        {
+            if (i % 2) r.Invalidate(G1); else PublishNow(r, G1, e2, Human(i % 19, 0));
+            CHECK(r.Get(G1).revision > prev);
+            prev = r.Get(G1).revision;
+        }
     }
 
     void TestConcurrency()
@@ -243,6 +288,7 @@ int main()
     TestInvalidatedWhileComputing();
     TestCommandDetection();
     TestSameKnownSnapshot();
+    TestRevisionAuthorization();
     TestConcurrency();
     std::printf("STAGE SNAPSHOT MODEL %u/%u passed\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
