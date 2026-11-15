@@ -250,7 +250,7 @@ namespace
 
     // Fast relog: logout save (fire-and-forget, as Player::SaveToDB) still in
     // flight when the next login's async read is queued.
-    int ScenarioFastRelogOrdering(uint32 guid, unsigned asyncThreads)
+    int ScenarioFastRelogOrdering(uint32 guid, unsigned asyncThreads, unsigned syncDelayMs)
     {
         Reset(guid, 1000);
         Player p = Login(guid);
@@ -284,15 +284,19 @@ namespace
             queries.ProcessReadyCallbacks();
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        // IP's strict sync read runs after the login holder completed.
+        // IP's strict sync read runs after the login holder completed
+        // (optionally later, as on a busy login thread).
+        std::this_thread::sleep_for(std::chrono::milliseconds(syncDelayMs));
         DbState const syncRead = ReadDb(guid);
         bool const loginSawSave = seenMoney == 600 && seenData == R::Serialize(staged);
         bool const syncSawSave = syncRead.money == 600 && DbPaid(syncRead);
-        std::printf("ORDERING async_threads=%u: login_read money=%lld receipt=\"%s\" -> %s; ip_sync_read_after -> %s\n",
-            asyncThreads, (long long)seenMoney, seenData.c_str(), loginSawSave ? "FRESH" : "STALE",
-            syncSawSave ? "FRESH" : "STALE");
+        std::printf("ORDERING async_threads=%u sync_delay_ms=%u: login_read money=%lld receipt=\"%s\" -> %s; ip_sync_read_after -> %s%s\n",
+            asyncThreads, syncDelayMs, (long long)seenMoney, seenData.c_str(), loginSawSave ? "FRESH" : "STALE",
+            syncSawSave ? "FRESH" : "STALE", loginSawSave != syncSawSave ? " => DIVERGENT" : "");
         SetFailStage(0);
         std::this_thread::sleep_for(std::chrono::milliseconds(2500)); // let the slow save finish
+        if (loginSawSave != syncSawSave)
+            return 4;                                         // Core snapshot != IP snapshot
         return loginSawSave && syncSawSave ? 0 : 1;
     }
 
@@ -314,10 +318,10 @@ namespace
 
 int main(int argc, char** argv)
 {
-    bool const ordering = argc == 4 && std::string(argv[2]) == "ordering";
+    bool const ordering = (argc == 4 || argc == 5) && std::string(argv[2]) == "ordering";
     if (argc != 2 && !ordering)
     {
-        std::printf("usage: %s \"host;port;user;password;database\" [ordering <asyncThreads>]\n", argv[0]);
+        std::printf("usage: %s \"host;port;user;password;database\" [ordering <asyncThreads> [syncDelayMs]]\n", argv[0]);
         return 2;
     }
     unsigned const asyncThreads = ordering ? static_cast<unsigned>(std::stoul(argv[3])) : 1;
@@ -330,11 +334,13 @@ int main(int argc, char** argv)
     }
     if (ordering)
     {
-        int const stale = ScenarioFastRelogOrdering(1006, asyncThreads);
+        unsigned const syncDelayMs = argc == 5 ? static_cast<unsigned>(std::stoul(argv[4])) : 0;
+        int const result = ScenarioFastRelogOrdering(1006, asyncThreads, syncDelayMs);
         CharacterDatabase.Close();
         MySQL::Library_End();
-        // Exit 0 = fresh, 3 = stale observed (a finding, not a harness error).
-        return stale ? 3 : 0;
+        // Exit 0 = fresh, 3 = both stale, 4 = Core and IP snapshots DIVERGE
+        // (findings, not harness errors).
+        return result == 4 ? 4 : result ? 3 : 0;
     }
     ScenarioSuccess(1001);
     ScenarioFirstFailLaterSuccess(1002);

@@ -23,9 +23,9 @@ eval "$(cat "$PREFIX") -I$IP/src $HERE/paid_persistence_db_harness.cpp -o $OUT/d
   -lboost_iostreams -lboost_thread -lz -lpthread -ldl"
 timeout 120 "$OUT/dbh" "127.0.0.1;$PORT;harness;harness;$DB"
 # Fast-relog ordering (finding, not pass/fail): Core default 1 async worker, then 2.
-for threads in 1 2; do
-  rc=0; timeout 120 "$OUT/dbh" "127.0.0.1;$PORT;harness;harness;$DB" ordering $threads || rc=$?
-  echo "ordering async_threads=$threads exit=$rc (0 fresh, 3 stale)"
+for args in "1 0" "2 0" "1 2500" "2 2500"; do
+  rc=0; timeout 120 "$OUT/dbh" "127.0.0.1;$PORT;harness;harness;$DB" ordering $args || rc=$?
+  echo "ordering threads/sync_delay=$args exit=$rc (0 fresh, 3 stale, 4 divergent)"
 done
 # The release audit over the DB the harness left behind (read-only exports).
 for q in audit anomalies schema; do
