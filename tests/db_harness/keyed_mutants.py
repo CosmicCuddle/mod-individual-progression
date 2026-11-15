@@ -53,15 +53,21 @@ M = {
  "M21_purchase_coalescing": [("if (!purchase && !k.queue.empty())", "if (!k.queue.empty())"),
                              (" && tail.purchaseId.empty() && ", " && ")],
  # freeze on inconsistent proof / callback failure (CS01 6895011029)
- "M24_no_freeze_on_inconsistent_proof": [("                        if (!journalMine)\n                            FreezeForProof(key, op);", "                        if (false)\n                            FreezeForProof(key, op);")],
+ "M24_no_freeze_on_inconsistent_proof": [("                        if (!journalMine)\n                            FreezeForProof(key, op, FreezeKind::CurrentProof);", "                        if (false)\n                            FreezeForProof(key, op, FreezeKind::CurrentProof);")],
  "M25_journal_fence_ignored": [("\n                            && f[8].Get<uint64_t>() == op.fence);", ");")],
  "M26_frozen_ignored_by_pump": [(" && !k.abandoned && !k.frozen)", " && !k.abandoned)")],
  "M27_frozen_admission_ignored": [("            if (it->second.frozen)\n                return Admit::Frozen;\n", "")],
  "M28_callback_exception_propagates": [("                ++_stats.callbackExceptions;\n                Freeze(k);", "                ++_stats.callbackExceptions;\n                throw;")],
  # proof-gated unfreeze, shutdown containment, duplicate proof (CS01 6895440140)
- "M29_blind_unfreeze": [("            if (!k.frozenProof)\n            {", "            if (true)\n            {")],
+ "M29_blind_unfreeze": [("            if (k.freezeKind == FreezeKind::Callback)\n            {", "            if (true)\n            {")],
  "M30_shutdown_callback_uncontained": [("                            Invoke(k, [&] { w.done(Outcome::Unresolved); });", "                            w.done(Outcome::Unresolved);")],
  "M31_duplicate_without_proof": [("                            if (earlierProven)", "                            if (true)")],
+ # resolve lifecycle + duplicate recovery (CS01 6896262413)
+ "M32_resolve_ignores_freeze_generation": [("ok = ok && key.frozen && key.freezeGen == gen && key.freezeKind == kind;", "ok = ok && key.frozen;")],
+ "M33_resolve_not_single_flight": [(" || it->second.resolveToken || _shuttingDown)", " || _shuttingDown)")],
+ "M34_resolve_completion_uncontained": [("            if (done)\n                Invoke(k, [&] { done(ok); });", "            if (done)\n                done(ok);")],
+ "M35_shutdown_leaves_resolve_pending": [("                    Complete(k, cb, false); // settled exactly once", "                    (void)cb;")],
+ "M36_duplicate_resolved_by_current_proof": [("FreezeForProof(key, op, FreezeKind::EarlierDuplicate);", "FreezeForProof(key, op, FreezeKind::CurrentProof);")],
  # lifecycle
  "M8_no_shutdown_drain": [("while (!Idle() && Clock::now() < deadline)", "while (false)")],
  "M9_running_cancel_ignored": [("k.current.discard = true;", "k.current.discard = false;")],

@@ -156,49 +156,91 @@ namespace KeyedProto
                 std::chrono::system_clock::now().time_since_epoch()).count(), static_cast<long>(::getpid()), r);
         }
 
-        // Explicit authoritative reconciliation of a Frozen key. Never a blind
-        // unfreeze: the caller must confirm it recovered its own state, and a
-        // key frozen for inconsistent DB proof is only released after the
-        // dispatcher re-reads the write log and journal for the frozen op and
-        // finds them consistent (repaired). `done(true)` = released.
+        // Explicit authoritative reconciliation of a Frozen key (never a blind
+        // unfreeze). Single-flight per key; the async proof read is bound to the
+        // freeze GENERATION it started under, and is ignored if the key was
+        // re-frozen, abandoned or shut down meanwhile. `done` is called exactly
+        // once (contained: a throwing completion re-freezes the key).
+        //  - callback/admin freeze: released on the caller's confirmation alone;
+        //  - current-proof freeze (log mine, journal mismatch): released only when
+        //    the write log AND journal for that op are consistent (repaired);
+        //  - earlier-duplicate freeze (journal row without its own write-log
+        //    proof): released only when that EARLIER journal row is proven by its
+        //    own write-log row, or an audit voided it. The current, uncommitted
+        //    attempt is never "proven" (nothing is fabricated for it).
         void ResolveFrozen(uint32_t guid, bool callerStateRecovered, std::function<void(bool)> done)
         {
             auto it = _keys.find(guid);
-            if (it == _keys.end() || !it->second.frozen || !callerStateRecovered)
+            if (it == _keys.end() || !it->second.frozen || !callerStateRecovered || it->second.resolveToken || _shuttingDown)
             {
-                if (done)
-                    done(false);
+                if (it != _keys.end())
+                    Complete(it->second, done, false);
+                else if (done)
+                    try { done(false); } catch (...) { ++_stats.callbackExceptions; }
                 return;
             }
             Key& k = it->second;
-            if (!k.frozenProof)
+            if (k.freezeKind == FreezeKind::Callback)
             {
                 Unfreeze(guid, k);
-                if (done)
-                    done(true);
+                Complete(k, done, true);
                 return;
             }
+            uint64_t const token = ++_resolveCounter;
+            uint64_t const gen = k.freezeGen;
+            FreezeKind const kind = k.freezeKind;
             FrozenOp const fo = k.frozenOp;
-            _queryCallbacks.AddCallback(CharacterDatabase.AsyncQuery(Acore::StringFormat(
-                "SELECT l.fence, l.op, j.guid, j.seq, j.fence, j.op FROM harness_write_log l "
-                "LEFT JOIN harness_purchase_journal j ON j.purchase_id = '{}' WHERE l.guid = {} AND l.seq = {}",
-                fo.purchaseId, guid, fo.seq))).WithCallback(
-                [this, guid, fo, done](QueryResult r)
+            k.resolveToken = token;
+            k.resolveDone = std::move(done);
+            std::string const sql = kind == FreezeKind::CurrentProof
+                ? Acore::StringFormat("SELECT l.fence, l.op, j.guid, j.seq, j.fence, j.op FROM harness_write_log l "
+                    "LEFT JOIN harness_purchase_journal j ON j.purchase_id = '{}' WHERE l.guid = {} AND l.seq = {}",
+                    fo.purchaseId, guid, fo.seq)
+                : Acore::StringFormat("SELECT COUNT(*), MAX(j.guid), MAX(j.seq), MAX(j.fence), MAX(j.op), MAX(l.fence), MAX(l.op) "
+                    "FROM harness_purchase_journal j LEFT JOIN harness_write_log l ON l.guid = j.guid AND l.seq = j.seq "
+                    "WHERE j.purchase_id = '{}'", fo.purchaseId);
+            _queryCallbacks.AddCallback(CharacterDatabase.AsyncQuery(sql)).WithCallback(
+                [this, guid, token, gen, kind, fo](QueryResult r)
                 {
-                    Key& key = _keys[guid];
+                    auto kit = _keys.find(guid);
+                    if (kit == _keys.end())
+                        return;
+                    Key& key = kit->second;
+                    if (key.abandoned || key.resolveToken != token)
+                        return; // settled at shutdown, or superseded: late result ignored
+                    std::function<void(bool)> cb = std::move(key.resolveDone);
+                    key.resolveDone = nullptr;
+                    key.resolveToken = 0;
                     bool ok = false;
-                    if (r)
+                    if (r && kind == FreezeKind::CurrentProof)
                     {
                         Field* f = r->Fetch();
                         ok = f[0].Get<uint64_t>() == fo.fence && f[1].Get<std::string>() == fo.op && !f[2].IsNull()
                             && f[2].Get<uint32_t>() == guid && f[3].Get<uint64_t>() == fo.seq
                             && f[4].Get<uint64_t>() == fo.fence && f[5].Get<std::string>() == fo.op;
                     }
+                    else if (r && kind == FreezeKind::EarlierDuplicate)
+                    {
+                        Field* f = r->Fetch();
+                        bool const voided = f[0].Get<uint64_t>() == 0;
+                        bool const earlierProven = !voided && !f[5].IsNull() && f[1].Get<uint32_t>() == guid
+                            && f[5].Get<uint64_t>() == f[3].Get<uint64_t>() && f[6].Get<std::string>() == f[4].Get<std::string>();
+                        ok = voided || earlierProven;
+                    }
+                    // Re-check the exact freeze this resolve started for.
+                    ok = ok && key.frozen && key.freezeGen == gen && key.freezeKind == kind;
                     if (ok)
                         Unfreeze(guid, key);
-                    if (done)
-                        done(ok);
+                    Complete(key, cb, ok);
                 });
+        }
+
+        // Administrative / audit freeze (also used by tests to re-freeze mid-resolve).
+        void FreezeForAudit(uint32_t guid)
+        {
+            auto it = _keys.find(guid);
+            if (it != _keys.end())
+                Freeze(it->second);
         }
 
         bool Frozen(uint32_t guid) const
@@ -365,6 +407,13 @@ namespace KeyedProto
             for (auto& [guid, k] : _keys)
             {
                 k.abandoned = true; // late DB callbacks are ignored from here on
+                if (k.resolveToken)
+                {
+                    std::function<void(bool)> cb = std::move(k.resolveDone);
+                    k.resolveDone = nullptr;
+                    k.resolveToken = 0;
+                    Complete(k, cb, false); // settled exactly once
+                }
                 if (k.running)
                     for (auto& w : TakeWaiters(k.current))
                         if (w.done)
@@ -383,7 +432,8 @@ namespace KeyedProto
         bool Idle() const
         {
             for (auto const& [guid, k] : _keys)
-                if (!k.abandoned && (k.running || !k.queue.empty() || k.state != KeyState::Idle || k.deferredOutcome))
+                if (!k.abandoned && (k.running || !k.queue.empty() || k.state != KeyState::Idle || k.deferredOutcome
+                    || k.resolveToken))
                     return false;
             return true;
         }
@@ -447,6 +497,8 @@ namespace KeyedProto
             bool dispatched = false;
         };
 
+        enum class FreezeKind { None, Callback, CurrentProof, EarlierDuplicate };
+
         struct FrozenOp
         {
             uint64_t seq = 0;
@@ -466,8 +518,11 @@ namespace KeyedProto
             bool owned = false;            // this process holds the marker fence
             bool fenced = false;           // another claimant took the fence: refuse writes
             bool frozen = false;           // inconsistent proof / callback failure: nothing runs until ResolveFrozen
-            bool frozenProof = false;      // frozen for inconsistent DB proof (needs a consistent re-read)
+            FreezeKind freezeKind = FreezeKind::None;
+            uint64_t freezeGen = 0;        // bumped by EVERY freeze (a resolve is bound to one generation)
             FrozenOp frozenOp;
+            uint64_t resolveToken = 0;     // single-flight ResolveFrozen in progress
+            std::function<void(bool)> resolveDone;
             bool claimQueued = false;
             uint64_t fence = 0;
             uint64_t lastSeq = 0;
@@ -637,26 +692,41 @@ namespace KeyedProto
             }
         }
 
+        // Every freeze bumps the generation; a proof kind is never downgraded.
         void Freeze(Key& k)
         {
             if (!k.frozen)
                 ++_stats.frozen;
             k.frozen = true;
+            ++k.freezeGen;
+            if (k.freezeKind == FreezeKind::None)
+                k.freezeKind = FreezeKind::Callback;
         }
 
-        void FreezeForProof(Key& k, Op const& op)
+        void FreezeForProof(Key& k, Op const& op, FreezeKind kind)
         {
             Freeze(k);
-            k.frozenProof = true;
-            k.frozenOp = FrozenOp{op.seq, op.fence, op.opToken, op.purchaseId};
+            if (k.freezeKind == FreezeKind::Callback || k.freezeKind == FreezeKind::None
+                || (kind == FreezeKind::EarlierDuplicate && k.freezeKind == FreezeKind::CurrentProof))
+            {
+                k.freezeKind = kind;
+                k.frozenOp = FrozenOp{op.seq, op.fence, op.opToken, op.purchaseId};
+            }
         }
 
         void Unfreeze(uint32_t guid, Key& k)
         {
             k.frozen = false;
-            k.frozenProof = false;
+            k.freezeKind = FreezeKind::None;
             k.frozenOp = FrozenOp();
             Pump(guid, k);
+        }
+
+        // A resolve completion is contained like any caller callback.
+        void Complete(Key& k, std::function<void(bool)> const& done, bool ok)
+        {
+            if (done)
+                Invoke(k, [&] { done(ok); });
         }
 
         void Schedule(Key& k, std::function<void()> step)
@@ -781,7 +851,7 @@ namespace KeyedProto
                             && f[8].Get<uint64_t>() == op.fence);
                         forPurchase = journalMine ? Outcome::Committed : Outcome::Unresolved;
                         if (!journalMine)
-                            FreezeForProof(key, op); // inconsistent proof: nothing runs until reconciled
+                            FreezeForProof(key, op, FreezeKind::CurrentProof); // inconsistent proof
                     }
                     else if (!op.purchaseId.empty() && !f[5].IsNull())
                     {
@@ -796,7 +866,7 @@ namespace KeyedProto
                             else
                             {
                                 forPurchase = Outcome::Unresolved;
-                                FreezeForProof(key, op);
+                                FreezeForProof(key, op, FreezeKind::EarlierDuplicate);
                             }
                         }
                         else
@@ -907,7 +977,7 @@ namespace KeyedProto
         std::unordered_map<uint32_t, Key> _keys;
         AsyncCallbackProcessor<TransactionCallback> _txCallbacks;
         AsyncCallbackProcessor<QueryCallback> _queryCallbacks;
-        uint64_t _epochCounter = 0, _ticketCounter = 0, _claimCounter = 0;
+        uint64_t _epochCounter = 0, _ticketCounter = 0, _claimCounter = 0, _resolveCounter = 0;
         std::size_t _totalWaiters = 0;
         bool _shuttingDown = false;
         Stats _stats;

@@ -4,7 +4,7 @@
 // real IP receipt policy; the dispatcher under test is
 // keyed_dispatcher_prototype.h. THROWAWAY DATABASE ONLY (run_harness.sh).
 //
-//   keyed <workers>   K1-K10, K12-K21, K23-K27 (K12 needs >= 2 workers)
+//   keyed <workers>   K1-K10, K12-K21, K23-K28 (K12 needs >= 2 workers)
 //   restart1          K11 part 1: purchase left Unresolved at shutdown
 //   restart2          K11 part 2: a NEW process reconciles it from the DB
 //   netloss           K22: real COMMIT network loss through commit_drop_proxy.py
@@ -1059,7 +1059,109 @@ namespace
         RunUntil(d, [&] { return o != Outcome::Committed; }, 10000);
         DbState const s = ReadDb(g);
         CHECK(o == Outcome::Unresolved && d.Frozen(g) && s.money == 1000 && !DbPaid(s));
-        std::printf("K27 duplicate without proof: outcome=%s frozen=%d db_money=%lld\n", Name(o), d.Frozen(g), (long long)s.money);
+        // Recovery (CS01 6896262413): proving the CURRENT attempt is impossible and must not
+        // help. A fabricated current-commit log row does not release; only the EARLIER
+        // journal row's own proof, or an audit voiding it, does.
+        auto resolve = [&] { int r = -1; d.ResolveFrozen(g, true, [&](bool ok) { r = ok; }); RunUntil(d, [&] { return r != -1; }, 5000); return r; };
+        int const noProof = resolve();
+        CHECK(Mysql(Acore::StringFormat("INSERT INTO harness_write_log (guid, seq, fence, op) VALUES ({}, {}, {}, 'fabricated-current')",
+            g, d.LastSeq(g) + 1, d.Fence(g))) == 0);
+        int const fabricated = resolve();
+        CHECK(noProof == 0 && fabricated == 0 && d.Frozen(g));
+        CHECK(Mysql("DELETE FROM harness_purchase_journal WHERE purchase_id = 'k27-1176'") == 0); // audit voids the ghost row
+        int const afterAudit = resolve();
+        DbState const after = ReadDb(g);
+        CHECK(afterAudit == 1 && !d.Frozen(g) && after.money == 1000 && !DbPaid(after));
+        std::printf("K27 duplicate without proof: outcome=%s db_money=%lld resolve_no_proof=%d resolve_with_fabricated_current_log=%d "
+            "resolve_after_audit_void=%d (no charge)\n", Name(o), (long long)s.money, noProof, fabricated, afterAudit);
+    }
+
+    // K28 (CS01 6896262413): ResolveFrozen lifecycle. Single-flight; a resolve
+    // started before a NEW freeze cannot clear it; a throwing completion is
+    // contained (re-freezes); shutdown settles a pending resolve exactly once and
+    // ignores its late result.
+    void K28ResolveLifecycle()
+    {
+        uint32 const g = 1177;
+        Reset(g, 1000);
+        Player p = Load(g);
+        Dispatcher d({}, {});
+        uint64 const e = d.BeginSession(g);
+        CHECK(Drain(d));
+        // Make a CurrentProof freeze with an already-consistent proof row so a resolve WOULD succeed.
+        p.money = 900;
+        CHECK(d.SubmitSave(g, e, SaveBuilder(&p), [](Outcome) { throw std::runtime_error("x"); }) == Admit::Queued);
+        RunUntil(d, [&] { return d.Frozen(g); }, 5000); // callback freeze
+        // a) single-flight + new freeze before the old callback: use an admin freeze mid-resolve.
+        d.FreezeForAudit(g);
+        int a1 = -1;
+        d.ResolveFrozen(g, true, [&](bool ok) { a1 = ok; });        // Callback kind: immediate
+        CHECK(a1 == 1 && !d.Frozen(g));
+        // Now a proof-kind freeze via K24-style forged rows is heavy; emulate generations with
+        // admin freezes on a proof freeze produced by an inconsistent purchase.
+        bool forged = false;
+        InFlight seen;
+        Hooks h;
+        h.beforeReconcile = [&](InFlight const& w)
+        {
+            if (forged) return;
+            forged = true;
+            seen = w;
+            Mysql(Acore::StringFormat(
+                "UPDATE harness_write_seq SET seq = {}, fence = {} WHERE guid = {}; "
+                "INSERT INTO harness_write_log (guid, seq, fence, op) VALUES ({}, {}, {}, '{}'); "
+                "INSERT INTO harness_purchase_journal (purchase_id, guid, seq, fence, op) VALUES ('{}', {}, {}, {}, 'other');",
+                w.seq, w.fence, g, g, w.seq, w.fence, w.op, w.purchaseId, g, w.seq, w.fence));
+        };
+        Reset(g, 1000);
+        Player q = Load(g);
+        Dispatcher d2({}, h);
+        uint64 const e2 = d2.BeginSession(g);
+        CHECK(Drain(d2));
+        StagePurchase(q, 400);
+        q.failNext = true;
+        Outcome op = Outcome::Committed;
+        CHECK(d2.SubmitPurchase(g, e2, "k28-1177", SaveBuilder(&q), [&](Outcome o) { op = o; }) == Admit::Queued);
+        RunUntil(d2, [&] { return d2.Frozen(g); }, 10000);
+        CHECK(op == Outcome::Unresolved);
+        CHECK(Mysql(Acore::StringFormat("UPDATE harness_purchase_journal SET op = '{}' WHERE purchase_id = 'k28-1177'", seen.op)) == 0); // repaired
+        int b1 = -1, b2 = -1;
+        d2.ResolveFrozen(g, true, [&](bool ok) { b1 = ok; });       // in flight (async proof read)
+        d2.ResolveFrozen(g, true, [&](bool ok) { b2 = ok; });       // single-flight: refused now
+        bool const singleFlight = b2 == 0 && b1 == -1;
+        d2.FreezeForAudit(g);                                       // NEW freeze before the old callback runs
+        RunUntil(d2, [&] { return b1 != -1; }, 5000);
+        bool const oldCouldNotClear = b1 == 0 && d2.Frozen(g);
+        // c) throwing completion is contained and re-freezes; d) a fresh resolve then succeeds.
+        int c1 = -1;
+        d2.ResolveFrozen(g, true, [&](bool ok) { c1 = ok; throw std::runtime_error("completion"); });
+        RunUntil(d2, [&] { return c1 != -1; }, 5000);
+        bool const containedThrow = c1 == 1 && d2.Frozen(g) && d2.GetStats().callbackExceptions >= 1;
+        int c2 = -1;
+        d2.ResolveFrozen(g, true, [&](bool ok) { c2 = ok; }); // the completion's own freeze is callback-kind: caller confirmation
+        RunUntil(d2, [&] { return c2 != -1; }, 5000);
+        CHECK(singleFlight && oldCouldNotClear && containedThrow && c2 == 1 && !d2.Frozen(g));
+        // e) shutdown with a pending resolve: settled once, late result ignored.
+        Reset(g, 1000);
+        int s1 = 0;
+        Dispatcher d3({}, h);
+        forged = false;
+        uint64 const e3 = d3.BeginSession(g);
+        CHECK(Drain(d3));
+        Player r = Load(g);
+        StagePurchase(r, 400);
+        r.failNext = true;
+        Outcome op3 = Outcome::Committed;
+        CHECK(d3.SubmitPurchase(g, e3, "k28b-1177", SaveBuilder(&r), [&](Outcome o) { op3 = o; }) == Admit::Queued);
+        RunUntil(d3, [&] { return d3.Frozen(g); }, 10000);
+        d3.ResolveFrozen(g, true, [&](bool) { ++s1; });             // async, pending
+        bool const drained = d3.Shutdown(0);                        // deadline already passed
+        int const atShutdown = s1;
+        RunUntil(d3, [] { return false; }, 500);
+        CHECK(!drained && atShutdown == 1 && s1 == 1);
+        std::printf("K28 resolve lifecycle: single_flight=%d new_freeze_not_cleared_by_old_resolve=%d throwing_completion_contained=%d "
+            "fresh_resolve_after=%d shutdown_settles_pending_once=%d\n", singleFlight, oldCouldNotClear, containedThrow, c2,
+            atShutdown == 1 && s1 == 1);
     }
 
     // K22: REAL network loss at COMMIT (commit_drop_proxy.py between Core and
@@ -1238,6 +1340,7 @@ int main(int argc, char** argv)
         K25CallbackException();
         K26ShutdownCallbackThrows();
         K27DuplicateNeedsProof();
+        K28ResolveLifecycle();
     }
     CharacterDatabase.Close();
     MySQL::Library_End();
