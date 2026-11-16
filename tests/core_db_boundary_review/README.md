@@ -34,3 +34,15 @@ It also adds and removes an `/etc/hosts` entry `txdbhost` to simulate a DNS fail
   - `outage refuse|dns|dead`: COMMIT error, then a reconnect outage. `dead` = exhaustion, fail-stop expected.
 - `mklib_full.py`: rebuilds `libdatabase.a` from a Core worktree using an existing build's `compile_commands.json` (no PCH; optional sanitizer flags).
 - `logs/`: outputs of the runs reported in Coordination #13. Scratch paths are replaced by `<scratch>`.
+
+## Round 3 (native builds, module pool, observer)
+- `tx_module_test.cpp`: `ModuleDatabasePool::DirectCommitTransactionWithResult` (Core `10b0ec9a`), using the statement shapes of `PlayerbotRepository::Save`:
+  - normal save;
+  - COMMIT error;
+  - BEGIN error (no DELETE ran);
+  - deadlock then lost COMMIT (exactly once);
+  - recovery after the faults.
+- `observer_race_test.cpp`: 4 threads standing in for map threads (reserve/seal/attach), racing a world-thread `Drain` on `PB59::CharacterSaveObserver<256>` (Core `28110cd`), under ASan/UBSan and TSan.
+- `logs/build_*_tail.log`: worldserver build outcomes for
+  - Core `28110cd` + PB `07d0180` + IP `4a604378` + CS `f43bc2c`;
+  - Core `10b0ec9a` + PB `3d0f5529` (same IP/CS).

@@ -1,0 +1,15 @@
+  strategy save normal -> Committed (0)
+PASS strategy save normal is Committed
+PASS normal: 3 rows written
+  strategy save COMMIT error -> Ambiguous (-2)
+PASS strategy save COMMIT error is Ambiguous
+PASS COMMIT error: previous snapshot intact, no partial
+  strategy save BEGIN error -> NotStarted (-3)
+PASS strategy save BEGIN error is NotStarted
+PASS BEGIN error: no DELETE ran (no strategy wipe)
+  strategy deadlock then lost COMMIT -> Ambiguous (-2)
+PASS strategy deadlock then lost COMMIT is Ambiguous
+PASS deadlock+lost COMMIT applied exactly once (no replay)
+  strategy save after faults -> Committed (0)
+PASS strategy save after faults is Committed
+module fails=0
