@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""ERR-injecting MySQL proxy (THROWAWAY DB ONLY). Tags (sent as DO '<tag>'):
+"""ERR-injecting MySQL proxy (THROWAWAY DB ONLY). Usage: err_proxy.py <listen_port> <mysql_port> [--fail-next-commit [N]]
+Tags (sent as DO '<tag>'):
   harness-err-commit    next COMMIT is not forwarded; client gets ERR 1180; connection kept
   harness-err-begin     next START TRANSACTION is not forwarded; client gets ERR 1180
   harness-err-rollback  next ROLLBACK is not forwarded; client gets ERR 1180; connection kept
@@ -8,7 +9,7 @@
 """
 import asyncio, sys
 def log(m): print(m, flush=True)
-G = {"server": None, "lp": 0, "mp": 0}
+G = {"server": None, "lp": 0, "mp": 0, "fail_next_commit": 0}
 HOSTS = "/etc/hosts"; HOSTLINE = "127.0.0.1 txdbhost\n"
 def hosts_set(on):
     lines = [l for l in open(HOSTS).read().splitlines(True) if "txdbhost" not in l]
@@ -62,7 +63,9 @@ async def handle(cr, cw, mport):
                             if t in q: st["tags"].add(t)
                         if b"harness-plan-a4" in q: st["a4"] += 1
                         fake = None
-                        if u == b"COMMIT" and st["tags"] & {b"harness-refuse-after", b"harness-dns-after", b"harness-dead-after"}:
+                        if u == b"COMMIT" and G["fail_next_commit"] > 0:
+                            G["fail_next_commit"] -= 1; fake = (1180, "injected COMMIT error (--fail-next-commit)")
+                        elif u == b"COMMIT" and st["tags"] & {b"harness-refuse-after", b"harness-dns-after", b"harness-dead-after"}:
                             t = st["tags"]; dns = b"harness-dns-after" in t
                             secs = -1 if b"harness-dead-after" in t else 7
                             t.difference_update({b"harness-refuse-after", b"harness-dns-after", b"harness-dead-after"})
@@ -90,6 +93,10 @@ async def handle(cr, cw, mport):
     await asyncio.gather(s2c(), c2s())
 async def main():
     lp, mp = int(sys.argv[1]), int(sys.argv[2])
+    # Optional: --fail-next-commit [N] fails the next N COMMITs on any connection.
+    if "--fail-next-commit" in sys.argv:
+        i = sys.argv.index("--fail-next-commit")
+        G["fail_next_commit"] = int(sys.argv[i + 1]) if len(sys.argv) > i + 1 and sys.argv[i + 1].isdigit() else 1
     G["lp"], G["mp"] = lp, mp
     G["server"] = await asyncio.start_server(lambda r, w: handle(r, w, mp), "127.0.0.1", lp)
     log(f"proxy: listening {lp} -> {mp}")
