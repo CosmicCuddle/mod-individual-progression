@@ -1,0 +1,6 @@
+--- a/tests/pb59/pb59_original_combat_effects_native.cpp
++++ b/tests/pb59/pb59_original_combat_effects_native.cpp
+@@ -1,2 +1,3 @@
+ #include "PB59OriginalCombatEffects.h"
++#include <algorithm>
+ #include <array>
