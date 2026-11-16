@@ -1,0 +1,10 @@
+2582a3307657dce7276dda9645c44c382612ae03
+PASS: bounded capture, capacity, delayed/out-of-order completion, broken future, final drain, slot reuse, saturation reclamation
+sealed=77449 reported=77046 nonCommitted=7746 full=2551
+expectedNonCommitted=7746
+PASS race
+sealed=80000 reported=80000 nonCommitted=8000 full=0
+expectedNonCommitted=8000
+PASS race
+
+[exited with code 0]

@@ -1,0 +1,4 @@
+FAILED: modules/CMakeFiles/modules.dir/mod-individual-progression/src/IndividualProgression.cpp.o 
+<scratch>/coresync/modules/mod-individual-progression/src/IndividualProgression.cpp:140:63: error: cannot call member function 'uint8 IndividualProgression::GetPlayerProgressionFromQuests(Player*) const' without object
+<scratch>/coresync/modules/mod-individual-progression/src/IndividualProgression.cpp:168:85: error: cannot call member function 'uint8 IndividualProgression::GetPlayerProgressionFromQuests(Player*) const' without object
+rc=1
