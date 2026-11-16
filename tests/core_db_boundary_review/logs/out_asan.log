@@ -1,0 +1,13 @@
+R1 rc=-2 t2rc=0 r1rows=0 t2rows=1
+PASS R1 failed COMMIT not reported as success
+PASS R1 uncommitted work NOT committed by next task
+PASS R1 next task commits normally
+R5 rc=-2 rows=0
+PASS R5 body not executed after BEGIN failure
+R8 rc=-2 t2rc=0 r8rows=0
+PASS R8 failed ROLLBACK leftover not committed by next task
+PASS R8 next task commits normally
+PASS prepared statement usable after reset
+A4 result=0 counter=1
+PASS A4 no replay after uncertain COMMIT (counter exactly 1)
+draft fails=0

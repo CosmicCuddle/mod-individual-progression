@@ -1,0 +1,14 @@
+  cancel: in-flight task -> Committed (0)
+PASS cancel: in-flight task is Committed
+  cancel: queued #1 -> CancelledBeforeExecution (-6)
+PASS cancel: queued #1 is CancelledBeforeExecution
+  cancel: queued #2 -> CancelledBeforeExecution (-6)
+PASS cancel: queued #2 is CancelledBeforeExecution
+  cancel: queued #3 -> CancelledBeforeExecution (-6)
+PASS cancel: queued #3 is CancelledBeforeExecution
+  cancel: queued #4 -> CancelledBeforeExecution (-6)
+PASS cancel: queued #4 is CancelledBeforeExecution
+  cancel: queued #5 -> CancelledBeforeExecution (-6)
+PASS cancel: queued #5 is CancelledBeforeExecution
+PASS cancelled tasks wrote nothing
+cancel fails=0

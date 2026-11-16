@@ -1,0 +1,10 @@
+R1 rc=0 t2rc=0 r1rows=1 t2rows=1
+PASS R1 baseline defect reproduced (true + leftover committed by next BEGIN)
+R5 rc=1062 rows=1
+PASS R5 baseline defect reproduced (partial autocommit write)
+R8 rc=1062 t2rc=0 r8rows=1
+PASS R8 baseline defect reproduced (leftover committed)
+PASS prepared statement usable after reset
+A4 result=0 counter=15463
+PASS A4 baseline defect reproduced (double apply)
+baseline fails=0

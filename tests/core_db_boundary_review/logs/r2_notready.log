@@ -1,0 +1,3 @@
+  async before PrepareStatements -> NotEnqueued (-5)
+PASS async before PrepareStatements is NotEnqueued
+notready fails=0

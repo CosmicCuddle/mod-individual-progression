@@ -1,0 +1,19 @@
+  direct commit -> Committed (0)
+PASS direct commit is Committed
+PASS direct commit row present
+  direct empty -> Empty (-1)
+PASS direct empty is Empty
+  direct BEGIN error -> NotStarted (-3)
+PASS direct BEGIN error is NotStarted
+PASS direct BEGIN error wrote nothing
+  direct COMMIT error -> Ambiguous (-2)
+PASS direct COMMIT error is Ambiguous
+PASS direct COMMIT error leftover discarded
+  direct dup-key -> FailedUnverified (1062)
+PASS direct dup-key is FailedUnverified
+  direct deadlock then lost COMMIT -> Ambiguous (-2)
+PASS direct deadlock then lost COMMIT is Ambiguous
+PASS direct deadlock loop applied exactly once
+  direct commit after faults -> Committed (0)
+PASS direct commit after faults is Committed
+direct fails=0

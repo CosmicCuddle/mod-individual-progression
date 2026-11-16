@@ -1,0 +1,22 @@
+  async #0 -> Committed (0)
+PASS async #0 is Committed
+  async #1 -> Committed (0)
+PASS async #1 is Committed
+  async #2 -> Committed (0)
+PASS async #2 is Committed
+  async #3 -> Committed (0)
+PASS async #3 is Committed
+  async #4 -> Committed (0)
+PASS async #4 is Committed
+  async COMMIT error -> Ambiguous (-2)
+PASS async COMMIT error is Ambiguous
+  async after Ambiguous on same worker -> Committed (0)
+PASS async after Ambiguous on same worker is Committed
+PASS async Ambiguous leftover not committed by next task
+PASS order read
+  commit order: a0,a1,a2,a3,a4,a-after
+PASS async one-worker FIFO commit order
+  async after Close -> NotEnqueued (-5)
+PASS async after Close is NotEnqueued
+PASS rejected transaction not executed
+async fails=0

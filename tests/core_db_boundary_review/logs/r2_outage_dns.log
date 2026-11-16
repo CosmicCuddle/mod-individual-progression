@@ -1,0 +1,7 @@
+  COMMIT error then dns outage -> Ambiguous (-2)
+PASS COMMIT error then dns outage is Ambiguous
+  reconnect took 9s
+PASS outage: leftover discarded
+  commit after reconnect -> Committed (0)
+PASS commit after reconnect is Committed
+outage fails=0

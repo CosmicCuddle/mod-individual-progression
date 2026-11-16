@@ -1,0 +1,14 @@
+  drain #0 -> Committed (0)
+PASS drain #0 is Committed
+  drain #1 -> Committed (0)
+PASS drain #1 is Committed
+  drain #2 -> Committed (0)
+PASS drain #2 is Committed
+  drain #3 -> Committed (0)
+PASS drain #3 is Committed
+  drain #4 -> Committed (0)
+PASS drain #4 is Committed
+  drain #5 -> Committed (0)
+PASS drain #5 is Committed
+PASS drain committed all queued
+drain fails=0

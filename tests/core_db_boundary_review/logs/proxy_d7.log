@@ -1,0 +1,7 @@
+proxy: listening 33318 -> 33306
+proxy: fake ERR 1180 for b'COMMIT'
+proxy: fake ERR 1180 for b'START TRANSACTION'
+proxy: fake ERR 1180 for b'ROLLBACK'
+proxy: fake ERR 1213 for b'UPDATE TXC SET V = V + 1 WHERE'
+proxy: a4 COMMIT forwarded, reply will be dropped
+proxy: COMMIT reply dropped; closing

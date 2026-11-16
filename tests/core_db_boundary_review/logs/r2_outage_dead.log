@@ -1,0 +1,32 @@
+
+#----------------------------------------------------------------------#
+ 
+>> ABORTED
+
+# Location '<scratch>/txdraft/src_fa/src/server/database/Database/MySQLConnection.cpp:719'
+# Function '_HandleMySQLErrno'
+# Message 'Failed to reconnect to the MySQL server, terminating the server to prevent data corruption!
+
+[2006] Failed transaction boundary'
+ 
+#----------------------------------------------------------------------#
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==1593==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x560ab83d1920 bp 0x7ffebdbdabc0 sp 0x7ffebdbdab70 T0)
+==1593==The signal is caused by a WRITE memory access.
+==1593==Hint: address points to the zero page.
+    #0 0x560ab83d1920 in Acore::Abort(std::basic_string_view<char, std::char_traits<char> >, unsigned int, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >) (<scratch>/txdraft/t/pool_fa_asan+0x7d1920) (BuildId: 0f39e66072be3cfd7a74b727d842c911c7de5496)
+    #1 0x560ab81fcbe4 in void Acore::Abort<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, unsigned int&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&>(std::basic_string_view<char, std::char_traits<char> >, unsigned int, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, unsigned int&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) <scratch>/txdraft/src_fa/src/common/Debugging/Errors.h:46
+    #2 0x560ab81ec37d in MySQLConnection::_HandleMySQLErrno(unsigned int, char const*, unsigned char) <scratch>/txdraft/src_fa/src/server/database/Database/MySQLConnection.cpp:719
+    #3 0x560ab81cd3a1 in MySQLConnection::ResetTransactionConnection() <scratch>/txdraft/src_fa/src/server/database/Database/MySQLConnection.cpp:545
+    #4 0x560ab81e3890 in MySQLConnection::ExecuteTransactionAttempt(std::shared_ptr<TransactionBase> const&, bool&) <scratch>/txdraft/src_fa/src/server/database/Database/MySQLConnection.cpp:505
+    #5 0x560ab81e503f in MySQLConnection::ExecuteTransaction(std::shared_ptr<TransactionBase>) <scratch>/txdraft/src_fa/src/server/database/Database/MySQLConnection.cpp:407
+    #6 0x560ab814c49e in DatabaseWorkerPool<CharacterDatabaseConnection>::DirectCommitTransactionWithResult(std::shared_ptr<Transaction<CharacterDatabaseConnection> >&) <scratch>/txdraft/src_fa/src/server/database/Database/DatabaseWorkerPool.cpp:322
+    #7 0x560ab8113cbf in main txdraft/t/tx_pool_test.cpp:117
+    #8 0x7ffa49e2a1c9 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+    #9 0x7ffa49e2a28a in __libc_start_main_impl ../csu/libc-start.c:360
+    #10 0x560ab8117204 in _start (<scratch>/txdraft/t/pool_fa_asan+0x517204) (BuildId: 0f39e66072be3cfd7a74b727d842c911c7de5496)
+
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV (<scratch>/txdraft/t/pool_fa_asan+0x7d1920) (BuildId: 0f39e66072be3cfd7a74b727d842c911c7de5496) in Acore::Abort(std::basic_string_view<char, std::char_traits<char> >, unsigned int, std::basic_string_view<char, std::char_traits<char> >, std::basic_string_view<char, std::char_traits<char> >)
+==1593==ABORTING
