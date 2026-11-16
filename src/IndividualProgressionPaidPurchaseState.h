@@ -20,6 +20,9 @@
  *    teleport/reconnect reload must not replace the staged cache.
  *  - A callback lost with its session (reconnect) turns Pending into
  *    Unconfirmed; logout forgets the record (the next login reads the DB).
+ *    The session identity is a typed key (IndividualProgressionSessionIdentity.h):
+ *    Core's exact session incarnation where available, else the address.
+ *    A zero identity is invalid: no purchase may start with it.
  *
  * No Player, DB, clock or Core dependency: native-testable.
  */
@@ -50,12 +53,32 @@ namespace IndividualProgressionPaidPurchaseState
         Active       // entitlement bit active (durable purchase, or stored/grandfathered at load)
     };
 
+    enum class SessionKind : std::uint8_t { None, Incarnation, Address };
+
+    // Identity of the session that holds a purchase's commit callback.
+    struct SessionKey
+    {
+        SessionKind kind = SessionKind::None;
+        std::uint64_t value = 0;
+    };
+
+    constexpr bool Valid(SessionKey const& k)
+    {
+        return k.kind != SessionKind::None && k.value != 0;
+    }
+
+    // Different kinds never match (a kind change can only mean "lost").
+    constexpr bool SameSession(SessionKey const& a, SessionKey const& b)
+    {
+        return Valid(a) && Valid(b) && a.kind == b.kind && a.value == b.value;
+    }
+
     struct Record
     {
         State state = State::None;
         std::uint8_t era = 0;          // IndividualProgressionExpansionPolicy::Era value
         std::uint64_t token = 0;       // unique per submission
-        std::uintptr_t session = 0;    // identity of the session holding the callback
+        SessionKey session;            // identity of the session holding the callback
     };
 
     constexpr bool InFlight(State s)
@@ -78,7 +101,8 @@ namespace IndividualProgressionPaidPurchaseState
         return !InFlight(r.state);
     }
 
-    constexpr Record Submit(std::uint8_t era, std::uint64_t token, std::uintptr_t session)
+    // Callers must refuse BEFORE reserving or debiting if !Valid(session).
+    constexpr Record Submit(std::uint8_t era, std::uint64_t token, SessionKey session)
     {
         return Record{State::Pending, era, token, session};
     }
@@ -100,9 +124,9 @@ namespace IndividualProgressionPaidPurchaseState
 
     // The reload hook also runs on reconnect. A Pending purchase whose
     // callback lived on another session can never be acknowledged now.
-    constexpr bool CallbackLost(Record const& r, std::uintptr_t currentSession)
+    constexpr bool CallbackLost(Record const& r, SessionKey const& currentSession)
     {
-        return r.state == State::Pending && r.session != currentSession;
+        return r.state == State::Pending && !SameSession(r.session, currentSession);
     }
 
     // First-use commissioning (release gate, default OFF). Only a truly

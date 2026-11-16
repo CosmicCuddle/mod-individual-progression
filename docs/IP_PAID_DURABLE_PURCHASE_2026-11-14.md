@@ -176,3 +176,25 @@ All results are developer-reported until someone runs them independently.
 - gameplay testing.
 
 **Rollback:** keep both switches at 0, or revert the branch. No SQL, schema or data change.
+
+## Exact session identity for the commit callback (16 Nov 2026, CS01 6903447094)
+**Why:** the purchase's commit callback lives on the submitting `WorldSession`.
+- On reconnect, Core destroys that session and silently drops its pending callbacks.
+- IP detects this in the reload hook (`OnPlayerSendInitialPacketsBeforeAddToMap`, which also runs on reconnect) and marks the purchase **Unconfirmed**.
+- Comparing raw `WorldSession*` values was open to address reuse (ABA).
+
+**Change:** `PurchaseState::Record.session` is now a typed `SessionKey`.
+- **Paired Core** (`WorldSession::GetPB59SessionIncarnation()`, a never-recycled process-local counter): the **exact incarnation**. The accessor is detected by expression SFINAE in `src/IndividualProgressionSessionIdentity.h`, so IP still builds against every Core.
+- **Standalone Core:** the session address, as before. The ABA tradeoff is documented: a reused address keeps the purchase Pending, which means no grant, no refund and no second charge, until logout forgets it. IP alone has no hook that tells a worldport from a reconnect.
+- **Invalid identity:** a key with kind `None` or value 0 (for example an exhausted incarnation) is refused in `CanPurchaseExpansion` and before reservation and debit in `PurchaseExpansion`.
+- **Mixed kinds** never compare equal, so the result is "lost", which is fail-closed.
+- **Unchanged:** grant, refund and retry semantics.
+
+**Evidence:**
+- The model has 1800/1800 checks (GCC/Clang × C++17/20). New cases: same address with a replacement incarnation, worldport keeping its incarnation, exhausted incarnation, a stale callback after loss, the standalone fallback (ABA documented), and mixed kinds.
+- Mutants killed: kind ignored, zero accepted, always-address.
+- `static_assert` probes against the real `WorldSession`:
+  - Core `5d7819e7`: the exact path is selected;
+  - Core `21ff1973`: the fallback is selected.
+- `IndividualProgressionExpansion.cpp` object-compiles against both Cores with `-Wall -Wextra` and no diagnostics.
+- Contract tests: 15/15.

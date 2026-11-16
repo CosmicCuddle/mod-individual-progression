@@ -19,6 +19,7 @@
 #include "Opcodes.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
+#include "IndividualProgressionSessionIdentity.h"
 #include "ScriptedGossip.h"
 
 #include <limits>
@@ -27,6 +28,7 @@
 using namespace IndividualProgressionExpansionPolicy;
 namespace ReceiptPolicy = IndividualProgressionReceiptPolicy;
 namespace PurchaseState = IndividualProgressionPaidPurchaseState;
+namespace SessionIdentity = IndividualProgressionSessionIdentity;
 
 namespace
 {
@@ -257,7 +259,7 @@ void IndividualProgression::LoadPaidExpansionEntitlement(Player* player)
         auto const purchase = _paidExpansionPurchases.find(guid);
         if (purchase != _paidExpansionPurchases.end())
         {
-            if (PurchaseState::CallbackLost(purchase->second, reinterpret_cast<std::uintptr_t>(player->GetSession())))
+            if (PurchaseState::CallbackLost(purchase->second, SessionIdentity::KeyFor(player->GetSession())))
             {
                 purchase->second.state = PurchaseState::State::Unconfirmed;
                 LOG_ERROR("module", "IndividualProgression: paid purchase for character {} lost its commit callback (session changed); left unconfirmed, no refund or retry",
@@ -306,7 +308,8 @@ void IndividualProgression::LoadPaidExpansionEntitlement(Player* player)
 PurchaseResult IndividualProgression::CanPurchaseExpansion(Player* player, uint8 eraValue, uint32 costCopper)
 {
     if (!player || !player->IsInWorld() || player->IsBeingTeleportedFar() || !player->GetSession() ||
-        costCopper > static_cast<uint32>(std::numeric_limits<int32>::max()))
+        costCopper > static_cast<uint32>(std::numeric_limits<int32>::max()) ||
+        !PurchaseState::Valid(SessionIdentity::KeyFor(player->GetSession())))
         return PurchaseResult::InvalidRequest;
 
     // Money is always saved; the purchase flag only if the store is saving.
@@ -378,6 +381,11 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
     //    a duplicate click or a second era is refused while unresolved.
     uint32 const guid = player->GetGUID().GetCounter();
     WorldSession* const session = player->GetSession();
+    // Exact session identity for the commit callback; a zero identity
+    // (e.g. an exhausted incarnation) refuses before reservation or debit.
+    PurchaseState::SessionKey const sessionKey = SessionIdentity::KeyFor(session);
+    if (!PurchaseState::Valid(sessionKey))
+        return PurchaseResult::InvalidRequest;
     uint64 token = 0;
     {
         std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);
@@ -385,7 +393,7 @@ PurchaseResult IndividualProgression::PurchaseExpansion(Player* player, uint8 er
         if (!PurchaseState::MayStartPurchase(record))
             return PurchaseResult::PurchasePending;
         token = ++_paidExpansionNextToken;
-        record = PurchaseState::Submit(eraValue, token, reinterpret_cast<std::uintptr_t>(session));
+        record = PurchaseState::Submit(eraValue, token, sessionKey);
     }
 
     // 3. Charge and stage ALL eight validated v1 slots in the Player
