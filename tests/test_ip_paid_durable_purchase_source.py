@@ -84,9 +84,11 @@ class PurchaseSequence(unittest.TestCase):
         lock = p.index("std::unique_lock<std::shared_mutex> lock(_paidExpansionLock);\n        PurchaseState::Record& record = _paidExpansionPurchases[guid];")
         may = p.index("if (!PurchaseState::MayStartPurchase(record))\n            return PurchaseResult::PurchasePending;")
         token = p.index("token = ++_paidExpansionNextToken;")
-        submit = p.index("record = PurchaseState::Submit(eraValue, token, reinterpret_cast<std::uintptr_t>(session));")
+        identity = p.index("PurchaseState::SessionKey const sessionKey = SessionIdentity::KeyFor(session);")
+        refuse = p.index("if (!PurchaseState::Valid(sessionKey))\n        return PurchaseResult::InvalidRequest;")
+        submit = p.index("record = PurchaseState::Submit(eraValue, token, sessionKey);")
         debit = p.index("player->ModifyMoney(-static_cast<int32>(costCopper));")
-        self.assertTrue(p.index("ReceiptPolicy::RecordPurchase(") < lock < may < token < submit < debit)
+        self.assertTrue(p.index("ReceiptPolicy::RecordPurchase(") < identity < refuse < lock < may < token < submit < debit)
         self.assertEqual(p.count("ModifyMoney("), 1)
 
     def test_one_transaction_with_commit_callback(self):
@@ -150,13 +152,32 @@ class PurchaseSequence(unittest.TestCase):
 class ReloadAndCommissioning(unittest.TestCase):
     L = code(body(EXP, SIG_LOAD))
 
+    def test_exact_session_identity_no_raw_address(self):
+        # CS01 6903447094: Core incarnation where available (SFINAE-detected),
+        # address only as the standalone fallback inside the identity header;
+        # a zero identity refuses before reservation/debit and in CanPurchase.
+        src = (ROOT / "src" / "IndividualProgressionExpansion.cpp").read_text()
+        self.assertNotIn("reinterpret_cast<std::uintptr_t>(session)", src)
+        self.assertNotIn("reinterpret_cast<std::uintptr_t>(player->GetSession())", src)
+        self.assertIn('#include "IndividualProgressionSessionIdentity.h"', src)
+        can = src.split("PurchaseResult IndividualProgression::CanPurchaseExpansion(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("!PurchaseState::Valid(SessionIdentity::KeyFor(player->GetSession())))\n        return PurchaseResult::InvalidRequest;", can)
+        hdr = (ROOT / "src" / "IndividualProgressionSessionIdentity.h").read_text()
+        self.assertIn("decltype(static_cast<std::uint64_t>(std::declval<S const&>().GetPB59SessionIncarnation()))", hdr)
+        self.assertIn("if constexpr (HasIncarnation<S>::value)", hdr)
+        self.assertNotIn("__has_include", hdr)
+        st = (ROOT / "src" / "IndividualProgressionPaidPurchaseState.h").read_text()
+        self.assertIn("return k.kind != SessionKind::None && k.value != 0;", st)
+        self.assertIn("return r.state == State::Pending && !SameSession(r.session, currentSession);", st)
+        self.assertNotIn("std::uintptr_t", st)
+
     def test_off_forgets_purchases(self):
         off = self.L.split("if (!IsPaidExpansionActive())", 1)[1].split("return;", 1)[0]
         self.assertIn("_paidExpansionPurchases.erase(guid);", off)
 
     def test_pending_reload_keeps_cache_and_lost_callback_is_unconfirmed(self):
         l = self.L
-        lost = l.index("if (PurchaseState::CallbackLost(purchase->second, reinterpret_cast<std::uintptr_t>(player->GetSession())))")
+        lost = l.index("if (PurchaseState::CallbackLost(purchase->second, SessionIdentity::KeyFor(player->GetSession())))")
         mark = l.index("purchase->second.state = PurchaseState::State::Unconfirmed;")
         keep = l.index("if (!PurchaseState::ReloadMayReplaceCache(purchase->second))\n                return;")
         read_db = l.index("ReadStrictPaidLedger(guid)")

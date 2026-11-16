@@ -317,7 +317,7 @@ class PurchaseSequence(unittest.TestCase):
         # committed with a callback. The entitlement bit is set only by the
         # confirmed callback; no refund exists anywhere on this path.
         p = self.PURCHASE
-        reserve = p.index("record = PurchaseState::Submit(eraValue, token, reinterpret_cast<std::uintptr_t>(session));")
+        reserve = p.index("record = PurchaseState::Submit(eraValue, token, sessionKey);")
         debit = p.index("player->ModifyMoney(-static_cast<int32>(costCopper));")
         save = p.index("player->SaveToDB(trans, false, false);")
         commit = p.index("session->AddTransactionCallback(CharacterDatabase.AsyncCommitTransaction(trans)).AfterComplete(")

@@ -6,6 +6,7 @@
 // No AzerothCore, DB or server: this is a model, not a native/game test.
 #include "IndividualProgressionExpansionPolicy.h"
 #include "IndividualProgressionPaidPurchaseState.h"
+#include "IndividualProgressionSessionIdentity.h"
 #include "IndividualProgressionReceiptPolicy.h"
 
 #include <cstdint>
@@ -17,9 +18,11 @@
 namespace E = IndividualProgressionExpansionPolicy;
 namespace R = IndividualProgressionReceiptPolicy;
 namespace S = IndividualProgressionPaidPurchaseState;
+namespace SI = IndividualProgressionSessionIdentity;
 
 namespace
 {
+    constexpr S::SessionKey Key(std::uint64_t v) { return S::SessionKey{S::SessionKind::Incarnation, v}; }
     unsigned g_pass = 0;
     unsigned g_fail = 0;
 #define CHECK(expr)                                                         \
@@ -73,7 +76,7 @@ namespace
         bool tbcBit = false;
         bool wrathBit = false;
         S::Record record;
-        std::uintptr_t session = 1;
+        S::SessionKey session = Key(1);
         std::uint64_t nextToken = 0;
         std::vector<std::pair<std::uint64_t, Txn>> inflight; // purchase txns with callbacks
         std::int64_t debits = 0;
@@ -90,9 +93,9 @@ namespace
         }
 
         // OnPlayerSendInitialPacketsBeforeAddToMap at login: everything from the DB.
-        void Login(std::uintptr_t newSession)
+        void Login(std::uint64_t newSession)
         {
-            session = newSession;
+            session = Key(newSession);
             gold = db.gold;
             settings = db.row;
             rawStage = db.rawStage;
@@ -360,7 +363,7 @@ namespace
         {
             Character c = Human(7, 1000);
             c.Purchase(TBC, 400);
-            c.session = 77;
+            c.session = Key(77);
             c.Reload();
             CHECK(c.record.state == S::State::Unconfirmed);
             CHECK(c.View(TBC) == S::View::Unconfirmed && !c.tbcBit);
@@ -368,7 +371,7 @@ namespace
         }
         // Stale/duplicate tokens never change state.
         {
-            S::Record r = S::Submit(TBC, 5, 1);
+            S::Record r = S::Submit(TBC, 5, Key(1));
             CHECK(S::Complete(r, 4, true) == S::Completion::Ignored);
             CHECK(S::Complete(r, 0, true) == S::Completion::Ignored);
             CHECK(S::Complete(r, 5, true) == S::Completion::GrantAccess);
@@ -482,7 +485,7 @@ namespace
         S::Record none;
         CHECK(S::ViewFor(none, TBC, false) == S::View::None);
         CHECK(S::ViewFor(none, TBC, true) == S::View::Active);
-        S::Record p = S::Submit(TBC, 1, 1);
+        S::Record p = S::Submit(TBC, 1, Key(1));
         CHECK(S::ViewFor(p, TBC, false) == S::View::Pending);
         CHECK(S::ViewFor(p, WRATH, false) == S::View::None);
         CHECK(S::ViewFor(p, WRATH, true) == S::View::Active);
@@ -491,14 +494,58 @@ namespace
         p.state = S::State::Confirmed;
         CHECK(S::ViewFor(p, TBC, true) == S::View::Active);
         CHECK(S::MayStartPurchase(p) && S::ReloadMayReplaceCache(p));
-        CHECK(!S::CallbackLost(p, 2));
-        S::Record q = S::Submit(WRATH, 2, 3);
-        CHECK(S::CallbackLost(q, 4) && !S::CallbackLost(q, 3));
+        CHECK(!S::CallbackLost(p, Key(2)));
+        S::Record q = S::Submit(WRATH, 2, Key(3));
+        CHECK(S::CallbackLost(q, Key(4)) && !S::CallbackLost(q, Key(3)));
         CHECK(static_cast<int>(E::PurchaseResult::InsufficientFunds) == 8);   // v1 numbering kept
         CHECK(static_cast<int>(E::PurchaseResult::Submitted) == 9);
         CHECK(static_cast<int>(E::PurchaseResult::PurchasePending) == 10);
     }
 }
+
+    // CS01 6903447094: exact session identity for the commit callback.
+    struct CoreSession { std::uint64_t inc; std::uint64_t GetPB59SessionIncarnation() const noexcept { return inc; } };
+    struct PlainSession { int unused = 0; };
+
+    void TestSessionIdentity()
+    {
+        // Zero / None identity is invalid; a purchase may not start with it.
+        CHECK(!S::Valid(S::SessionKey{}) && !S::Valid(Key(0)) && S::Valid(Key(1)));
+        CHECK(!S::Valid(S::SessionKey{S::SessionKind::Address, 0}));
+        // Kinds never match each other, and invalid never matches anything.
+        CHECK(!S::SameSession(Key(5), S::SessionKey{S::SessionKind::Address, 5}));
+        CHECK(!S::SameSession(Key(0), Key(0)) && S::SameSession(Key(7), Key(7)));
+        // Paired Core: same ADDRESS, replacement incarnation -> the callback is lost.
+        CoreSession a{41};
+        S::SessionKey const ka = SI::KeyFor(&a);
+        CHECK(ka.kind == S::SessionKind::Incarnation && ka.value == 41);
+        S::Record r = S::Submit(TBC, 9, ka);
+        a.inc = 42;                      // the freed object's slot reused by a NEW session
+        CHECK(S::CallbackLost(r, SI::KeyFor(&a)));
+        // ... while a worldport keeps the same incarnation -> not lost.
+        a.inc = 41;
+        CHECK(!S::CallbackLost(r, SI::KeyFor(&a)));
+        // Exhausted incarnation (0) is invalid: no purchase can be submitted.
+        CoreSession z{0};
+        CHECK(!S::Valid(SI::KeyFor(&z)));
+        // A stale callback after the loss never grants.
+        r.state = S::State::Unconfirmed;
+        CHECK(S::Complete(r, 9, true) == S::Completion::Ignored);
+        // Standalone Core (no accessor): address fallback; the ABA case is NOT
+        // distinguishable (documented tradeoff: fail-closed Pending until logout).
+        PlainSession p;
+        S::SessionKey const kp = SI::KeyFor(&p);
+        CHECK(kp.kind == S::SessionKind::Address && kp.value != 0);
+        S::Record rp = S::Submit(TBC, 10, kp);
+        CHECK(!S::CallbackLost(rp, SI::KeyFor(&p)));
+        PlainSession other;
+        CHECK(S::CallbackLost(rp, SI::KeyFor(&other)));
+        // Mixed kinds (e.g. a record from before an upgrade) count as lost.
+        CHECK(S::CallbackLost(r.state == S::State::Pending ? r : S::Submit(TBC, 11, kp), ka));
+        // No session at all.
+        CHECK(!S::Valid(SI::KeyFor(static_cast<CoreSession const*>(nullptr))));
+        static_assert(SI::HasIncarnation<CoreSession>::value && !SI::HasIncarnation<PlainSession>::value);
+    }
 
 int main()
 {
@@ -514,6 +561,7 @@ int main()
     TestNegativesBotsAltbotsExcluded();
     TestNoAccountBypass();
     TestViews();
+    TestSessionIdentity();
     std::printf("PAID PURCHASE DURABILITY MODEL %u/%u passed\n", g_pass, g_pass + g_fail);
     return g_fail == 0 ? 0 : 1;
 }
