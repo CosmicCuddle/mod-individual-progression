@@ -43,6 +43,13 @@ private:
 public:
     IndividualPlayerProgression() : PlayerScript("IndividualProgression") { }
 
+#if defined(COSMIC_PB59_AUTOGEAR_PROGRESSION_API)
+    bool OnPlayerPB59AutoGearProgression(Player* player, uint8& raw, uint8& effective) override
+    {
+        return sIndividualProgression->TryReadPB59AutoGearProgression(player, raw, effective);
+    }
+#endif
+
     void OnPlayerLogin(Player* player) override
     {
         if (!player)
