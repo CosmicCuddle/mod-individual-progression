@@ -465,6 +465,7 @@ public:
 
     // progression is derived from rewarded hidden quests (IDs 66000 + progression)
     uint8 GetPlayerProgressionFromQuests(Player* player) const;
+    bool TryReadPB59AutoGearProgression(Player* player, uint8& raw, uint8& effective);
 
     bool hasPassedProgression(Player* player, ProgressionState state) const;
     static bool isBeforeProgression(Player* player, ProgressionState state) ;
