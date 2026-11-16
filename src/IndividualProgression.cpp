@@ -36,6 +36,35 @@ uint8 IndividualProgression::GetPlayerProgressionFromQuests(Player* player) cons
     return progressionLevel;
 }
 
+bool IndividualProgression::TryReadPB59AutoGearProgression(Player* player, uint8& raw, uint8& effective)
+{
+    raw = effective = 0;
+    // Called only from the live owner/world context. No DB-loading account
+    // matcher or account-wide progression fallback: an unknown cache entry
+    // is not proof of a normal human character.
+    if (!enabled || !player || !player->IsInWorld() || player->IsBeingTeleported() ||
+        player->GetLevel() > 60 || !player->GetSession() ||
+        player->GetSession()->GetPlayer() != player || player->GetSession()->IsHeadless() ||
+        player->GetSession()->IsLoggingOut() || player->GetSession()->PlayerLogout())
+        return false;
+    {
+        std::shared_lock<std::shared_mutex> lock(_accountMatchLock);
+        auto const itr = _accountMatchCache.find(player->GetSession()->GetAccountId());
+        if (itr == _accountMatchCache.end() || itr->second.excluded || itr->second.bot || itr->second.gm)
+            return false;
+    }
+    uint8 const stage = GetPlayerProgressionFromQuests(player);
+    // Only owner-approved Vanilla stages. Do not invent expansion caps.
+    if (stage > PROGRESSION_NAXX40 || (progressionLimit && stage > progressionLimit))
+        return false;
+    uint8 const access = GetEffectiveProgression(player);
+    if (access != stage)
+        return false;
+    raw = stage;
+    effective = access;
+    return true;
+}
+
 bool IndividualProgression::hasPassedProgression(Player* player, ProgressionState state) const
 {
     if (!enabled || !state || !player || !player->IsInWorld())
