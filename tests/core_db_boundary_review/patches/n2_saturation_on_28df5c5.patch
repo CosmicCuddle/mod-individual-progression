@@ -1,0 +1,70 @@
+diff --git a/src/server/game/Entities/Player/PB59CharacterSaveObserver.h b/src/server/game/Entities/Player/PB59CharacterSaveObserver.h
+index ff69d690..1b9a67bc 100644
+--- a/src/server/game/Entities/Player/PB59CharacterSaveObserver.h
++++ b/src/server/game/Entities/Player/PB59CharacterSaveObserver.h
+@@ -23,7 +23,10 @@ public:
+         std::lock_guard lock(_mutex);
+         if (_sequence == std::numeric_limits<std::uint64_t>::max())
+             return {Store::Admission::Exhausted, {}};
+-        return _store.Reserve({guid, player, session, ++_sequence});
++        auto reservation = _store.Reserve({guid, player, session, ++_sequence});
++        if (reservation.status == Store::Admission::Full && ReclaimCommitted())
++            reservation = _store.Reserve({guid, player, session, _sequence});
++        return reservation;
+     }
+ 
+     bool Seal(Ticket const& ticket, SaveEvidence const& evidence)
+@@ -86,6 +89,30 @@ public:
+     }
+ 
+ private:
++    // Bounded, non-blocking slot reclamation for saturation (caller holds _mutex).
++    // Only settled Committed/Empty records are released here; every other
++    // outcome stays for Drain() to report, so nothing needing a log is lost.
++    bool ReclaimCommitted()
++    {
++        bool freed = false;
++        for (std::size_t i = 0; i < Capacity; ++i)
++        {
++            auto record = _store.InspectSlot(i);
++            if (!record || record->state != Store::State::Pending)
++                continue;
++            auto& future = _futures[i];
++            if (!future.valid() || future.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
++                continue;
++            DatabaseTransactionResult result = DatabaseTransactionResult::FromExecutionCode(DatabaseTransactionResult::AmbiguousCode);
++            try { result = future.get(); }
++            catch (std::future_error const&) {}
++            _store.Complete(record->ticket, result);
++            if (result.IsCommitted() || result.status == DatabaseTransactionStatus::Empty)
++                freed = _store.Acknowledge(record->ticket) || freed;
++        }
++        return freed;
++    }
++
+     std::mutex _mutex;
+     Store _store;
+     std::array<std::future<DatabaseTransactionResult>, Capacity> _futures;
+diff --git a/src/server/game/Entities/Player/PlayerStorage.cpp b/src/server/game/Entities/Player/PlayerStorage.cpp
+index 4770f2f4..5121365b 100644
+--- a/src/server/game/Entities/Player/PlayerStorage.cpp
++++ b/src/server/game/Entities/Player/PlayerStorage.cpp
+@@ -7675,6 +7675,18 @@ void Player::SaveToDB(bool create, bool logout)
+             observer.Abandon(reservation.ticket);
+         }
+         LOG_ERROR("entities.player", "PB59 character save GUID {} diagnostic reservation/capture unavailable; continuing native save, possible missing evidence", GetGUID().GetRawValue());
++        if (!built)
++        {
++            // Saturation fallback: still capture bounded evidence (stack only, no
++            // buffer) and name IP progression markers in this unobserved save now.
++            PB59::SaveEvidence evidence;
++            SaveToDBWithEvidence(trans, create, logout, &evidence);
++            built = true;
++            for (std::size_t i = 0; i < evidence.questCount; ++i)
++                if (evidence.quests[i] >= 66001 && evidence.quests[i] <= 66018)
++                    LOG_ERROR("entities.player", "PB59 unobserved save GUID {} carries progression marker quest {}; outcome not tracked (verify manually; no automatic repair)",
++                        GetGUID().GetRawValue(), evidence.quests[i]);
++        }
+     }
+     if (!built)
+         SaveToDB(trans, create, logout);
