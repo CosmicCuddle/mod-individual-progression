@@ -1,0 +1,4 @@
+  legacy after Close: rows=0; typed after Close: NotEnqueued rows=0
+PASS legacy CommitTransaction after Close is silently not executed
+PASS typed after Close is reported NotEnqueued
+lateclose fails=0

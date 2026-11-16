@@ -1,0 +1,7 @@
+sealed=80000 reported=80000 nonCommitted=8000 full=0
+expectedNonCommitted=8000
+PASS race
+sealed=80000 reported=80000 nonCommitted=8000 full=0
+expectedNonCommitted=8000
+PASS race
+PASS: bounded capture, capacity, delayed/out-of-order completion, broken future, final drain, slot reuse

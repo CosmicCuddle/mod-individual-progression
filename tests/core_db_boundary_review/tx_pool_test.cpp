@@ -109,6 +109,17 @@ int main(int argc, char** argv) {
         expect(fs[0].get(), DatabaseTransactionStatus::Committed, "cancel: in-flight task");
         for (int i = 1; i < 6; ++i) expect(fs[i].get(), DatabaseTransactionStatus::CancelledBeforeExecution, "cancel: queued #" + std::to_string(i));
         check(sql1("SELECT COUNT(*) FROM txt WHERE k LIKE 'c-%'") == 1, "cancelled tasks wrote nothing");
+    } else if (mode == "lateclose") {
+        // N1: what does the legacy path do with a save submitted after Close()?
+        if (!openPool(db, info, 1)) { std::puts("cannot open/prepare"); return 2; }
+        db.Close();
+        db.CommitTransaction(tx({"INSERT INTO txt VALUES ('late-legacy', 1)"}));
+        auto r = db.AsyncCommitTransactionWithOutcome(tx({"INSERT INTO txt VALUES ('late-typed', 1)"})).get();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        long legacy = rows("late-legacy"), typed = rows("late-typed");
+        std::printf("  legacy after Close: rows=%ld; typed after Close: %s rows=%ld\n", legacy, name(r.status), typed);
+        check(legacy == 0, "legacy CommitTransaction after Close is silently not executed");
+        check(r.status == DatabaseTransactionStatus::NotEnqueued && typed == 0, "typed after Close is reported NotEnqueued");
     } else if (mode == "outage") {
         // argv[3]: refuse | dns | dead
         if (!openPool(db, info, 1)) { std::puts("cannot open/prepare"); return 2; }

@@ -46,3 +46,11 @@ It also adds and removes an `/etc/hosts` entry `txdbhost` to simulate a DNS fail
 - `logs/build_*_tail.log`: worldserver build outcomes for
   - Core `28110cd` + PB `07d0180` + IP `4a604378` + CS `f43bc2c`;
   - Core `10b0ec9a` + PB `3d0f5529` (same IP/CS).
+
+## Round 4 (N1 audit, N2 patch, more native builds)
+- `tx_pool_test.cpp lateclose`: after `CharacterDatabase.Close()`, the legacy `CommitTransaction` is **silently not executed**, while the typed path returns **NotEnqueued**.
+- `patches/n2_saturation_on_28df5c5.patch`, proposed for CS01:
+  - `CharacterSaveObserver::Reserve` reclaims settled Committed/Empty slots when `Full` (bounded O(Capacity), non-blocking). Every other outcome stays for `Drain` to report.
+  - On saturation, `SaveToDB` still builds bounded stack evidence and logs IP marker quests 66001–66018 immediately.
+  - It compiled inside the full worldserver build.
+- `observer_race_n2_test.cpp`: the stress test, with an assertion that every non-committed outcome is still reported.
