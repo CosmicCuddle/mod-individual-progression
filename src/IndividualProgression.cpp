@@ -137,7 +137,7 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
     if (!newState && newState != 0)
         return;
 
-    uint8 const previousState = GetPlayerProgressionFromQuests(player);
+    uint8 const previousState = sIndividualProgression->GetPlayerProgressionFromQuests(player);
 
     // Stage snapshot (#59): invalidate before any marker write or removal
     // (after the floor guard, whose refusal changes nothing).
@@ -165,7 +165,7 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
     }
 
     sIndividualProgression->GrantAttunements(player, newState);
-    NotifyCompanionStageChange(player, previousState, GetPlayerProgressionFromQuests(player));
+    NotifyCompanionStageChange(player, previousState, sIndividualProgression->GetPlayerProgressionFromQuests(player));
 }
 
 void IndividualProgression::CheckAdjustments(Player* player) const
