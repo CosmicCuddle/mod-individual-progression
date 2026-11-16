@@ -3,6 +3,9 @@
 */
 
 #include "IndividualProgression.h"
+#include "IndividualProgressionCompanionPush.h"
+#include "Chat.h"
+#include "WorldPacket.h"
 #include "IndividualProgressionGroupPolicy.h"
 #include "IndividualProgressionF14LoginPolicy.h"
 #include "IndividualProgressionF14StageFloorPolicy.h"
@@ -57,6 +60,26 @@ bool IndividualProgression::isBeforeProgression(Player* player, ProgressionState
     return sIndividualProgression->GetEffectiveProgression(player) < state;
 }
 
+namespace
+{
+    // Display notification only. Never changes progression, retries, or
+    // depends on an addon being installed.
+    void NotifyCompanionStageChange(Player* player, uint8 before, uint8 after)
+    {
+        WorldSession* session = player && player->IsInWorld() ? player->GetSession() : nullptr;
+        if (!session || session->GetPlayer() != player || session->IsHeadless() || session->PlayerLogout())
+            return;
+
+        auto const payload = IndividualProgressionCompanionPush::Payload(before, after);
+        if (!payload)
+            return;
+
+        WorldPacket packet;
+        ChatHandler::BuildChatPacket(packet, CHAT_MSG_WHISPER, LANG_ADDON, player, player, *payload);
+        session->SendPacket(&packet);
+    }
+}
+
 void IndividualProgression::UpdateProgressionState(Player* player, ProgressionState newState) const
 {
     if (!enabled || !newState || !player || !player->IsInWorld())
@@ -87,6 +110,7 @@ void IndividualProgression::UpdateProgressionState(Player* player, ProgressionSt
             player->CompleteQuest(PROGRESSION_QUEST);
             player->RewardQuest(quest, 0, player, false, false);
         }
+        NotifyCompanionStageChange(player, currentState, GetPlayerProgressionFromQuests(player));
     }
 }
 
@@ -112,6 +136,8 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
 
     if (!newState && newState != 0)
         return;
+
+    uint8 const previousState = GetPlayerProgressionFromQuests(player);
 
     // Stage snapshot (#59): invalidate before any marker write or removal
     // (after the floor guard, whose refusal changes nothing).
@@ -139,6 +165,7 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
     }
 
     sIndividualProgression->GrantAttunements(player, newState);
+    NotifyCompanionStageChange(player, previousState, GetPlayerProgressionFromQuests(player));
 }
 
 void IndividualProgression::CheckAdjustments(Player* player) const
