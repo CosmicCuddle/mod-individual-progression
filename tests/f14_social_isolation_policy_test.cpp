@@ -1081,18 +1081,23 @@ namespace
     void TestPendingReplies()
     {
         P::PendingReplies<3> pending;
-        CHECK(!pending.Push(0, 5) && !pending.Push(5, 0));   // no GUID: ignored
-        CHECK(pending.Push(1, 10) && pending.Push(2, 20) && pending.Push(3, 30));
-        CHECK(!pending.Push(4, 40));                          // full: dropped
+        CHECK(!pending.Push(1, 10, 0)); // missing login identity is never queued
+        CHECK(!pending.Push(0, 5, 99) && !pending.Push(5, 0, 99));   // no GUID: ignored
+        CHECK(pending.Push(1, 10, 99) && pending.Push(2, 20, 99) && pending.Push(3, 30, 99));
+        CHECK(!pending.Push(4, 40, 99));                          // full: dropped
         CHECK(pending.Size() == 3 && pending.Dropped() == 1);
         std::vector<std::uint64_t> order;
-        pending.Drain([&](std::uint64_t h, std::uint64_t b) { order.push_back(h * 100 + b); });
+        pending.Drain([&](std::uint64_t h, std::uint64_t b, std::uint64_t epoch)
+        {
+            CHECK(epoch == 99);
+            order.push_back(h * 100 + b);
+        });
         CHECK((order == std::vector<std::uint64_t>{110, 220, 330}));   // oldest first, once each
         CHECK(pending.Size() == 0);
         unsigned again = 0;
-        pending.Drain([&](std::uint64_t, std::uint64_t) { ++again; });
+        pending.Drain([&](std::uint64_t, std::uint64_t, std::uint64_t) { ++again; });
         CHECK(again == 0);                                    // nothing is sent twice
-        CHECK(pending.Push(4, 40) && pending.Size() == 1);    // usable again after a drain
+        CHECK(pending.Push(4, 40, 99) && pending.Size() == 1);    // usable again after a drain
 
         // One reply per cooldown window survives deferral: the limiter is
         // consulted before queueing, so a burst queues at most one.
@@ -1100,7 +1105,7 @@ namespace
         P::PendingReplies<16> queue;
         for (int attempt = 0; attempt < 10; ++attempt)
             if (limiter.MayReply(7, 70, 1000, 60))
-                queue.Push(7, 70);
+                queue.Push(7, 70, 99);
         CHECK(queue.Size() == 1);
     }
 }

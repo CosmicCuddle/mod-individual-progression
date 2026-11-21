@@ -143,6 +143,10 @@ namespace
     // Build and send one reply. World thread only.
     void SendReplyPacket(Player const* bot, Player* human)
     {
+        // A queued decision may have become obsolete after progression,
+        // logout, reclassification or a config reload. Recheck at the sink.
+        if (!Policy::IsRestrictedPair(OptionOn(), ReadHuman(human), ReadBot(bot)))
+            return;
         // One line, bounded length; empty means decline silently.
         std::string const text = Policy::NormalizeReply(sIndividualProgression->GetF14SocialIsolationReply());
         if (text.empty())
@@ -159,10 +163,15 @@ namespace
         Policy::PendingReplies<256> due;
         {
             std::lock_guard<std::mutex> lock(PendingRepliesLock());
-            PendingReplies().Drain([&due](uint64 human, uint64 bot) { due.Push(human, bot); });
+            PendingReplies().Drain([&due](uint64 human, uint64 bot, uint64 botEpoch)
+            {
+                due.Push(human, bot, botEpoch);
+            });
         }
-        due.Drain([](uint64 humanGuid, uint64 botGuid)
+        due.Drain([](uint64 humanGuid, uint64 botGuid, uint64 botEpoch)
         {
+            if (!botEpoch || botEpoch != sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(ObjectGuid(botGuid)))
+                return;
             Player* human = ObjectAccessor::FindPlayer(ObjectGuid(humanGuid));
             Player const* bot = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
             if (human && bot && human->GetSession())
@@ -173,6 +182,9 @@ namespace
     void SendInCharacterReply(Player const* bot, Player* human)
     {
         if (!bot || !human || !human->GetSession())
+            return;
+        uint64 const botEpoch = sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(bot->GetGUID());
+        if (!botEpoch)
             return;
         bool mayReply = false;
         {
@@ -189,7 +201,7 @@ namespace
         if (!WorldThread().IsCurrent())
         {
             std::lock_guard<std::mutex> lock(PendingRepliesLock());
-            PendingReplies().Push(human->GetGUID().GetRawValue(), bot->GetGUID().GetRawValue());
+            PendingReplies().Push(human->GetGUID().GetRawValue(), bot->GetGUID().GetRawValue(), botEpoch);
             return;
         }
         SendReplyPacket(bot, human);

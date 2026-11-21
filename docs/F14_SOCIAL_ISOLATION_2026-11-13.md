@@ -227,3 +227,12 @@ This social feature is unaffected: it never restricts Altbots.
 Source and model proof, plus a local header syntax check. No Worldserver link, gameplay or client test has been done.
 
 **Rollback:** keep the option `0` (the default), or close the DRAFT. No host, DB, config or client was changed.
+
+
+### Deferred social-reply hardening — 21 November 2026
+
+Queued replies now carry the verified RandomBot login epoch. The world-thread drain rejects a missing or changed epoch before resolving players. Both immediate and deferred packet sends recheck the current option, human progression/session facts and verified bot policy. Disabling the feature, reaching TBC, losing verification, leaving the world or changing GM/session facts suppresses an obsolete refusal. The bounded queue and existing cooldown remain in place; no Player pointer is retained.
+
+This is a focused source increment from PR182 `23359b2f27a14ad91b38f80eabe14ad5ed25c49e`, not completion of F14. Human-session incarnation tracking is still unresolved: GUID re-resolution plus current-policy checking does not prove the same human login. Pending reply generation after human logout needs separate coverage before claiming full stale-callback safety. Guild off-thread admission and LANG_ADDON policy remain unchanged. No visual-concealment changes.
+
+Executed with local Python 3.12.4: social source contracts 32/32; group-floor source contracts 6/6; guild hook patch tests 3/3. C++ queue tests updated for required nonzero epoch and epoch preservation, but GCC/Clang, native Worldserver, sanitizers and gameplay NOT RUN (no local compiler found). Tests are source/patch evidence only. No live config, DB, migration or deployment. Rollback: revert this increment; original draft branches remain unchanged. Runtime option remains OFF by default.

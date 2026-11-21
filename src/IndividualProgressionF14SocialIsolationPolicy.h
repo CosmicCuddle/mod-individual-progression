@@ -214,19 +214,19 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         static_assert(Capacity > 0, "pending replies need capacity");
 
     public:
-        bool Push(std::uint64_t human, std::uint64_t bot)
+        bool Push(std::uint64_t human, std::uint64_t bot, std::uint64_t botEpoch)
         {
-            if (!human || !bot || _size == Capacity)
+            if (!human || !bot || !botEpoch || _size == Capacity)
             {
                 if (_size == Capacity)
                     ++_dropped;
                 return false;
             }
-            _items[_size++] = Item{human, bot};
+            _items[_size++] = Item{human, bot, botEpoch};
             return true;
         }
 
-        // Hands every waiting reply to `send(human, bot)` once, oldest
+        // Hands every waiting reply to `send(human, bot, botEpoch)` once, oldest
         // first, and empties the queue.
         template<typename Send>
         void Drain(Send send)
@@ -234,7 +234,7 @@ namespace IndividualProgressionF14SocialIsolationPolicy
             std::size_t const count = _size;
             _size = 0;
             for (std::size_t i = 0; i < count; ++i)
-                send(_items[i].human, _items[i].bot);
+                send(_items[i].human, _items[i].bot, _items[i].botEpoch);
         }
 
         std::size_t Size() const { return _size; }
@@ -245,6 +245,7 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         {
             std::uint64_t human = 0;
             std::uint64_t bot = 0;
+            std::uint64_t botEpoch = 0;
         };
         std::array<Item, Capacity> _items{};
         std::size_t _size = 0;

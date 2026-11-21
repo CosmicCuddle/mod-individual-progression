@@ -507,7 +507,7 @@ class HooksAndAuthority(unittest.TestCase):
         # queued, and packets are sent only from the world thread.
         self.assertLess(reply.index("MayReply("), reply.index("if (!WorldThread().IsCurrent())"))
         off = reply.split("if (!WorldThread().IsCurrent())", 1)[1].split("return;", 1)[0]
-        self.assertIn("PendingReplies().Push(human->GetGUID().GetRawValue(), bot->GetGUID().GetRawValue());", off)
+        self.assertIn("PendingReplies().Push(human->GetGUID().GetRawValue(), bot->GetGUID().GetRawValue(), botEpoch);", off)
         self.assertNotIn("SendDirectMessage", reply)
         self.assertEqual(self.src.count("SendDirectMessage("), 1)
         self.assertEqual(self.src.count("SendReplyPacket("), 3)  # definition, direct world-thread send, drain
@@ -516,6 +516,16 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertIn("ObjectAccessor::FindPlayer(ObjectGuid(botGuid))", drain)
         self.assertIn("constexpr std::size_t MaxReplyBytes = 512;", read(POLICY))
         self.assertIn("std::lock_guard<std::mutex> lock(ReplyLock());", reply)
+
+    def test_deferred_reply_revalidates_identity_and_eligibility(self):
+        drain = self.src.split("void SendPendingReplies()", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("!botEpoch || botEpoch != sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(ObjectGuid(botGuid))", drain)
+        self.assertLess(drain.index("GetF14VerifiedRandomBotLoginEpoch"), drain.index("ObjectAccessor::FindPlayer"))
+        packet = self.src.split("void SendReplyPacket(Player const* bot, Player* human)", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("Policy::IsRestrictedPair(OptionOn(), ReadHuman(human), ReadBot(bot))", packet)
+        self.assertLess(packet.index("IsRestrictedPair"), packet.index("BuildChatPacket"))
+        reply = self.src.split("void SendInCharacterReply(", 1)[1].split("\n    }\n", 1)[0]
+        self.assertLess(reply.index("if (!botEpoch)"), reply.index("MayReply("))
 
     def test_stage_mirror_matches_ip(self):
         mirror = self.src.split("uint8 ReadRawStage(Player const* player)", 1)[1].split("\n    }\n", 1)[0]
