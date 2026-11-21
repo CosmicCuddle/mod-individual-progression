@@ -118,6 +118,9 @@ namespace
     public:
         GroupViewSessions() : PlayerScript("IndividualProgression_F14GroupViewSessions",
             {PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_LOGOUT, PLAYERHOOK_ON_BEFORE_UPDATE
+#if defined(COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION) && COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION >= 1
+             , PLAYERHOOK_ON_BEFORE_REWARDED_QUEST_CHANGE, PLAYERHOOK_ON_AFTER_REWARDED_QUEST_CHANGE
+#endif
 #if defined(COSMIC_F14_SESSION_REBIND_EXPERIMENT) && COSMIC_F14_SESSION_REBIND_EXPERIMENT >= 1
              , PLAYERHOOK_ON_F14_SESSION_REBOUND
 #endif
@@ -128,6 +131,17 @@ namespace
 
         void OnPlayerLogin(Player* player) override { Changed(player); }
         void OnPlayerLogout(Player* player) override { Changed(player); }
+#if defined(COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION) && COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION >= 1
+        void OnPlayerBeforeRewardedQuestChange(Player* player, uint32 questId) override
+        {
+            Mutation(player, questId, true);
+        }
+
+        void OnPlayerAfterRewardedQuestChange(Player* player, uint32 questId) override
+        {
+            Mutation(player, questId, false);
+        }
+#endif
         void OnPlayerBeforeUpdate(Player* player, uint32 /*diff*/) override
         {
             if (!OptionOn() || !player || !player->IsInWorld() || !player->GetSession() ||
@@ -153,6 +167,24 @@ namespace
         void OnF14PlayerSessionDisconnected(Player* player) override { Changed(player); }
 #endif
     private:
+#if defined(COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION) && COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION >= 1
+        static void Mutation(Player* player, uint32 questId, bool before)
+        {
+            if (!player || questId < 66000 || questId > 66000 + IndividualProgressionGroupPolicy::LastSupportedStage)
+                return;
+            // Count both halves even if the option changes mid-pair. A global
+            // fence is conservative and avoids retaining Player/group leases.
+            uint64 groupGuid = 0;
+            if (OptionOn())
+                if (Group* group = player->GetGroup())
+                    groupGuid = group->GetGUID().GetRawValue();
+            std::lock_guard<std::mutex> lock(ViewLock);
+            if (before)
+                GroupViews.BeginMutation(groupGuid);
+            else
+                GroupViews.EndMutation(groupGuid);
+        }
+#endif
         static void Changed(Player* player)
         {
             if (player)
@@ -193,11 +225,15 @@ bool IndividualProgression::TryGetF14TemporaryGroupProgression(Player* player, u
         GroupViews.EnsureRequested(groupGuid);
         found = GroupViews.Read(groupGuid, group->GetLeaderGUID().GetRawValue(), stage);
     }
-    // Direct rewarded-quest edits outside IP are detected at the leader's
-    // next update, not atomically. Until a Core mutation hook closes that
-    // window, cached leader facts must not grant an unearned Wrath era.
+    bool canBorrowWrath = false;
+#if defined(COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION) && COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION >= 1
+    // Paid receipt changes have a separate lifecycle; this increment supports
+    // the owner's Paid-OFF configuration only for unearned Wrath borrowing.
+    canBorrowWrath = !IsPaidExpansionActive();
+#endif
+    // Older Core has no paired mutation fence; keep its compatibility limit.
     if (found && stage >= IndividualProgressionGroupPolicy::FirstWrathStage &&
-        earned < IndividualProgressionGroupPolicy::FirstWrathStage)
+        earned < IndividualProgressionGroupPolicy::FirstWrathStage && !canBorrowWrath)
         stage = IndividualProgressionGroupPolicy::FirstTbcStage;
     effective = found ? View::EffectiveStage(player->getRace(), earned, stage, progressionLimit)
                       : View::UnavailableStage(earned);

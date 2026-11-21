@@ -53,6 +53,39 @@ int main()
     exhausted.Request(1);
     CHECK(exhausted.TakeWork().empty()); // reset never reuses an exhausted revision
 
+    View::Snapshots<2> mutations;
+    mutations.Request(1);
+    auto publishDuringEdit = mutations.TakeWork().front();
+    mutations.BeginMutation(0);
+    CHECK(!mutations.Publish(publishDuringEdit, 10, 15));
+    CHECK(!mutations.Read(1, 10, stage));
+    mutations.EndMutation(0);
+    auto retry = mutations.TakeWork();
+    CHECK(retry.size() == 1); // busy publication is retried, not silently lost
+    CHECK(mutations.Publish(retry.front(), 10, 15));
+    CHECK(mutations.Read(1, 10, stage) && stage == 15);
+    mutations.BeginMutation(1);
+    mutations.BeginMutation(2);
+    CHECK(!mutations.Read(1, 10, stage));
+    mutations.EndMutation(1);
+    CHECK(!mutations.Read(1, 10, stage)); // inner end cannot release outer edit
+    mutations.Clear(); // config reload cannot erase the active outer pair
+    mutations.Request(1);
+    auto duringReload = mutations.TakeWork().front();
+    CHECK(!mutations.Publish(duringReload, 10, 18));
+    mutations.EndMutation(2);
+    retry = mutations.TakeWork();
+    bool publishedAfterEnd = false;
+    for (auto const& item : retry)
+        if (item.first == 1)
+            publishedAfterEnd = mutations.Publish(item, 10, 8);
+    CHECK(publishedAfterEnd && mutations.Read(1, 10, stage) && stage == 8);
+    mutations.EndMutation(1); // unbalanced event must fail closed
+    CHECK(!mutations.Read(1, 10, stage));
+    mutations.Clear();
+    mutations.Request(1);
+    CHECK(mutations.TakeWork().empty()); // reload cannot hide lost-pair corruption
+
     for (std::uint8_t race : {std::uint8_t{10}, std::uint8_t{11}})
         for (std::uint8_t earned = 0; earned <= 18; ++earned)
             for (std::uint8_t leader = 0; leader <= 18; ++leader)

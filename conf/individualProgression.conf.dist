@@ -101,9 +101,9 @@ IndividualProgression.F14.ExperimentalAttackLifecycleRegistry = 0
 #        RandomBots use a temporary group-stage view instead of rewriting
 #        earned progression quests in the two IP group-sync paths.
 #        Vanilla/TBC leaders give at least TBC stage 8; Wrath leaders give
-#        their current stage for bots already earned into Wrath, subject to
-#        the existing cap. Borrowing UNEARNED Wrath remains blocked pending
-#        an atomic Core progression-quest mutation hook.
+#        their current stage, subject to the existing cap. Borrowing an
+#        UNEARNED Wrath stage requires Core rewarded-quest change API v1,
+#        both session hooks and Paid OFF; older builds retain the fence.
 #        Leaving exposes the exact earned stage. Existing admission rules and
 #        normal-race/Altbot/human behavior are unchanged. Login keeps an
 #        already-earned stage at least as high as the normal level write;

@@ -27,7 +27,7 @@ namespace IndividualProgressionF14GroupSyncView
 
         void Request(std::uint64_t group)
         {
-            if (!group || _failed)
+            if (!group || _failed || _mutationPoisoned)
                 return;
             if ((_groups.count(group) == 0 && _groups.size() == Capacity) ||
                 _revision == std::numeric_limits<std::uint64_t>::max())
@@ -60,9 +60,14 @@ namespace IndividualProgressionF14GroupSyncView
         bool Publish(Work const& work, std::uint64_t leader, std::uint8_t stage)
         {
             auto it = _groups.find(work.first);
-            if (_failed || !leader || stage > Floor::GroupPolicy::LastSupportedStage ||
+            if (_failed || _mutationPoisoned || !leader || stage > Floor::GroupPolicy::LastSupportedStage ||
                 it == _groups.end() || it->second.revision != work.second)
                 return false;
+            if (_activeMutations)
+            {
+                _pending.insert(work.first);
+                return false;
+            }
             it->second.leader = leader;
             it->second.stage = stage;
             it->second.valid = true;
@@ -72,7 +77,8 @@ namespace IndividualProgressionF14GroupSyncView
         bool Read(std::uint64_t group, std::uint64_t leader, std::uint8_t& stage) const
         {
             auto const it = _groups.find(group);
-            if (_failed || !leader || it == _groups.end() || !it->second.valid || it->second.leader != leader)
+            if (_failed || _mutationPoisoned || _activeMutations || !leader ||
+                it == _groups.end() || !it->second.valid || it->second.leader != leader)
                 return false;
             stage = it->second.stage;
             return true;
@@ -91,9 +97,39 @@ namespace IndividualProgressionF14GroupSyncView
             _failed = false;
             // Keep revision monotonic: work captured before a reset must not
             // accidentally match a newly requested group.
+            // Active mutation pairs and poison survive reload: clearing them
+            // could publish an intermediate stage or hide an unbalanced pair.
+        }
+
+        void BeginMutation(std::uint64_t group)
+        {
+            if (_activeMutations == std::numeric_limits<std::uint64_t>::max())
+            {
+                PoisonMutations();
+                return;
+            }
+            ++_activeMutations;
+            Request(group);
+        }
+
+        void EndMutation(std::uint64_t group)
+        {
+            if (!_activeMutations)
+            {
+                PoisonMutations();
+                return;
+            }
+            --_activeMutations;
+            Request(group);
         }
 
     private:
+        void PoisonMutations()
+        {
+            _mutationPoisoned = true;
+            _groups.clear();
+            _pending.clear();
+        }
         struct Snapshot
         {
             std::uint64_t revision;
@@ -105,6 +141,8 @@ namespace IndividualProgressionF14GroupSyncView
         std::set<std::uint64_t> _pending;
         std::uint64_t _revision;
         bool _failed = false;
+        std::uint64_t _activeMutations = 0;
+        bool _mutationPoisoned = false;
     };
 
     // Caller must already prove current racial RandomBot identity and group
