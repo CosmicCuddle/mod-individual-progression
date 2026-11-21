@@ -157,6 +157,9 @@ bool IndividualProgression::MustHoldPaidTbcQuestReward(Player* player)
 uint8 IndividualProgression::GetEffectiveProgression(Player* player)
 {
     uint8 const raw = GetPlayerProgressionFromQuests(player);
+    uint8 grouped = raw;
+    if (TryGetF14TemporaryGroupProgression(player, raw, grouped))
+        return grouped;
     // Fast path: OFF, or below the only stage the feature can cap.
     if (raw < WrathAccessStage || !IsPaidExpansionActive())
         return raw;

@@ -19,7 +19,9 @@ SCRIPT = "src/IndividualProgressionF14SocialIsolationScript.cpp"
 KEY = "IndividualProgression.F14.RandomBotSocialIsolation"
 SCOPE = {
     POLICY, SCRIPT,
+    "tests/test_ip_f14_verified_rndbot_tbc_floor.py",
     "src/IndividualProgression.h", "src/IndividualProgression.cpp", "src/IndividualProgressionPlayer.cpp",
+    "src/IndividualProgressionExpansion.cpp",
     "conf/individualProgression.conf.dist",
     "tests/f14_social_isolation_policy_test.cpp", "tests/test_f14_social_isolation_source.py",
     ".github/workflows/f14-social-isolation.yml",
@@ -655,16 +657,35 @@ class GroupFloorPopulation(unittest.TestCase):
 
 
 class ExactInsertions(unittest.TestCase):
-    def test_player_cpp_one_or_reason(self):
+    def test_player_cpp_reviewed_social_and_temporary_group_insertions(self):
         plus, minus = added_lines("src/IndividualProgressionPlayer.cpp")
-        # Inserted before the pinned last reason so the #80 gate pin holds.
-        self.assertEqual(minus, [])
-        self.assertEqual(plus, ["             sIndividualProgression->f14RandomBotSocialIsolation ||"])
+        self.assertEqual(minus, ["            if (!preserveVerifiedRandomBotStage && !appliedVerifiedRandomBotTbcFloor)"])
+        self.assertEqual(plus, [
+            "             sIndividualProgression->f14RandomBotSocialIsolation ||",
+            "            bool const preserveF14GroupEarnedStage =",
+            "                sIndividualProgression->UsesF14TemporaryGroupProgression(player) &&",
+            "                sIndividualProgression->GetPlayerProgressionFromQuests(player) >=",
+            "                    IndividualProgressionGroupPolicy::FirstTbcStage &&",
+            "                sIndividualProgression->GetPlayerProgressionFromQuests(player) >=",
+            "                    IndividualProgressionF14LoginPolicy::LevelStage(player->GetLevel());",
+            "            if (!preserveVerifiedRandomBotStage && !appliedVerifiedRandomBotTbcFloor && !preserveF14GroupEarnedStage)",
+            "        if (sIndividualProgression->UsesF14TemporaryGroupProgression(player))",
+            "            return true; // admission is unchanged; OnAddMember refreshes the view",
+        ])
+
+    def test_expansion_reader_only_adds_temporary_view(self):
+        addition = ("    uint8 grouped = raw;\n"
+                    "    if (TryGetF14TemporaryGroupProgression(player, raw, grouped))\n"
+                    "        return grouped;\n")
+        cur = read("src/IndividualProgressionExpansion.cpp")
+        self.assertEqual(cur.count(addition), 1)
+        self.assertEqual(cur.replace(addition, ""), parent("src/IndividualProgressionExpansion.cpp"))
 
     def test_core_and_header_additions_only(self):
         for name in ("src/IndividualProgression.cpp", "src/IndividualProgression.h"):
             plus, minus = added_lines(name)
-            self.assertEqual(minus, [], name)
+            expected = ["    bool dropAllRanks = !VanillaPvpTitlesKeepPostVanilla && hasPassedProgression(player, PROGRESSION_PRE_TBC);"] if name.endswith(".cpp") else []
+            self.assertEqual(minus, expected, name)
             joined = "\n".join(plus)
             for token in ("ForceUpdateProgressionState", "RewardQuest", "enforceGroupRules ="):
                 self.assertNotIn(token, joined, name)

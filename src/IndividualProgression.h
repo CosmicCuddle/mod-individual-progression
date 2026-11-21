@@ -481,6 +481,9 @@ public:
     bool isLockedExpansionGear(Player* player, ItemTemplate const* proto);
     void LoadAccountRegexes();
     void SyncBotsProgressionToLeader(Group* group);
+    bool UsesF14TemporaryGroupProgression(Player const* player);
+    bool TryGetF14TemporaryGroupProgression(Player* player, uint8 earned, uint8& effective);
+    void RequestF14GroupSyncView(Group* group);
     // F14: verified GUID is recorded only on the login thread; group workers never call Playerbots.
     // Compile-only F14 current-login identity publication for a future
     // Core6 player/WHO reader. It is not a suppression, paid or stage grant.
