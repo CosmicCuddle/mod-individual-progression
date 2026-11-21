@@ -1078,26 +1078,73 @@ namespace
 {
     // Replies decided off the world thread wait in a bounded queue and are
     // sent once from the world update; full means dropped, never unbounded.
+    void TestReplySessionEpochs()
+    {
+        P::ReplySessionEpochIssuer issuer;
+        auto const oldLogin = issuer.Issue();
+        CHECK(oldLogin != 0);
+        CHECK(P::ReplyEpochsMatch(oldLogin, oldLogin));
+        CHECK(!P::ReplyEpochsMatch(oldLogin, 0)); // disconnected/logged out
+        auto const relog = issuer.Issue();
+        CHECK(!P::ReplyEpochsMatch(oldLogin, relog));
+        CHECK(!P::ReplyEpochsMatch(0, relog));
+        CHECK(!P::ReplyEpochsMatch(0, 0));
+        CHECK(P::ReplyEpochsMatch(relog, relog));
+        P::ReplySessionEpochIssuer exhausted(std::numeric_limits<std::uint64_t>::max() - 1);
+        CHECK(exhausted.Issue() == std::numeric_limits<std::uint64_t>::max());
+        CHECK(exhausted.Issue() == 0);
+        CHECK(exhausted.Issue() == 0); // never wraps to a previously issued login
+
+        P::ReplySessionEpochIssuer concurrent;
+        std::array<std::array<std::uint64_t, 1000>, 4> issued{};
+        std::vector<std::thread> workers;
+        for (std::size_t worker = 0; worker < issued.size(); ++worker)
+            workers.emplace_back([&, worker]()
+            {
+                for (auto& epoch : issued[worker])
+                    epoch = concurrent.Issue();
+            });
+        for (auto& worker : workers)
+            worker.join();
+        std::vector<std::uint64_t> all;
+        for (auto const& worker : issued)
+            all.insert(all.end(), worker.begin(), worker.end());
+        std::sort(all.begin(), all.end());
+        CHECK(all.front() == 1 && all.back() == 4000);
+        CHECK(std::adjacent_find(all.begin(), all.end()) == all.end());
+
+        P::PendingReplies<2> pending;
+        CHECK(pending.Push(7, 70, 99, oldLogin));
+        unsigned delivered = 0;
+        pending.Drain([&](std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t captured)
+        {
+            if (P::ReplyEpochsMatch(captured, relog))
+                ++delivered;
+        });
+        CHECK(delivered == 0); // same GUID with a new login cannot receive old work
+    }
+
     void TestPendingReplies()
     {
         P::PendingReplies<3> pending;
-        CHECK(!pending.Push(1, 10, 0)); // missing login identity is never queued
-        CHECK(!pending.Push(0, 5, 99) && !pending.Push(5, 0, 99));   // no GUID: ignored
-        CHECK(pending.Push(1, 10, 99) && pending.Push(2, 20, 99) && pending.Push(3, 30, 99));
-        CHECK(!pending.Push(4, 40, 99));                          // full: dropped
+        CHECK(!pending.Push(1, 10, 99, 0)); // recipient identity is required too
+        CHECK(!pending.Push(1, 10, 0, 101)); // missing login identity is never queued
+        CHECK(!pending.Push(0, 5, 99, 101) && !pending.Push(5, 0, 99, 101));   // no GUID: ignored
+        CHECK(pending.Push(1, 10, 99, 101) && pending.Push(2, 20, 99, 101) && pending.Push(3, 30, 99, 101));
+        CHECK(!pending.Push(4, 40, 99, 101));                          // full: dropped
         CHECK(pending.Size() == 3 && pending.Dropped() == 1);
         std::vector<std::uint64_t> order;
-        pending.Drain([&](std::uint64_t h, std::uint64_t b, std::uint64_t epoch)
+        pending.Drain([&](std::uint64_t h, std::uint64_t b, std::uint64_t epoch, std::uint64_t humanEpoch)
         {
-            CHECK(epoch == 99);
+            CHECK(epoch == 99 && humanEpoch == 101);
             order.push_back(h * 100 + b);
         });
         CHECK((order == std::vector<std::uint64_t>{110, 220, 330}));   // oldest first, once each
         CHECK(pending.Size() == 0);
         unsigned again = 0;
-        pending.Drain([&](std::uint64_t, std::uint64_t, std::uint64_t) { ++again; });
+        pending.Drain([&](std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t) { ++again; });
         CHECK(again == 0);                                    // nothing is sent twice
-        CHECK(pending.Push(4, 40, 99) && pending.Size() == 1);    // usable again after a drain
+        CHECK(pending.Push(4, 40, 99, 101) && pending.Size() == 1);    // usable again after a drain
 
         // One reply per cooldown window survives deferral: the limiter is
         // consulted before queueing, so a burst queues at most one.
@@ -1105,7 +1152,7 @@ namespace
         P::PendingReplies<16> queue;
         for (int attempt = 0; attempt < 10; ++attempt)
             if (limiter.MayReply(7, 70, 1000, 60))
-                queue.Push(7, 70, 99);
+                queue.Push(7, 70, 99, 101);
         CHECK(queue.Size() == 1);
     }
 }
@@ -1439,6 +1486,7 @@ int main()
     TestBattlegroundMatcher();
     TestDuelAndMail();
     TestOfflineMail();
+    TestReplySessionEpochs();
     TestPendingReplies();
     TestRoleCheckMemberRefresh();
     TestCharacterCreateDeleteCleanup();
