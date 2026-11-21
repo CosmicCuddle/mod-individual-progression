@@ -24,6 +24,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <set>
 #include <string>
 #include <utility>
@@ -204,29 +205,52 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         return onWorldThread || (ownedScopeValid && firstInOwnedMap && secondInOwnedMap);
     }
 
-    // Replies decided off the world thread (for example a duel request,
-    // processed in the caster's map update) are not sent there: they wait
-    // here and the world-thread update sends them. Bounded: when full, the
-    // reply is dropped (the interaction stays blocked either way).
+    // Independent of paused visibility state. Never wrap/reuse a token:
+    // exhaustion disables feedback rather than addressing another login.
+    class ReplySessionEpochIssuer
+    {
+    public:
+        explicit ReplySessionEpochIssuer(std::uint64_t initial = 0) : _last(initial) { }
+
+        std::uint64_t Issue()
+        {
+            std::uint64_t last = _last.load(std::memory_order_relaxed);
+            while (last != std::numeric_limits<std::uint64_t>::max())
+                if (_last.compare_exchange_weak(last, last + 1, std::memory_order_relaxed))
+                    return last + 1;
+            return 0;
+        }
+
+    private:
+        std::atomic<std::uint64_t> _last;
+    };
+
+    constexpr bool ReplyEpochsMatch(std::uint64_t captured, std::uint64_t current)
+    {
+        return captured != 0 && captured == current;
+    }
+
+    // Replies decided off the world thread wait for the world update.
+    // When full, drop feedback; the interaction stays blocked either way.
     template<std::size_t Capacity>
     class PendingReplies
     {
         static_assert(Capacity > 0, "pending replies need capacity");
 
     public:
-        bool Push(std::uint64_t human, std::uint64_t bot)
+        bool Push(std::uint64_t human, std::uint64_t bot, std::uint64_t botEpoch, std::uint64_t humanEpoch)
         {
-            if (!human || !bot || _size == Capacity)
+            if (!human || !bot || !botEpoch || !humanEpoch || _size == Capacity)
             {
                 if (_size == Capacity)
                     ++_dropped;
                 return false;
             }
-            _items[_size++] = Item{human, bot};
+            _items[_size++] = Item{human, bot, botEpoch, humanEpoch};
             return true;
         }
 
-        // Hands every waiting reply to `send(human, bot)` once, oldest
+        // Hands every waiting reply to `send(human, bot, botEpoch, humanEpoch)` once, oldest
         // first, and empties the queue.
         template<typename Send>
         void Drain(Send send)
@@ -234,7 +258,7 @@ namespace IndividualProgressionF14SocialIsolationPolicy
             std::size_t const count = _size;
             _size = 0;
             for (std::size_t i = 0; i < count; ++i)
-                send(_items[i].human, _items[i].bot);
+                send(_items[i].human, _items[i].bot, _items[i].botEpoch, _items[i].humanEpoch);
         }
 
         std::size_t Size() const { return _size; }
@@ -245,6 +269,8 @@ namespace IndividualProgressionF14SocialIsolationPolicy
         {
             std::uint64_t human = 0;
             std::uint64_t bot = 0;
+            std::uint64_t botEpoch = 0;
+            std::uint64_t humanEpoch = 0;
         };
         std::array<Item, Capacity> _items{};
         std::size_t _size = 0;

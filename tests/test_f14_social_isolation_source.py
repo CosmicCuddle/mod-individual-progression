@@ -96,6 +96,7 @@ class HooksAndAuthority(unittest.TestCase):
             "ALLBATTLEGROUNDHOOK_ON_BATTLEGROUND_DESTROY", "ALLBATTLEGROUNDHOOK_CAN_ADD_GROUP_TO_MATCHING_POOL",
             "PLAYERHOOK_CAN_SEND_MAIL", "ALLSPELLHOOK_ON_SPELL_CHECK_CAST", "PLAYERHOOK_ON_F14_CAN_GUILD_INVITE",
             "PLAYERHOOK_ON_LOGIN", "PLAYERHOOK_ON_CREATE", "PLAYERHOOK_ON_DELETE",
+            "PLAYERHOOK_ON_F14_SESSION_REBOUND", "PLAYERHOOK_ON_F14_SESSION_DISCONNECTED",
             "GROUPHOOK_ON_ADD_MEMBER", "GROUPHOOK_ON_DISBAND",
             "GUILDHOOK_CAN_ADD_MEMBER", "GUILDHOOK_CAN_SEND_CHAT_TO_MEMBER", "GUILDHOOK_ON_EVENT"]))
         overrides = sorted(re.findall(r"\b(On\w+)\([^;{]*\)\s*override", self.src))
@@ -105,7 +106,8 @@ class HooksAndAuthority(unittest.TestCase):
             "OnPlayerCanJoinLfg", "OnPlayerLogout", "OnPlayerCanJoinInBattlegroundQueue",
             "OnPlayerCanBattleFieldPort", "OnBattlegroundAddPlayer", "OnBattlegroundRemovePlayerAtLeave",
             "OnBattlegroundDestroy", "OnPlayerCanSendMail", "OnSpellCheckCast", "OnPlayerCanGuildInvite", "OnPlayerLogin",
-            "OnPlayerCreate", "OnPlayerDelete", "OnAddMember", "OnDisband", "OnEvent"]))
+            "OnPlayerCreate", "OnPlayerDelete", "OnAddMember", "OnDisband", "OnEvent",
+            "OnF14PlayerSessionRebound", "OnF14PlayerSessionDisconnected"]))
         # The guild hook is overridden only inside the patched-Core guard.
         self.assertEqual(re.findall(r"\bbool (OnPlayerCanGuildInvite)\(Player\* inviter, Player\* invitee\) override", self.src),
                          ["OnPlayerCanGuildInvite"])
@@ -507,7 +509,7 @@ class HooksAndAuthority(unittest.TestCase):
         # queued, and packets are sent only from the world thread.
         self.assertLess(reply.index("MayReply("), reply.index("if (!WorldThread().IsCurrent())"))
         off = reply.split("if (!WorldThread().IsCurrent())", 1)[1].split("return;", 1)[0]
-        self.assertIn("PendingReplies().Push(human->GetGUID().GetRawValue(), bot->GetGUID().GetRawValue());", off)
+        self.assertIn("PendingReplies().Push(human->GetGUID().GetRawValue(), bot->GetGUID().GetRawValue(), botEpoch, humanEpoch);", off)
         self.assertNotIn("SendDirectMessage", reply)
         self.assertEqual(self.src.count("SendDirectMessage("), 1)
         self.assertEqual(self.src.count("SendReplyPacket("), 3)  # definition, direct world-thread send, drain
@@ -516,6 +518,31 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertIn("ObjectAccessor::FindPlayer(ObjectGuid(botGuid))", drain)
         self.assertIn("constexpr std::size_t MaxReplyBytes = 512;", read(POLICY))
         self.assertIn("std::lock_guard<std::mutex> lock(ReplyLock());", reply)
+
+    def test_deferred_reply_revalidates_identity_and_eligibility(self):
+        drain = self.src.split("void SendPendingReplies()", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("!botEpoch || botEpoch != sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(ObjectGuid(botGuid))", drain)
+        self.assertLess(drain.index("GetF14VerifiedRandomBotLoginEpoch"), drain.index("ObjectAccessor::FindPlayer"))
+        packet = self.src.split("void SendReplyPacket(Player const* bot, Player* human)", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("Policy::IsRestrictedPair(OptionOn(), ReadHuman(human), ReadBot(bot))", packet)
+        self.assertLess(packet.index("IsRestrictedPair"), packet.index("BuildChatPacket"))
+        reply = self.src.split("void SendInCharacterReply(", 1)[1].split("\n    }\n", 1)[0]
+        self.assertLess(reply.index("if (!botEpoch)"), reply.index("MayReply("))
+
+    def test_recipient_login_is_rechecked_after_deferral(self):
+        for hook, action in (("OnPlayerLogin", "BindReplySession"),
+                             ("OnPlayerLogout", "InvalidateReplySession"),
+                             ("OnF14PlayerSessionRebound", "BindReplySession"),
+                             ("OnF14PlayerSessionDisconnected", "InvalidateReplySession")):
+            body = self.src.split("void " + hook + "(Player* player) override", 1)[1].split("\n        }", 1)[0]
+            self.assertIn(action + "(player);", body)
+        drain = self.src.split("void SendPendingReplies()", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("Policy::ReplyEpochsMatch(humanEpoch, ReadReplySession(human))", drain)
+        self.assertLess(drain.index("ReplyEpochsMatch"), drain.index("SendReplyPacket"))
+        off = self.src.split("if (!WorldThread().IsCurrent())", 1)[1].split("return;", 1)[0]
+        self.assertIn("COSMIC_F14_SESSION_REBIND_EXPERIMENT >= 1", off)
+        self.assertIn("COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT >= 1", off)
+        self.assertIn("uint64 const humanEpoch = ReadReplySession(human);", off)
 
     def test_stage_mirror_matches_ip(self):
         mirror = self.src.split("uint8 ReadRawStage(Player const* player)", 1)[1].split("\n    }\n", 1)[0]

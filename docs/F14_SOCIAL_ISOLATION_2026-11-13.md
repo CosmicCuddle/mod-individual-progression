@@ -227,3 +227,32 @@ This social feature is unaffected: it never restricts Altbots.
 Source and model proof, plus a local header syntax check. No Worldserver link, gameplay or client test has been done.
 
 **Rollback:** keep the option `0` (the default), or close the DRAFT. No host, DB, config or client was changed.
+
+
+### Deferred social-reply hardening — 21 November 2026
+
+Queued replies now carry the verified RandomBot login epoch. The world-thread drain rejects a missing or changed epoch before resolving players. Both immediate and deferred packet sends recheck the current option, human progression/session facts and verified bot policy. Disabling the feature, reaching TBC, losing verification, leaving the world or changing GM/session facts suppresses an obsolete refusal. The bounded queue and existing cooldown remain in place; no Player pointer is retained.
+
+This is a focused source increment from PR182 `23359b2f27a14ad91b38f80eabe14ad5ed25c49e`, not completion of F14. Human-session incarnation tracking is still unresolved: GUID re-resolution plus current-policy checking does not prove the same human login. Pending reply generation after human logout needs separate coverage before claiming full stale-callback safety. Guild off-thread admission and LANG_ADDON policy remain unchanged. No visual-concealment changes.
+
+Executed with local Python 3.12.4: social source contracts 32/32; group-floor source contracts 6/6; guild hook patch tests 3/3. C++ queue tests updated for required nonzero epoch and epoch preservation, but GCC/Clang, native Worldserver, sanitizers and gameplay NOT RUN (no local compiler found). Tests are source/patch evidence only. No live config, DB, migration or deployment. Rollback: revert this increment; original draft branches remain unchanged. Runtime option remains OFF by default.
+
+
+### Human reply-session identity — 21 November 2026 follow-up
+
+This increment addresses the queued human-login gap noted above. A social-only marker in `Player::CustomData` holds a nonzero, process-unique token. Login/rebind issues a fresh token; logout/disconnect clears it. Tokens saturate rather than wrap. A deferred reply carries both bot and human tokens and compares the recipient token after GUID re-resolution on the world thread. A late logout on an old Player object cannot clear a replacement Player's marker. This uses the existing optional Core session hook interfaces directly; no paused visibility publisher, observer registry or PR174 code is activated or edited.
+
+Deferred feedback is compiled only when **both** `COSMIC_F14_SESSION_REBIND_EXPERIMENT >= 1` and `COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT >= 1` are available. Otherwise an off-thread attempt remains restricted but gets no deferred reply: no unsafe GUID-only fallback. Immediate world-thread feedback remains available. No compile macro or runtime option is enabled here. Enabling/building the Core hooks is an integration prerequisite, not a production change made by this branch. Existing map ownership guards remain essential: this does not make arbitrary cross-thread Player access safe or authenticate an upstream handler that began only after a session was rebound.
+
+Developer evidence (exact checked-in policy sources; Windows x86-64):
+
+- Clang 20.1.2 via portable Zig 0.15.2, `-std=c++20 -pthread -Wall -Wextra -Werror -pedantic -O2`: social policy **1,888,644/1,888,644 PASS**.
+- Same source, `-std=c++17` plus `-DNDEBUG`: **1,888,644/1,888,644 PASS**. Includes 4,000 concurrent token issuances, uniqueness, exhaustion, stale/missing tokens, bounded reply transport and unchanged social-negative matrix.
+- `python -B tests/run_f14_reply_session_adapter_test.py --core ../core-phase-b-review-20261114 --compiler <zig.exe> c++`: **14/14 PASS**. The test compiles the helper block extracted from the actual adapter against real Core `DataMap.h` (local Core `45499a228fe4273acf83b4a52a45033cec1f4dbc`). Player is explicitly a test double; native PlayerScript hookup and ownership are not proven.
+- Existing `tests/f14_group_sync_floor.cpp`: **1,805/1,805 PASS**, C++20. This is the existing pure floor model, not proof of complete temporary group-stage integration.
+- Python source/patch checks: social 33, verified-rndbot floor 3, group-floor 6, guild-invite patch 3: **45 PASS**. `git diff --check` PASS.
+- GCC, sanitizer matrix, full native Worldserver compilation and gameplay **NOT RUN**. No hosted workflow was dispatched.
+
+Compiler provenance: official `https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip`, SHA256 `3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c`. Download and extraction stayed in workspace audit artifacts, with archive hash and path checks; no toolchain is committed or installed system-wide. Sandboxed compilation initially failed inside compiler subprocesses; the successful standalone builds used the authorised unrestricted local process runner. This is developer testing, not server deployment.
+
+Rollback: revert the follow-up source commit (including its queue signature/tests), or keep the existing runtime option OFF. No SQL, persisted token, config migration or data rollback. F14 social surface completion, guild policy questions and group transition integration remain subsequent work.

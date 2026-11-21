@@ -26,6 +26,7 @@
 #include "BattlegroundQueue.h"
 #include "Chat.h"
 #include "DBCStores.h"
+#include "DataMap.h"
 #include "GameTime.h"
 #include "GlobalScript.h"
 #include "Group.h"
@@ -128,6 +129,37 @@ namespace
     // bot. An empty configured reply disables the answer, not the block.
     Policy::WorldThreadMarker& WorldThread();
 
+    constexpr char const* ReplySessionKey = "IndividualProgression.F14.SocialReplySession";
+
+    struct ReplySessionMarker final : DataMap::Base
+    {
+        std::atomic<uint64> epoch{0};
+    };
+
+    void BindReplySession(Player* player)
+    {
+        if (!player)
+            return;
+        static Policy::ReplySessionEpochIssuer issuer;
+        player->CustomData.GetDefault<ReplySessionMarker>(ReplySessionKey)->epoch.store(
+            issuer.Issue(), std::memory_order_release);
+    }
+
+    void InvalidateReplySession(Player* player)
+    {
+        if (player)
+            if (auto* marker = player->CustomData.Get<ReplySessionMarker>(ReplySessionKey))
+                marker->epoch.store(0, std::memory_order_release);
+    }
+
+    uint64 ReadReplySession(Player const* player)
+    {
+        if (player)
+            if (auto const* marker = player->CustomData.Get<ReplySessionMarker>(ReplySessionKey))
+                return marker->epoch.load(std::memory_order_acquire);
+        return 0;
+    }
+
     std::mutex& PendingRepliesLock()
     {
         static std::mutex lock;
@@ -143,6 +175,10 @@ namespace
     // Build and send one reply. World thread only.
     void SendReplyPacket(Player const* bot, Player* human)
     {
+        // A queued decision may have become obsolete after progression,
+        // logout, reclassification or a config reload. Recheck at the sink.
+        if (!Policy::IsRestrictedPair(OptionOn(), ReadHuman(human), ReadBot(bot)))
+            return;
         // One line, bounded length; empty means decline silently.
         std::string const text = Policy::NormalizeReply(sIndividualProgression->GetF14SocialIsolationReply());
         if (text.empty())
@@ -159,13 +195,18 @@ namespace
         Policy::PendingReplies<256> due;
         {
             std::lock_guard<std::mutex> lock(PendingRepliesLock());
-            PendingReplies().Drain([&due](uint64 human, uint64 bot) { due.Push(human, bot); });
+            PendingReplies().Drain([&due](uint64 human, uint64 bot, uint64 botEpoch, uint64 humanEpoch)
+            {
+                due.Push(human, bot, botEpoch, humanEpoch);
+            });
         }
-        due.Drain([](uint64 humanGuid, uint64 botGuid)
+        due.Drain([](uint64 humanGuid, uint64 botGuid, uint64 botEpoch, uint64 humanEpoch)
         {
+            if (!botEpoch || botEpoch != sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(ObjectGuid(botGuid)))
+                return;
             Player* human = ObjectAccessor::FindPlayer(ObjectGuid(humanGuid));
             Player const* bot = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
-            if (human && bot && human->GetSession())
+            if (human && bot && human->GetSession() && Policy::ReplyEpochsMatch(humanEpoch, ReadReplySession(human)))
                 SendReplyPacket(bot, human);
         });
     }
@@ -173,6 +214,9 @@ namespace
     void SendInCharacterReply(Player const* bot, Player* human)
     {
         if (!bot || !human || !human->GetSession())
+            return;
+        uint64 const botEpoch = sIndividualProgression->GetF14VerifiedRandomBotLoginEpoch(bot->GetGUID());
+        if (!botEpoch)
             return;
         bool mayReply = false;
         {
@@ -188,8 +232,14 @@ namespace
         // spent, so it is still at most one reply per window).
         if (!WorldThread().IsCurrent())
         {
+#if defined(COSMIC_F14_SESSION_REBIND_EXPERIMENT) && COSMIC_F14_SESSION_REBIND_EXPERIMENT >= 1 && \
+    defined(COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT) && COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT >= 1
+            // Without both Core callbacks we cannot prove the recipient's
+            // connection survived deferral. Restrict normally, reply silently.
+            uint64 const humanEpoch = ReadReplySession(human);
             std::lock_guard<std::mutex> lock(PendingRepliesLock());
-            PendingReplies().Push(human->GetGUID().GetRawValue(), bot->GetGUID().GetRawValue());
+            PendingReplies().Push(human->GetGUID().GetRawValue(), bot->GetGUID().GetRawValue(), botEpoch, humanEpoch);
+#endif
             return;
         }
         SendReplyPacket(bot, human);
@@ -417,7 +467,27 @@ namespace
              PLAYERHOOK_ON_BEFORE_UPDATE, PLAYERHOOK_CAN_JOIN_LFG, PLAYERHOOK_ON_LOGOUT,
              PLAYERHOOK_CAN_JOIN_IN_BATTLEGROUND_QUEUE, PLAYERHOOK_CAN_BATTLEFIELD_PORT,
              PLAYERHOOK_CAN_SEND_MAIL, PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_CREATE,
-             PLAYERHOOK_ON_DELETE}) { }
+             PLAYERHOOK_ON_DELETE
+#if defined(COSMIC_F14_SESSION_REBIND_EXPERIMENT) && COSMIC_F14_SESSION_REBIND_EXPERIMENT >= 1
+             , PLAYERHOOK_ON_F14_SESSION_REBOUND
+#endif
+#if defined(COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT) && COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT >= 1
+             , PLAYERHOOK_ON_F14_SESSION_DISCONNECTED
+#endif
+            }) { }
+
+#if defined(COSMIC_F14_SESSION_REBIND_EXPERIMENT) && COSMIC_F14_SESSION_REBIND_EXPERIMENT >= 1
+        void OnF14PlayerSessionRebound(Player* player) override
+        {
+            BindReplySession(player);
+        }
+#endif
+#if defined(COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT) && COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT >= 1
+        void OnF14PlayerSessionDisconnected(Player* player) override
+        {
+            InvalidateReplySession(player);
+        }
+#endif
 
         // Offline mail: a character that logs in is no longer "remembered";
         // its next logout re-remembers it only if still a verified
@@ -426,6 +496,7 @@ namespace
         {
             if (!player)
                 return;
+            BindReplySession(player);
             {
                 std::lock_guard<std::mutex> lock(ConfirmedLock());
                 Confirmed().Forget(player->GetGUID().GetRawValue());
@@ -606,6 +677,7 @@ namespace
         {
             if (!player)
                 return;
+            InvalidateReplySession(player);
             // Remember a confirmed restricted RandomBot for offline mail. This
             // script is registered before IP's player script (loader order),
             // so the verified identity is still present here. World thread
