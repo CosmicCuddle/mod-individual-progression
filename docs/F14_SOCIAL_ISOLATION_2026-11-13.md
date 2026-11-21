@@ -229,7 +229,7 @@ Source and model proof, plus a local header syntax check. No Worldserver link, g
 **Rollback:** keep the option `0` (the default), or close the DRAFT. No host, DB, config or client was changed.
 
 
-### Deferred social-reply hardening — 21 November 2026
+### Deferred social-reply hardening â€” 21 November 2026
 
 Queued replies now carry the verified RandomBot login epoch. The world-thread drain rejects a missing or changed epoch before resolving players. Both immediate and deferred packet sends recheck the current option, human progression/session facts and verified bot policy. Disabling the feature, reaching TBC, losing verification, leaving the world or changing GM/session facts suppresses an obsolete refusal. The bounded queue and existing cooldown remain in place; no Player pointer is retained.
 
@@ -238,7 +238,7 @@ This is a focused source increment from PR182 `23359b2f27a14ad91b38f80eabe14ad5e
 Executed with local Python 3.12.4: social source contracts 32/32; group-floor source contracts 6/6; guild hook patch tests 3/3. C++ queue tests updated for required nonzero epoch and epoch preservation, but GCC/Clang, native Worldserver, sanitizers and gameplay NOT RUN (no local compiler found). Tests are source/patch evidence only. No live config, DB, migration or deployment. Rollback: revert this increment; original draft branches remain unchanged. Runtime option remains OFF by default.
 
 
-### Human reply-session identity — 21 November 2026 follow-up
+### Human reply-session identity â€” 21 November 2026 follow-up
 
 This increment addresses the queued human-login gap noted above. A social-only marker in `Player::CustomData` holds a nonzero, process-unique token. Login/rebind issues a fresh token; logout/disconnect clears it. Tokens saturate rather than wrap. A deferred reply carries both bot and human tokens and compares the recipient token after GUID re-resolution on the world thread. A late logout on an old Player object cannot clear a replacement Player's marker. This uses the existing optional Core session hook interfaces directly; no paused visibility publisher, observer registry or PR174 code is activated or edited.
 

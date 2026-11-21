@@ -1,4 +1,4 @@
-# F14 temporary group-stage view — 21 November 2026
+# F14 temporary group-stage view â€” 21 November 2026
 
 Owner: CosmicCuddle. This is an isolated implementation increment from `f3d0ff64b03fb72e5baca6511fb751a3ec9837f4` (IP Draft PR188). It keeps the older draft branches intact and reuses `IndividualProgressionF14GroupSyncEraFloor.h` and its C++ test byte-for-byte from the existing group-floor work (file evidence pinned at `05435925`; branch head `005d8949334b11c7c985225d6aa9a1cc120157a1`).
 

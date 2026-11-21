@@ -111,6 +111,32 @@ class GroupViewWiring(unittest.TestCase):
         self.assertIn(": hasPassedProgression(player, PROGRESSION_PRE_TBC)", cleanup)
         self.assertIn("!VanillaPvpTitlesKeepPostVanilla && pastVanilla", cleanup)
 
+    def test_paired_mutation_callbacks_do_not_depend_on_runtime_option(self):
+        source = read("src/IndividualProgressionF14GroupSyncView.cpp")
+        mutation = function(source, "static void Mutation(")
+        self.assertIn("questId < 66000", mutation)
+        self.assertIn("GroupViews.BeginMutation(groupGuid)", mutation)
+        self.assertIn("GroupViews.EndMutation(groupGuid)", mutation)
+        # Option only controls group invalidation. It must not skip one half
+        # of a counter pair when config changes between the notifications.
+        self.assertNotIn("!OptionOn()", mutation)
+        self.assertIn("PLAYERHOOK_ON_BEFORE_REWARDED_QUEST_CHANGE", source)
+        self.assertIn("PLAYERHOOK_ON_AFTER_REWARDED_QUEST_CHANGE", source)
+        query = function(source, "bool IndividualProgression::TryGetF14TemporaryGroupProgression(")
+        self.assertIn("COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION >= 1", query)
+        self.assertIn("canBorrowWrath = !IsPaidExpansionActive();", query)
+
+    def test_mutation_fence_survives_reload_and_retries_publication(self):
+        header = read("src/IndividualProgressionF14GroupSyncView.h")
+        clear = function(header, "void Clear()")
+        self.assertNotIn("_activeMutations =", clear)
+        self.assertNotIn("_mutationPoisoned =", clear)
+        publish = function(header, "bool Publish(")
+        self.assertIn("if (_activeMutations)", publish)
+        self.assertIn("_pending.insert(work.first);", publish)
+        read_view = function(header, "bool Read(")
+        self.assertIn("_mutationPoisoned || _activeMutations", read_view)
+
 
 if __name__ == "__main__":
     unittest.main()
