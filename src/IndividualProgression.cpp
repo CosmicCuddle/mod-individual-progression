@@ -73,6 +73,7 @@ void IndividualProgression::UpdateProgressionState(Player* player, ProgressionSt
     uint8 currentState = GetPlayerProgressionFromQuests(player);
     if (newState > currentState)
     {
+        sIndividualProgression->RequestF14GroupSyncView(player->GetGroup());
         for (uint8 i = currentState; i <= newState; ++i)
         {
             uint32 PROGRESSION_QUEST = 66000 + i;
@@ -93,6 +94,13 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
     if (!player || !player->IsInWorld())
         return;
 
+    // Explicit command/reset routes must not bypass the selected bot floor.
+    // No missing identity or missing earned marker is turned into a grant.
+    if (sIndividualProgression->UsesF14TemporaryGroupProgression(player) &&
+        static_cast<uint8>(newState) < IndividualProgressionGroupPolicy::FirstTbcStage &&
+        GetPlayerProgressionFromQuests(player) >= IndividualProgressionGroupPolicy::FirstTbcStage)
+        return;
+
     // F14 stage-8 floor durability (default OFF): every IP-owned route that
     // could lower an earned stage funnels through here. A refused write is a
     // no-op: the current earned stage stays exactly as it is.
@@ -111,6 +119,7 @@ void IndividualProgression::ForceUpdateProgressionState(Player* player, Progress
     if (!newState && newState != 0)
         return;
 
+    sIndividualProgression->RequestF14GroupSyncView(player->GetGroup());
     // remove all hidden progression quests first
     for (uint8 i = PROGRESSION_MOLTEN_CORE; i <= PROGRESSION_WOTLK_TIER_5; ++i)
     {
@@ -912,6 +921,8 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
     if (!enabled || !group)
         return;
 
+    RequestF14GroupSyncView(group);
+
     ObjectGuid leaderGuid = group->GetLeaderGUID();
     if (!leaderGuid)
         return;
@@ -942,6 +953,11 @@ void IndividualProgression::SyncBotsProgressionToLeader(Group* group)
     {
         Player* member = itr->GetSource();
         if (!member || isNormalAccount(member))
+            continue;
+
+        // The selected racial bot consumes a temporary effective view instead
+        // of losing its earned quests. Other populations keep stock sync.
+        if (UsesF14TemporaryGroupProgression(member))
             continue;
 
         // When group enforcement is enabled, never force a bot/excluded account
@@ -1458,7 +1474,13 @@ void IndividualProgression::CleanUpVanillaPvpTitles(Player* player)
         return;
 
     // Ranks are given up entirely once the player leaves Vanilla, unless configured to persist.
-    bool dropAllRanks = !VanillaPvpTitlesKeepPostVanilla && hasPassedProgression(player, PROGRESSION_PRE_TBC);
+    // A temporary group-era view must not erase an unrelated earned title.
+    bool const earnedOnly = UsesF14TemporaryGroupProgression(player) && player->GetGroup();
+    bool const pastVanilla = earnedOnly
+        ? enabled && (!progressionLimit || progressionLimit >= PROGRESSION_PRE_TBC) &&
+            GetPlayerProgressionFromQuests(player) >= PROGRESSION_PRE_TBC
+        : hasPassedProgression(player, PROGRESSION_PRE_TBC);
+    bool dropAllRanks = !VanillaPvpTitlesKeepPostVanilla && pastVanilla;
 
     // What the player was actually granted, capped by what their kills still entitle them to
     // so that raising the configured requirements takes ranks back off them.
@@ -1868,6 +1890,7 @@ void AddSC_ip_paid_expansion();
 // registered here so the upstream Grim loader stays byte-identical.
 void AddSC_mod_individual_progression_f14_lifecycle();
 void AddSC_mod_individual_progression_f14_social_isolation();
+void AddSC_mod_individual_progression_f14_group_sync_view();
 
 void AddSC_mod_individual_progression()
 {
@@ -1875,4 +1898,5 @@ void AddSC_mod_individual_progression()
     AddSC_ip_paid_expansion();
     AddSC_mod_individual_progression_f14_lifecycle();
     AddSC_mod_individual_progression_f14_social_isolation();
+    AddSC_mod_individual_progression_f14_group_sync_view();
 }

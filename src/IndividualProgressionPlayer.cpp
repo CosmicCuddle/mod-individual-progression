@@ -161,7 +161,13 @@ public:
             }
 
 #endif
-            if (!preserveVerifiedRandomBotStage && !appliedVerifiedRandomBotTbcFloor)
+            bool const preserveF14GroupEarnedStage =
+                sIndividualProgression->UsesF14TemporaryGroupProgression(player) &&
+                sIndividualProgression->GetPlayerProgressionFromQuests(player) >=
+                    IndividualProgressionGroupPolicy::FirstTbcStage &&
+                sIndividualProgression->GetPlayerProgressionFromQuests(player) >=
+                    IndividualProgressionF14LoginPolicy::LevelStage(player->GetLevel());
+            if (!preserveVerifiedRandomBotStage && !appliedVerifiedRandomBotTbcFloor && !preserveF14GroupEarnedStage)
             {
                 if (player->GetLevel() <= 60)
                     sIndividualProgression->ForceUpdateProgressionState(player, static_cast<ProgressionState>(0));
@@ -812,6 +818,8 @@ public:
         if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState &&
             sIndividualProgression->ShouldSkipF14VerifiedRandomBotGroupDowngrade(player, leaderState))
             return true;
+        if (sIndividualProgression->UsesF14TemporaryGroupProgression(player))
+            return true; // admission is unchanged; OnAddMember refreshes the view
         if (!sIndividualProgression->isNormalAccount(player) && joiningState != leaderState)
             sIndividualProgression->ForceUpdateProgressionState(
                 player, static_cast<ProgressionState>(leaderState));
