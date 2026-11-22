@@ -1082,9 +1082,24 @@ namespace
     // re-proven immediately before every call. World thread only.
     void RemoveRestrictedIfSafe(uint32 guildId, ObjectGuid target, ObjectGuid human)
     {
+        if (!OptionOn() || !WorldThread().IsCurrent() || target == human)
+            return;
         Guild* guild = sGuildMgr->GetGuildById(guildId);
         bool const member = guild && guild->GetMember(target);
-        bool const reason = guild && guild->GetMember(human);
+        Player const* currentHuman = ObjectAccessor::FindPlayer(human);
+        bool const reason = guild && guild->GetMember(human) && currentHuman &&
+            currentHuman->GetGuildId() == guildId && Policy::HumanStillVanilla(ReadHuman(currentHuman));
+        bool restricted = false;
+        if (Player const* currentTarget = ObjectAccessor::FindPlayer(target))
+            restricted = currentTarget->GetGuildId() == guildId &&
+                Policy::BotIsRestrictedRandomBot(ReadBot(currentTarget));
+        else
+        {
+            std::lock_guard<std::mutex> lock(ConfirmedLock());
+            restricted = Confirmed().Contains(target.GetRawValue());
+        }
+        if (!restricted)
+            return;
         if (!Policy::GuildRemovalSafe(guild != nullptr, member, guild ? guild->GetMemberSize() : 0, reason))
             return;
         guild->DeleteMember(target, false, true, false);
@@ -1092,6 +1107,8 @@ namespace
 
     void RemediateGuild(uint32 guildId, ObjectGuid human)
     {
+        if (!OptionOn() || !WorldThread().IsCurrent())
+            return;
         Guild* guild = sGuildMgr->GetGuildById(guildId);
         if (!guild || !guild->GetMember(human))
             return; // the human already left: nothing to separate

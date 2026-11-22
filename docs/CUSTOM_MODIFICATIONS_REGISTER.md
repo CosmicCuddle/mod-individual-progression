@@ -1319,3 +1319,16 @@ Focused native tests require every completeness family independently, exercise t
   Safety boundary for this increment: borrowing an unearned Wrath era is blocked until a Core rewarded-quest mutation hook closes the external-edit polling window; the pure model's upward case is not full runtime completion. Persistent Vanilla PvP-title cleanup uses earned evidence for selected grouped bots so temporary group access cannot erase unrelated titles. Normal/default-OFF behavior and title-retention/cap controls remain; actual-source predicate tests added. Next implementation is the isolated Core hook plus IP adapter, not a live enablement.
 
 - **F14 paired rewarded-state projection adapter (21 Nov 2026, development):** `IndividualProgressionF14GroupSyncView.{h,cpp}` consumes optional Core API v1 before/after notifications for hidden quest IDs. A nested in-flight fence blocks snapshot read/publication; retry preserves work, reload preserves pairs, bad pairing poisons positive views until restart. Allows unearned-Wrath group borrowing only with both session hooks, current positive racial RandomBot identity, fresh normal-human leader facts and Paid OFF. Old Core/Paid-ON keep the earlier fence. No quest/entitlement write by this adapter; title/normal-race/Altbot/human/visibility/guild policies unchanged. Parent PR189 `fabff319d8ff38ea8c3e06ced5f22e3b435f165d`; Core counterpart topic is a child of `21ff1973bc75216f8a0d0f3d7731eb3e8894ff97`. Source-linked matrix 67/69/69/71 PASS per C++20/C++17-NDEBUG build; snapshot3,906, legacy49/51, IP Python58/Core source8/Core writer35 PASS. SQL style PASS; full Core C++ style red on four unchanged baseline diagnostics only. No GCC/sanitizer/native Worldserver/gameplay/hosted Actions evidence. Direct mutable-map writes and actual module ownership/classification require composition QA; defaults remain OFF, no live/data changes. Rollback: revert paired children and rebuild matching Core/modules, no migration. See `F14_QUEST_MUTATION_ADAPTER_2026-11-21.md`.
+
+
+- **F14 deferred guild remediation recheck (22 Nov 2026, development):** Child of
+  PR190 aecba064eb2e9d8d7043d454b887787407816433. Actual removal helper re-proves
+  current triggering-human eligibility/guild, target restriction/guild, option and
+  world context before every native removal. Existing login/join-only triggers,
+  offline-confirmed policy, survivor/flags and Core APIv2 dependency retained.
+  No downgrade trigger/sweep/human eviction/visual or addon change. Executable
+  actual-body/real-policy tests with explicit engine/classifier doubles reproduce
+  parent defect and protect deferred/reentrant changes; exact results in PR/queue.
+  Native ABI/classifier/persisted guild/gameplay remain unproven. Source note:
+  F14_GUILD_REMEDIATION_RECHECK_2026-11-22.md. Defaults OFF; no SQL/config/DBC/client/
+  live operation. Rollback source child/rebuild matching modules, preserve history.
