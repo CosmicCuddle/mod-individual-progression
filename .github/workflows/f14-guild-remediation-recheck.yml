@@ -1,0 +1,34 @@
+name: F14 actual guild remediation recheck
+on:
+  pull_request:
+    branches: [feature/codex-f14-quest-mutation-adapter-20261121]
+    paths:
+      - src/IndividualProgressionF14SocialIsolationScript.cpp
+      - tests/run_f14_guild_remediation_adapter.py
+      - tests/test_f14_social_isolation_source.py
+      - .github/workflows/f14-guild-remediation-recheck.yml
+permissions:
+  contents: read
+jobs:
+  actual-remediation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run actual-source deferred and reentrant regression cases
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          python3 -B tests/run_f14_guild_remediation_adapter.py --compiler '${{ matrix.compiler }}' --verify-parent-fails
+          python3 -B tests/run_f14_guild_remediation_adapter.py --compiler '${{ matrix.compiler }}'
+          python3 -B -m unittest discover -s tests -p test_f14_social_isolation_source.py -v
+          git diff --check
+# Source adapters only. No server/DB launch, artifact/cache upload or feature activation.

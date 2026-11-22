@@ -374,7 +374,10 @@ class HooksAndAuthority(unittest.TestCase):
         rem = self.body("void RemediateGuild(uint32 guildId, ObjectGuid human)", "\n    }\n")
         self.assertIn("if (!guild || !guild->GetMember(human))\n            return;", rem)
         safe = self.body("void RemoveRestrictedIfSafe(uint32 guildId, ObjectGuid target, ObjectGuid human)", "\n    }\n")
-        self.assertIn("bool const reason = guild && guild->GetMember(human);", safe)
+        self.assertIn("Policy::HumanStillVanilla(ReadHuman(currentHuman))", safe)
+        self.assertIn("Policy::BotIsRestrictedRandomBot(ReadBot(currentTarget))", safe)
+        self.assertIn("!WorldThread().IsCurrent()", safe)
+        self.assertLess(safe.index("if (!restricted)"), safe.index("guild->DeleteMember("))
         self.assertLess(safe.index("Policy::GuildRemovalSafe("), safe.index("guild->DeleteMember(target, false, true, false);"))
         self.assertEqual(self.src.count("DeleteMember("), 2)  # remediation + late re-check
         self.assertNotIn("sCalendarMgr", self.src)
