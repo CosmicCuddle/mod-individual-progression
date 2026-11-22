@@ -56,11 +56,17 @@ struct ObjectGuid {
     bool operator==(ObjectGuid other) const { return raw == other.raw; }
     bool operator!=(ObjectGuid other) const { return raw != other.raw; }
 };
+enum AccountTypes { SEC_PLAYER, SEC_GAMEMASTER };
+namespace AccountMgr { bool IsPlayerAccount(AccountTypes security) { return security == SEC_PLAYER; } }
 struct Session {
+    AccountTypes _security = SEC_PLAYER;
+    void SetSecurity(AccountTypes);
+    AccountTypes GetSecurity() const { return _security; }
     bool headless = false, closed = false;
     bool IsHeadless() const { return headless; }
     bool IsSocketClosed() const { return closed; }
 };
+using WorldSession = Session;
 struct Group;
 struct Player {
     ObjectGuid guid;
@@ -68,6 +74,7 @@ struct Player {
     Session session;
     uint8 race = 1, earned = 0;
     bool inWorld = true, gm = false, verified = false, normal = true;
+    mutable unsigned roleReads = 0;
     unsigned writes = 0;
     std::unordered_set<uint32> m_RewardedQuests;
     std::map<uint32, bool> m_RewardedQuestsSave;
@@ -90,7 +97,7 @@ struct Player {
     void SendQuestUpdate(uint32) { ++questUpdates; }
     ObjectGuid GetGUID() const { return guid; }
     Group* GetGroup() const { return group; }
-    Session const* GetSession() const { return &session; }
+    Session const* GetSession() const { ++roleReads; return &session; }
     bool IsInWorld() const { return inWorld; }
     bool IsGameMaster() const { return gm; }
     uint8 getRace() const { return race; }
@@ -112,14 +119,18 @@ struct Group {
 };
 enum RemoveMethod : uint8 { TestRemoval };
 enum Hook {
-    WORLDHOOK_ON_UPDATE, WORLDHOOK_ON_AFTER_CONFIG_LOAD, GROUPHOOK_ON_ADD_MEMBER,
+    WORLDHOOK_ON_UPDATE, WORLDHOOK_ON_AFTER_CONFIG_LOAD, WORLDHOOK_ON_BEFORE_ROLE_STATE_CHANGE, WORLDHOOK_ON_AFTER_ROLE_STATE_CHANGE, GROUPHOOK_ON_ADD_MEMBER,
     GROUPHOOK_ON_REMOVE_MEMBER, GROUPHOOK_ON_CHANGE_LEADER, GROUPHOOK_ON_DISBAND,
     PLAYERHOOK_ON_LOGIN, PLAYERHOOK_ON_LOGOUT, PLAYERHOOK_ON_BEFORE_UPDATE,
     PLAYERHOOK_ON_F14_SESSION_REBOUND, PLAYERHOOK_ON_F14_SESSION_DISCONNECTED,
     PLAYERHOOK_ON_BEFORE_REWARDED_QUEST_CHANGE, PLAYERHOOK_ON_AFTER_REWARDED_QUEST_CHANGE
 };
 struct WorldScript {
-    WorldScript(char const*, std::initializer_list<Hook>) { }
+    std::set<Hook> hooks;
+    WorldScript(char const*, std::initializer_list<Hook> enabled) : hooks(enabled) { }
+    bool Enabled(Hook hook) const { return hooks.count(hook) != 0; }
+    virtual void OnBeforeRoleStateChange() { }
+    virtual void OnAfterRoleStateChange() { }
     virtual ~WorldScript() = default;
     virtual void OnUpdate(uint32) { }
     virtual void OnAfterConfigLoad(bool) { }
@@ -145,6 +156,11 @@ struct PlayerScript {
     virtual void OnPlayerBeforeRewardedQuestChange(Player*, uint32) { }
     virtual void OnPlayerAfterRewardedQuestChange(Player*, uint32) { }
 };
+static std::vector<WorldScript*> RoleScripts;
+static std::function<void(Hook)> RoleProbe;
+[[maybe_unused]] static void RoleDispatchProbe(Hook hook) {
+    auto callback = std::move(RoleProbe); RoleProbe = {}; if (callback) callback(hook);
+}
 static std::vector<PlayerScript*> QuestScripts;
 static std::function<void(Player*, uint32)> BeforeMutationProbe;
 static std::function<void(Player*, uint32)> AfterMutationProbe;
@@ -158,6 +174,8 @@ static unsigned BeforeEvents = 0, AfterEvents = 0;
 }
 #define CALL_ENABLED_HOOKS(type, hook, expression) do { for (auto* script : QuestScripts) if (script->Enabled(hook)) { expression; } QuestProbe(hook, player, questId); } while (false)
 struct ScriptMgr {
+    void OnBeforeRoleStateChange();
+    void OnAfterRoleStateChange();
     void OnPlayerBeforeRewardedQuestChange(Player*, uint32);
     void OnPlayerAfterRewardedQuestChange(Player*, uint32);
 };
@@ -238,7 +256,7 @@ PAIRED_TEST = r'''
     human.SetRewardedQuest(66015);
     CHECK(duringSafe);
     world.OnUpdate(0);
-    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS && ROLE_HOOKS ? 15 : 8));
     IP.paidActive = true;
     CHECK(IP.GetEffectiveProgression(&bot) == 8); // receipt-mutation support is not implied
     IP.paidActive = false;
@@ -255,7 +273,7 @@ PAIRED_TEST = r'''
     human.SetRewardedQuest(66015);
     CHECK(duringSafe);
     world.OnUpdate(0);
-    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS && ROLE_HOOKS ? 15 : 8));
     BeforeMutationProbe = [&](Player* player, uint32) {
         player->SetRewardedQuest(66016); // nested pair must not release the outer fence
         world.OnUpdate(0);
@@ -264,9 +282,9 @@ PAIRED_TEST = r'''
     human.SetRewardedQuest(66014);
     CHECK(duringSafe);
     world.OnUpdate(0);
-    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 16 : 8));
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS && ROLE_HOOKS ? 16 : 8));
     BeforeMutationProbe = [&](Player*, uint32) {
-        duringSafe = duringSafe && IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 16 : 8);
+        duringSafe = duringSafe && IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS && ROLE_HOOKS ? 16 : 8);
     };
     human.SetRewardedQuest(123); // unrelated quests do not enter the IP fence
     CHECK(duringSafe);
@@ -284,7 +302,7 @@ PAIRED_TEST = r'''
     human.RemoveRewardedQuest(66016, false);
     CHECK(duringSafe && BeforeEvents == AfterEvents);
     world.OnUpdate(0);
-    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS && ROLE_HOOKS ? 15 : 8));
     CHECK(bot.earned == 8 && human.m_RewardedQuests.count(66015) == 1);
     human.RemoveRewardedQuest(66014, false);
     world.OnUpdate(0);
@@ -297,7 +315,7 @@ PAIRED_TEST = r'''
     human.RemoveActiveQuest(66015, false); // reveals the same earned marker again
     CHECK(duringSafe && human.IsQuestRewarded(66015));
     world.OnUpdate(0);
-    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS && ROLE_HOOKS ? 15 : 8));
 #if QUEST_HOOKS
     sessions.OnPlayerAfterRewardedQuestChange(&human, 66008); // malformed pair fails closed
     CHECK(IP.GetEffectiveProgression(&bot) == 8);
@@ -336,6 +354,7 @@ int main()
     GroupViewSessions sessions;
     QuestScripts.push_back(&sessions);
     GroupViewWorld world;
+    RoleScripts.push_back(&world);
     CHECK(IP.GetEffectiveProgression(&bot) == 8); // no snapshot cannot grant Wrath
     IP.SyncBotsProgressionToLeader(&group); // actual production function, not a copied model
     CHECK(bot.earned == 17 && bot.writes == 0);
@@ -389,7 +408,7 @@ int main()
     world.OnUpdate(0);
     CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS ? 15 : 8));
     bot.earned = 8;
-    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS && ROLE_HOOKS ? 15 : 8));
     bot.earned = 17;
     human.earned = 8;
     sessions.OnPlayerBeforeUpdate(&human, 0);
@@ -490,8 +509,46 @@ int main()
     CHECK(!IP.hasPassedProgression(&bot, static_cast<ProgressionState>(8)));
     CHECK(!IP.DropRanksFromEarned(&bot)); // preserve the existing cap check too
     CHECK(bot.earned == 17); // lowering a cap does not delete historic rewards
+#if ROLE_HOOKS
+    // Native SetSecurity + actual WorldScript dispatch and IP role callbacks.
+    human.questBacked = false; human.earned = 15;
+    human.inWorld = true; human.normal = true; human.gm = false;
+    human.session.headless = human.session.closed = false;
+    human.group = bot.group = &group; group.leader = human.guid; bot.earned = 8;
+    IP.progressionLimit = 0; IP.paidActive = false;
+    IP.RequestF14GroupSyncView(&group); world.OnUpdate(0);
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+    bool roleSafe = false;
+    RoleProbe = [&](Hook hook) {
+        if (hook != WORLDHOOK_ON_BEFORE_ROLE_STATE_CHANGE) return;
+        roleSafe = IP.GetEffectiveProgression(&bot) == 8;
+        auto const reads = human.roleReads;
+        world.OnUpdate(0);
+        roleSafe = roleSafe && human.roleReads == reads;
+        sessions.OnPlayerBeforeUpdate(&human, 0);
+        roleSafe = roleSafe && human.roleReads == reads;
+    };
+    human.session.SetSecurity(SEC_GAMEMASTER);
+    CHECK(roleSafe); CHECK(IP.GetEffectiveProgression(&bot) == 8);
+    world.OnUpdate(0); CHECK(IP.GetEffectiveProgression(&bot) == 8);
+    human.session.SetSecurity(SEC_PLAYER);
+    CHECK(IP.GetEffectiveProgression(&bot) == 8); world.OnUpdate(0);
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+    // Nested role pairs + config reload must not expose an intermediate view.
+    world.OnBeforeRoleStateChange(); world.OnBeforeRoleStateChange();
+    world.OnAfterConfigLoad(true); world.OnAfterRoleStateChange();
+    CHECK(IP.GetEffectiveProgression(&bot) == 8); world.OnUpdate(0);
+    CHECK(IP.GetEffectiveProgression(&bot) == 8); world.OnAfterRoleStateChange();
+    world.OnUpdate(0); CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+    world.OnBeforeRoleStateChange();
+    IP.f14ProtectVerifiedRandomBotGroupFloor = false; world.OnAfterRoleStateChange();
+    IP.f14ProtectVerifiedRandomBotGroupFloor = true;
+    CHECK(IP.GetEffectiveProgression(&bot) == 8); world.OnUpdate(0);
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+    CHECK(bot.earned == 8 && bot.writes == 1); // only earlier legacy normal-race fixture write
+#endif
     PAIRED_QUEST_TESTS
-    std::printf("F14 ACTUAL GROUP ADAPTER %u/%u passed (session=%d quest=%d; Core test doubles)\n", checks, checks, HOOKS, QUEST_HOOKS);
+    std::printf("F14 ACTUAL GROUP ADAPTER %u/%u passed (session=%d quest=%d role=%d; Core test doubles)\n", checks, checks, HOOKS, QUEST_HOOKS, ROLE_HOOKS);
     return 0;
 }
 '''
@@ -504,11 +561,13 @@ def main():
     parser.add_argument("--ndebug", action="store_true")
     parser.add_argument("--core", type=Path, help="Paired Core checkout; compiles its actual mutation writers and dispatch")
     parser.add_argument("--verify-parent-fails", action="store_true", help="reproduce role-boundary failure with exact parent adapter")
+    parser.add_argument("--verify-role-parent-fails", action="store_true", help="reproduce native role setter stale-view gap on exact IP193")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     read = lambda name: (root / "src" / name).read_text(encoding="utf-8")
-    adapter_source = (subprocess.check_output(["git", "show", "9e9b97b516c516069411db3f160cee2f96792139:src/IndividualProgressionF14GroupSyncView.cpp"], cwd=root).decode("utf-8")
-                      if args.verify_parent_fails else read("IndividualProgressionF14GroupSyncView.cpp"))
+    adapter_ref = ("3fffa397fd6d678cfb515313b12a2ac54a0b0ac5" if args.verify_role_parent_fails else "9e9b97b516c516069411db3f160cee2f96792139")
+    adapter_source = (subprocess.check_output(["git", "show", adapter_ref + ":src/IndividualProgressionF14GroupSyncView.cpp"], cwd=root).decode("utf-8")
+                      if args.verify_parent_fails or args.verify_role_parent_fails else read("IndividualProgressionF14GroupSyncView.cpp"))
     adapter = re.sub(r'^#include[^\n]*\n', '', adapter_source, flags=re.M)
     sync = function(read("IndividualProgression.cpp"), "void IndividualProgression::SyncBotsProgressionToLeader(")
     reader = function(read("IndividualProgressionExpansion.cpp"), "uint8 IndividualProgression::GetEffectiveProgression(")
@@ -543,15 +602,33 @@ def main():
                                                                  "void Player::SetQuestStatus(", "void Player::RemoveActiveQuest(",
                                                                  "QuestStatus Player::GetQuestStatus("))
         paired += "\n".join(function(core_dispatch, "void ScriptMgr::OnPlayer" + phase + "RewardedQuestChange(") for phase in ("Before", "After"))
+    role_available = False
+    if args.core:
+        world_header = (core / "src/server/game/Scripting/ScriptDefines/WorldScript.h").read_text(encoding="utf-8")
+        role_available = "#define COSMIC_ROLE_STATE_CHANGE_HOOK_VERSION 1" in world_header
+        if role_available:
+            role_guard = re.sub(r'^#include[^\n]*\n', '', (core / "src/server/game/Scripting/RoleStateChangeGuard.h").read_text(encoding="utf-8"), flags=re.M)
+            world_dispatch = (core / "src/server/game/Scripting/ScriptDefines/WorldScript.cpp").read_text(encoding="utf-8")
+            security = (core / "src/server/game/Server/WorldSession.cpp").read_text(encoding="utf-8")
+            paired += "\n#if ROLE_HOOKS\n" + role_guard
+            paired += "\n#undef CALL_ENABLED_HOOKS\n#define CALL_ENABLED_HOOKS(type, hook, expression) do { for (auto* script : RoleScripts) if (script->Enabled(hook)) { expression; } RoleDispatchProbe(hook); } while (false)\n"
+            paired += "\n".join(function(world_dispatch, "void ScriptMgr::On" + phase + "RoleStateChange(") for phase in ("Before", "After"))
+            paired += function(security, "void WorldSession::SetSecurity(") + "\n#endif\n"
     with tempfile.TemporaryDirectory(prefix="f14-group-view-") as tmp:
         source = Path(tmp) / "group-view.cpp"
         source.write_text(PRELUDE + '#include "IndividualProgressionF14LoginPolicy.h"\n' + adapter + reader + access + sync + command_guard + login_guard + title_guard + paired + TEST.replace("PAIRED_QUEST_TESTS", PAIRED_TEST if args.core else ""), encoding="utf-8")
-        modes = [(hooks, quest) for hooks in (0, 1) for quest in ((0, 1) if args.core else (0,))]
+        modes = [(hooks, quest, role) for hooks in (0, 1) for quest in ((0, 1) if args.core else (0,)) for role in ((0, 1) if role_available else (0,))]
         if args.verify_parent_fails:
-            modes = [(1, 1 if args.core else 0)]
-        for hooks, quest in modes:
-            binary = Path(tmp) / ("group-view-" + str(hooks) + "-" + str(quest) + ".exe")
-            flags = ["-DHOOKS=" + str(hooks), "-DQUEST_HOOKS=" + str(quest)]
+            modes = [(1, 1 if args.core else 0, 0)]
+        if args.verify_role_parent_fails:
+            if not role_available:
+                parser.error("--verify-role-parent-fails needs paired Core role APIv1")
+            modes = [(1, 1, 1)]
+        for hooks, quest, role in modes:
+            binary = Path(tmp) / ("group-view-" + str(hooks) + "-" + str(quest) + "-" + str(role) + ".exe")
+            flags = ["-DHOOKS=" + str(hooks), "-DQUEST_HOOKS=" + str(quest), "-DROLE_HOOKS=" + str(role)]
+            if role:
+                flags.append("-DCOSMIC_ROLE_STATE_CHANGE_HOOK_VERSION=1")
             if args.ndebug:
                 flags.append("-DNDEBUG")
             if hooks:
@@ -562,10 +639,10 @@ def main():
                                        "-I" + str(root / "src")] + flags + [str(source), "-o", str(binary)]
             subprocess.run(command, check=True)
             result = subprocess.run([str(binary)])
-            if args.verify_parent_fails:
+            if args.verify_parent_fails or args.verify_role_parent_fails:
                 if result.returncode != 1:
                     raise AssertionError("parent must reproduce an executable role-boundary failure")
-                print("Actual parent reproduces stale/stranded leader view regression")
+                print("Actual parent reproduces native role-fence gap" if args.verify_role_parent_fails else "Actual parent reproduces stale/stranded leader view regression")
             else:
                 result.check_returncode()
 

@@ -1,5 +1,6 @@
 #include "IndividualProgression.h"
 #include "IndividualProgressionF14GroupSyncView.h"
+#include "AccountMgr.h"
 #include "GroupMgr.h"
 #include "GroupScript.h"
 #include "PlayerScript.h"
@@ -26,12 +27,22 @@ namespace
         GroupViews.Request(group.GetRawValue());
     }
 
-    bool EligibleHumanLeader(Player* player, Group* group)
+    bool NormalLeaderAccount(Player* player)
+    {
+        // The matcher can load an account cache miss from Auth DB. Never hold
+        // the global view/fence lock across that operation. Account id and
+        // headless construction role still require the caller's object lease.
+        return player && player->GetSession() && !player->GetSession()->IsHeadless() &&
+            sIndividualProgression->isNormalAccount(player);
+    }
+
+    bool EligibleHumanLeader(Player* player, Group* group, bool normalAccount)
     {
         return player && group && player->GetGroup() == group && player->IsInWorld() &&
             player->GetSession() && !player->GetSession()->IsHeadless() &&
-            !player->GetSession()->IsSocketClosed() && !player->IsGameMaster() &&
-            sIndividualProgression->isNormalAccount(player);
+            !player->GetSession()->IsSocketClosed() &&
+            AccountMgr::IsPlayerAccount(player->GetSession()->GetSecurity()) && !player->IsGameMaster() &&
+            normalAccount;
     }
 
     void Refresh()
@@ -63,10 +74,26 @@ namespace
             if (!group || group->GetGUID() != groupGuid)
                 continue;
             Player* leader = ObjectAccessor::FindPlayer(group->GetLeaderGUID());
-            if (!EligibleHumanLeader(leader, group))
+            {
+                std::lock_guard<std::mutex> lock(ViewLock);
+                if (GroupViews.ObservationBlocked())
+                {
+                    GroupViews.Request(item.first);
+                    continue;
+                }
+            }
+            bool const normalAccount = NormalLeaderAccount(leader);
+            std::lock_guard<std::mutex> lock(ViewLock);
+            if (GroupViews.ObservationBlocked())
+            {
+                GroupViews.Request(item.first);
+                continue;
+            }
+            // Native role/quest writers enter the same fence before writing.
+            // These eligibility/stage readers do not invoke those writers.
+            if (!EligibleHumanLeader(leader, group, normalAccount))
                 continue;
             uint8 const stage = sIndividualProgression->GetEffectiveProgression(leader);
-            std::lock_guard<std::mutex> lock(ViewLock);
             GroupViews.Publish(item, leader->GetGUID().GetRawValue(), stage);
         }
     }
@@ -75,10 +102,28 @@ namespace
     {
     public:
         GroupViewWorld() : WorldScript("IndividualProgression_F14GroupViewWorld",
-            {WORLDHOOK_ON_UPDATE, WORLDHOOK_ON_AFTER_CONFIG_LOAD}) { }
+            {WORLDHOOK_ON_UPDATE, WORLDHOOK_ON_AFTER_CONFIG_LOAD
+#if defined(COSMIC_ROLE_STATE_CHANGE_HOOK_VERSION) && COSMIC_ROLE_STATE_CHANGE_HOOK_VERSION >= 1
+             , WORLDHOOK_ON_BEFORE_ROLE_STATE_CHANGE, WORLDHOOK_ON_AFTER_ROLE_STATE_CHANGE
+#endif
+            }) { }
 
         void OnUpdate(uint32 /*diff*/) override { Refresh(); }
 
+#if defined(COSMIC_ROLE_STATE_CHANGE_HOOK_VERSION) && COSMIC_ROLE_STATE_CHANGE_HOOK_VERSION >= 1
+        void OnBeforeRoleStateChange() override
+        {
+            std::lock_guard<std::mutex> lock(ViewLock);
+            GroupViews.BeginMutation(0);
+            GroupViews.Clear(); // no actor lookup; preserve active pairs/poison
+        }
+
+        void OnAfterRoleStateChange() override
+        {
+            std::lock_guard<std::mutex> lock(ViewLock);
+            GroupViews.EndMutation(0);
+        }
+#endif
         void OnAfterConfigLoad(bool /*reload*/) override
         {
             std::lock_guard<std::mutex> lock(ViewLock);
@@ -155,17 +200,26 @@ namespace
             Group* group = player->GetGroup();
             if (!group || group->GetLeaderGUID() != player->GetGUID())
                 return;
-            if (!EligibleHumanLeader(player, group))
+            auto const guid = group->GetGUID().GetRawValue();
             {
-                Request(group->GetGUID());
+                std::lock_guard<std::mutex> lock(ViewLock);
+                if (GroupViews.ObservationBlocked())
+                {
+                    GroupViews.Request(guid);
+                    return;
+                }
+            }
+            bool const normalAccount = NormalLeaderAccount(player);
+            std::lock_guard<std::mutex> lock(ViewLock);
+            if (GroupViews.ObservationBlocked() || !EligibleHumanLeader(player, group, normalAccount))
+            {
+                GroupViews.Request(guid);
                 return;
             }
             // Only the owned human leader is read here. Catch quest changes
             // outside IP's writers without reading another map's Player.
             uint8 const current = sIndividualProgression->GetEffectiveProgression(player);
-            std::lock_guard<std::mutex> lock(ViewLock);
             uint8 published = 0;
-            auto const guid = group->GetGUID().GetRawValue();
             GroupViews.EnsureRequested(guid);
             if (!GroupViews.Read(guid, player->GetGUID().GetRawValue(), published) || current != published)
                 GroupViews.Request(guid);
@@ -236,7 +290,8 @@ bool IndividualProgression::TryGetF14TemporaryGroupProgression(Player* player, u
         found = GroupViews.Read(groupGuid, group->GetLeaderGUID().GetRawValue(), stage);
     }
     bool canBorrowWrath = false;
-#if defined(COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION) && COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION >= 1
+#if defined(COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION) && COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION >= 1 && \
+    defined(COSMIC_ROLE_STATE_CHANGE_HOOK_VERSION) && COSMIC_ROLE_STATE_CHANGE_HOOK_VERSION >= 1
     // Paid receipt changes have a separate lifecycle; this increment supports
     // the owner's Paid-OFF configuration only for unearned Wrath borrowing.
     canBorrowWrath = !IsPaidExpansionActive();

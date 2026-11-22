@@ -81,11 +81,11 @@ class GroupViewWiring(unittest.TestCase):
         refresh = function(source, "void Refresh()")
         self.assertIn("COSMIC_F14_SESSION_REBIND_EXPERIMENT < 1", refresh)
         self.assertIn("COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT < 1", refresh)
-        self.assertIn("EligibleHumanLeader(leader, group)", refresh)
+        self.assertIn("EligibleHumanLeader(leader, group, normalAccount)", refresh)
         eligibility = function(source, "bool EligibleHumanLeader(")
-        for token in ("IsSocketClosed()", "IsHeadless()", "IsGameMaster()", "isNormalAccount(player)", "IsInWorld()"):
+        for token in ("IsSocketClosed()", "IsHeadless()", "IsGameMaster()", "normalAccount", "IsInWorld()", "AccountMgr::IsPlayerAccount"):
             self.assertIn(token, eligibility)
-        self.assertIn("!EligibleHumanLeader(player, group)", source)
+        self.assertIn("!EligibleHumanLeader(player, group, normalAccount)", source)
         self.assertIn("!GroupViews.Read(guid, player->GetGUID().GetRawValue(), published) || current != published", source)
         self.assertIn("GroupViews.Publish(item,", refresh)
         owned = function(source, "void OnPlayerBeforeUpdate(")
@@ -130,6 +130,39 @@ class GroupViewWiring(unittest.TestCase):
         query = function(source, "bool IndividualProgression::TryGetF14TemporaryGroupProgression(")
         self.assertIn("COSMIC_REWARDED_QUEST_CHANGE_HOOK_VERSION >= 1", query)
         self.assertIn("canBorrowWrath = !IsPaidExpansionActive();", query)
+
+    def test_role_fence_has_no_actor_lookup_and_requires_both_hooks(self):
+        source = read("src/IndividualProgressionF14GroupSyncView.cpp")
+        before = function(source, "void OnBeforeRoleStateChange(")
+        after = function(source, "void OnAfterRoleStateChange(")
+        self.assertLess(before.index("BeginMutation(0)"), before.index("GroupViews.Clear()"))
+        self.assertIn("GroupViews.EndMutation(0)", after)
+        for body in (before, after):
+            for forbidden in ("OptionOn()", "ObjectAccessor", "Player*", "GetGroup("):
+                self.assertNotIn(forbidden, body)
+        self.assertIn("WORLDHOOK_ON_BEFORE_ROLE_STATE_CHANGE", source)
+        self.assertIn("WORLDHOOK_ON_AFTER_ROLE_STATE_CHANGE", source)
+        query = function(source, "bool IndividualProgression::TryGetF14TemporaryGroupProgression(")
+        self.assertIn("COSMIC_ROLE_STATE_CHANGE_HOOK_VERSION >= 1", query)
+
+    def test_role_readers_observe_mutation_gate_under_same_lock(self):
+        source = read("src/IndividualProgressionF14GroupSyncView.cpp")
+        refresh = function(source, "void Refresh()")
+        protected = refresh.split("Player* leader =", 1)[1]
+        self.assertLess(protected.index("lock(ViewLock)"), protected.index("ObservationBlocked()"))
+        self.assertLess(protected.index("ObservationBlocked()"), protected.index("EligibleHumanLeader("))
+        own = function(source, "void OnPlayerBeforeUpdate(")
+        self.assertLess(own.index("lock(ViewLock)"), own.index("EligibleHumanLeader("))
+        self.assertLess(own.index("ObservationBlocked()"), own.index("GetEffectiveProgression("))
+
+    def test_account_matcher_is_outside_fenced_role_predicate(self):
+        source = read("src/IndividualProgressionF14GroupSyncView.cpp")
+        classify = function(source, "bool NormalLeaderAccount(")
+        self.assertIn("isNormalAccount(player)", classify)
+        self.assertNotIn("ViewLock", classify)
+        predicate = function(source, "bool EligibleHumanLeader(")
+        self.assertNotIn("isNormalAccount(", predicate)
+        self.assertIn("normalAccount", predicate)
 
     def test_mutation_fence_survives_reload_and_retries_publication(self):
         header = read("src/IndividualProgressionF14GroupSyncView.h")

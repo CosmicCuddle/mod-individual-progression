@@ -84,6 +84,11 @@ namespace IndividualProgressionF14GroupSyncView
             return true;
         }
 
+        bool ObservationBlocked() const
+        {
+            return _failed || _mutationPoisoned || _activeMutations != 0;
+        }
+
         void Forget(std::uint64_t group)
         {
             _pending.erase(group);
