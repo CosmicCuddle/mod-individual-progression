@@ -1359,3 +1359,19 @@ Focused native tests require every completeness family independently, exercise t
   gameplay remain open. No snapshot/earned/admission/Paid/title rule rewrite.
   Source note F14_LEADER_VIEW_RECOVERY_2026-11-22.md. DefaultsOFF; no live/config/
   SQL/DBC/client changes. Rollback source child/rebuild matching module; no migration.
+
+
+- **F14 paired native role fence (22 Nov 2026, development):** IP194 child of
+  IP1933fffa397fd6d678cfb515313b12a2ac54a0b0ac5, paired Core71bc2460ea16de7108493d81ef1e5ac54e21bae213.
+  Pointer-free synchronous role callbacks invalidate global value snapshots before
+  supported native setters write; nested quest/role counters survive reload. Role/
+  stage readers serialized with fence, potentially blocking account classification
+  outside lock with gate recheck. Explicit player-session security check matches
+  social human policy; account-pattern cache remains distinct. Unearned Wrath needs
+  role+quest+session capabilities and PaidOFF; older SDK has TBC fallback. No earned,
+  title/admission, visual or PB dispatch rewrite. Actual source callback/mutation
+  fixtures and exact-parent failure; compiler/counts/hosted outcome in PR/queue.
+  Native ABI/classifier/ownership/threaded race/gameplay remain open. Tracked-setter
+  fence is not general field/thread authority or direct-write coverage. Source note
+  F14_ROLE_STATE_FENCE_2026-11-22.md. DefaultsOFF; no live/config/SQL/DBC/client/data
+  change. Rollback paired children, rebuild compatible Core/modules, preserve state.
