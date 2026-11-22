@@ -26,6 +26,14 @@ namespace
         GroupViews.Request(group.GetRawValue());
     }
 
+    bool EligibleHumanLeader(Player* player, Group* group)
+    {
+        return player && group && player->GetGroup() == group && player->IsInWorld() &&
+            player->GetSession() && !player->GetSession()->IsHeadless() &&
+            !player->GetSession()->IsSocketClosed() && !player->IsGameMaster() &&
+            sIndividualProgression->isNormalAccount(player);
+    }
+
     void Refresh()
     {
 #if !defined(COSMIC_F14_SESSION_REBIND_EXPERIMENT) || COSMIC_F14_SESSION_REBIND_EXPERIMENT < 1 || \
@@ -55,9 +63,7 @@ namespace
             if (!group || group->GetGUID() != groupGuid)
                 continue;
             Player* leader = ObjectAccessor::FindPlayer(group->GetLeaderGUID());
-            if (!leader || leader->GetGroup() != group || !leader->IsInWorld() || !leader->GetSession() ||
-                leader->GetSession()->IsHeadless() || leader->GetSession()->IsSocketClosed() ||
-                leader->IsGameMaster() || !sIndividualProgression->isNormalAccount(leader))
+            if (!EligibleHumanLeader(leader, group))
                 continue;
             uint8 const stage = sIndividualProgression->GetEffectiveProgression(leader);
             std::lock_guard<std::mutex> lock(ViewLock);
@@ -144,12 +150,16 @@ namespace
 #endif
         void OnPlayerBeforeUpdate(Player* player, uint32 /*diff*/) override
         {
-            if (!OptionOn() || !player || !player->IsInWorld() || !player->GetSession() ||
-                player->GetSession()->IsHeadless())
+            if (!OptionOn() || !player)
                 return;
             Group* group = player->GetGroup();
             if (!group || group->GetLeaderGUID() != player->GetGUID())
                 return;
+            if (!EligibleHumanLeader(player, group))
+            {
+                Request(group->GetGUID());
+                return;
+            }
             // Only the owned human leader is read here. Catch quest changes
             // outside IP's writers without reading another map's Player.
             uint8 const current = sIndividualProgression->GetEffectiveProgression(player);
@@ -157,7 +167,7 @@ namespace
             uint8 published = 0;
             auto const guid = group->GetGUID().GetRawValue();
             GroupViews.EnsureRequested(guid);
-            if (GroupViews.Read(guid, player->GetGUID().GetRawValue(), published) && current != published)
+            if (!GroupViews.Read(guid, player->GetGUID().GetRawValue(), published) || current != published)
                 GroupViews.Request(guid);
         }
 #if defined(COSMIC_F14_SESSION_REBIND_EXPERIMENT) && COSMIC_F14_SESSION_REBIND_EXPERIMENT >= 1

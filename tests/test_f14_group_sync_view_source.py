@@ -81,7 +81,12 @@ class GroupViewWiring(unittest.TestCase):
         refresh = function(source, "void Refresh()")
         self.assertIn("COSMIC_F14_SESSION_REBIND_EXPERIMENT < 1", refresh)
         self.assertIn("COSMIC_F14_SESSION_DISCONNECT_EXPERIMENT < 1", refresh)
-        self.assertIn("IsSocketClosed()", refresh)
+        self.assertIn("EligibleHumanLeader(leader, group)", refresh)
+        eligibility = function(source, "bool EligibleHumanLeader(")
+        for token in ("IsSocketClosed()", "IsHeadless()", "IsGameMaster()", "isNormalAccount(player)", "IsInWorld()"):
+            self.assertIn(token, eligibility)
+        self.assertIn("!EligibleHumanLeader(player, group)", source)
+        self.assertIn("!GroupViews.Read(guid, player->GetGUID().GetRawValue(), published) || current != published", source)
         self.assertIn("GroupViews.Publish(item,", refresh)
         owned = function(source, "void OnPlayerBeforeUpdate(")
         self.assertIn("group->GetLeaderGUID() != player->GetGUID()", owned)
