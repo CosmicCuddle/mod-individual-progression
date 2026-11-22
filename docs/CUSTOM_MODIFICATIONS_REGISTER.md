@@ -1332,3 +1332,17 @@ Focused native tests require every completeness family independently, exercise t
   Native ABI/classifier/persisted guild/gameplay remain unproven. Source note:
   F14_GUILD_REMEDIATION_RECHECK_2026-11-22.md. Defaults OFF; no SQL/config/DBC/client/
   live operation. Rollback source child/rebuild matching modules, preserve history.
+
+
+- **F14 bidirectional group-accept member check (22 Nov 2026, development):**
+  Child of IP1916f029a4ef8b2dcc54adfdfccf4a0a3430017cf60. Existing group admission
+  pair policy now checks a restricted bot acceptor against non-leader Vanilla
+  human members, as well as Vanilla human acceptors against restricted bots.
+  Reuses AllowPairIn, retaining safely resolved/owned-map-only members, positive
+  identity, protected actors, leader checks and reply direction. No new rule,
+  addon/visual/PB dispatch behavior or migration. Actual readers/scope/social entry
+  bodies plus real policy compile with explicit engine/classifier/packet doubles;
+  exact-parent bypass reproduction and targeted results in PR192/review queue.
+  Native group ownership/ABI/classifier/session packets/gameplay remain unproven.
+  Source note F14_GROUP_ACCEPT_SYMMETRY_2026-11-22.md. DefaultsOFF; no live/config/
+  SQL/DBC/client change. Rollback source child/rebuild module, preserve state.
