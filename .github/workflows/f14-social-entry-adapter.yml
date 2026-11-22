@@ -1,0 +1,35 @@
+name: F14 actual social entry adapter
+on:
+  pull_request:
+    branches: [feature/codex-f14-guild-remediation-recheck-20261122]
+    paths:
+      - src/IndividualProgressionF14SocialIsolationScript.cpp
+      - tests/run_f14_social_hook_adapter.py
+      - tests/test_f14_social_isolation_source.py
+      - .github/workflows/f14-social-entry-adapter.yml
+permissions:
+  contents: read
+jobs:
+  actual-social:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reproduce parent failure and execute actual social entry methods
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          python3 -B tests/run_f14_social_hook_adapter.py --compiler '${{ matrix.compiler }}' --verify-parent-fails
+          python3 -B tests/run_f14_social_hook_adapter.py --compiler '${{ matrix.compiler }}'
+          python3 -B tests/run_f14_guild_remediation_adapter.py --compiler '${{ matrix.compiler }}'
+          python3 -B -m unittest discover -s tests -p test_f14_social_isolation_source.py -v
+          git diff --check
+# No server/DB/host/packet sink execution, artifact or cache uploads.

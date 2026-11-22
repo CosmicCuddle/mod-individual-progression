@@ -567,18 +567,17 @@ class HooksAndAuthority(unittest.TestCase):
         self.assertLess(accept.index("AllowPair("), accept.index("AllowGroupMembers(scope, player, group)"))
         scan = self.src.split("bool AllowGroupMembers(", 1)[1].split("\n        }\n", 1)[0]
         # 2. Only a human still in Vanilla is checked; every current member is read.
-        self.assertIn("if (!Policy::HumanStillVanilla(facts))", scan)
+        self.assertIn("!Policy::HumanStillVanilla(ReadHuman(acceptor))", scan)
+        self.assertIn("!Policy::BotIsRestrictedRandomBot(ReadBot(acceptor))", scan)
         self.assertIn("group->GetMemberSlots()", scan)
         self.assertIn("Player* member = scope.Resolve(slot.guid);", scan)
         # 3. Unresolved members are skipped, never classified from the slot.
         self.assertRegex(scan, r"if \(!member\)\s*continue;")
-        self.assertIn("bots.push_back(ReadBot(member));", scan)
+        self.assertIn("AllowPairIn(scope, Policy::Surface::GroupAccept, acceptor, member, false)", scan)
         for token in ("getRace", "slot.name", "slot.flags", "IsTbcRace", "RACE_"):
             self.assertNotIn(token, scan, token)
         # 4. The same decision and reply rule as every other surface.
-        self.assertIn("Policy::FirstRestrictedGroupMember(true, facts, bots)", scan)
-        self.assertIn("Policy::Direction::HumanToBot, facts, bots[index], false)", scan)
-        self.assertIn("SendInCharacterReply(players[index], human);", scan)
+        self.assertLess(scan.index("scope.Contains(acceptor)"), scan.index("ReadHuman(acceptor)"))
         policy = strip_comments(read(POLICY))
         first = policy.split("std::size_t FirstRestrictedGroupMember(", 1)[1].split("\n    }\n", 1)[0]
         self.assertIn("if (IsRestrictedPair(optionEnabled, h, b))", first)
