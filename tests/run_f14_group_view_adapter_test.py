@@ -351,6 +351,38 @@ int main()
         CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS ? desired : 8));
         CHECK(bot.earned == 17 && bot.writes == 0);
     }
+    // Leader role/session eligibility changes at the owned update boundary.
+    human.earned = 15;
+    for (unsigned role = 0; role < 5; ++role)
+    {
+        IP.RequestF14GroupSyncView(&group);
+        world.OnUpdate(0);
+        CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS ? 15 : 8));
+        if (role == 0) human.session.headless = true;
+        if (role == 1) human.session.closed = true;
+        if (role == 2) human.gm = true;
+        if (role == 3) human.normal = false;
+        if (role == 4) human.inWorld = false;
+        sessions.OnPlayerBeforeUpdate(&human, 0);
+        CHECK(IP.GetEffectiveProgression(&bot) == 8);
+        world.OnUpdate(0);
+        CHECK(IP.GetEffectiveProgression(&bot) == 8);
+        human.session.headless = human.session.closed = human.gm = false;
+        human.normal = human.inWorld = true;
+        sessions.OnPlayerBeforeUpdate(&human, 0); // invalid snapshot must requeue
+        world.OnUpdate(0);
+        CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS ? 15 : 8));
+        CHECK(bot.earned == 17 && bot.writes == 0);
+    }
+    // Invalid leader at the first refresh must not permanently strand the view.
+    human.gm = true;
+    IP.RequestF14GroupSyncView(&group);
+    world.OnUpdate(0);
+    CHECK(IP.GetEffectiveProgression(&bot) == 8);
+    human.gm = false;
+    sessions.OnPlayerBeforeUpdate(&human, 0);
+    world.OnUpdate(0);
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS ? 15 : 8));
     // A hidden progression quest changed outside IP's two writers.
     human.earned = 15;
     sessions.OnPlayerBeforeUpdate(&human, 0);
@@ -471,10 +503,13 @@ def main():
     parser.add_argument("--std", choices=("c++17", "c++20"), default="c++20")
     parser.add_argument("--ndebug", action="store_true")
     parser.add_argument("--core", type=Path, help="Paired Core checkout; compiles its actual mutation writers and dispatch")
+    parser.add_argument("--verify-parent-fails", action="store_true", help="reproduce role-boundary failure with exact parent adapter")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     read = lambda name: (root / "src" / name).read_text(encoding="utf-8")
-    adapter = re.sub(r'^#include[^\n]*\n', '', read("IndividualProgressionF14GroupSyncView.cpp"), flags=re.M)
+    adapter_source = (subprocess.check_output(["git", "show", "9e9b97b516c516069411db3f160cee2f96792139:src/IndividualProgressionF14GroupSyncView.cpp"], cwd=root).decode("utf-8")
+                      if args.verify_parent_fails else read("IndividualProgressionF14GroupSyncView.cpp"))
+    adapter = re.sub(r'^#include[^\n]*\n', '', adapter_source, flags=re.M)
     sync = function(read("IndividualProgression.cpp"), "void IndividualProgression::SyncBotsProgressionToLeader(")
     reader = function(read("IndividualProgressionExpansion.cpp"), "uint8 IndividualProgression::GetEffectiveProgression(")
     access = function(read("IndividualProgression.cpp"), "bool IndividualProgression::hasPassedProgression(")
@@ -512,6 +547,8 @@ def main():
         source = Path(tmp) / "group-view.cpp"
         source.write_text(PRELUDE + '#include "IndividualProgressionF14LoginPolicy.h"\n' + adapter + reader + access + sync + command_guard + login_guard + title_guard + paired + TEST.replace("PAIRED_QUEST_TESTS", PAIRED_TEST if args.core else ""), encoding="utf-8")
         modes = [(hooks, quest) for hooks in (0, 1) for quest in ((0, 1) if args.core else (0,))]
+        if args.verify_parent_fails:
+            modes = [(1, 1 if args.core else 0)]
         for hooks, quest in modes:
             binary = Path(tmp) / ("group-view-" + str(hooks) + "-" + str(quest) + ".exe")
             flags = ["-DHOOKS=" + str(hooks), "-DQUEST_HOOKS=" + str(quest)]
@@ -524,7 +561,13 @@ def main():
             command = args.compiler + ["-std=" + args.std, "-pthread", "-Wall", "-Wextra", "-Werror", "-pedantic", "-O2",
                                        "-I" + str(root / "src")] + flags + [str(source), "-o", str(binary)]
             subprocess.run(command, check=True)
-            subprocess.run([str(binary)], check=True)
+            result = subprocess.run([str(binary)])
+            if args.verify_parent_fails:
+                if result.returncode != 1:
+                    raise AssertionError("parent must reproduce an executable role-boundary failure")
+                print("Actual parent reproduces stale/stranded leader view regression")
+            else:
+                result.check_returncode()
 
 
 if __name__ == "__main__":

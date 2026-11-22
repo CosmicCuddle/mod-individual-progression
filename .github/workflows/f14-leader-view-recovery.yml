@@ -1,0 +1,44 @@
+name: F14 leader view recovery paired source integration
+on:
+  pull_request:
+    branches: [feature/codex-f14-group-accept-symmetry-20261122]
+    paths:
+      - src/IndividualProgressionF14GroupSyncView.cpp
+      - tests/run_f14_group_view_adapter_test.py
+      - tests/test_f14_group_sync_view_source.py
+      - .github/workflows/f14-leader-view-recovery.yml
+permissions:
+  contents: read
+jobs:
+  paired-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: ip
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/azerothcore-wotlk
+          ref: c6e3bf04d2e49fd30afcb8b0e3416fca50287aab
+          path: core
+          persist-credentials: false
+      - name: Execute actual-source lifecycle and paired mutation matrix
+        working-directory: ip
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git -C ../core rev-parse HEAD)" = c6e3bf04d2e49fd30afcb8b0e3416fca50287aab
+          python3 -B tests/run_f14_group_view_adapter_test.py --core ../core --compiler '${{ matrix.compiler }}' --std c++17 --verify-parent-fails
+          python3 -B tests/run_f14_group_view_adapter_test.py --core ../core --compiler '${{ matrix.compiler }}' --std c++17 --ndebug
+          python3 -B tests/run_f14_group_view_adapter_test.py --core ../core --compiler '${{ matrix.compiler }}' --std c++20
+          python3 -B -m unittest discover -s tests -p test_f14_group_sync_view_source.py -v
+          git diff --check
+# Source adapters with explicit engine doubles; no server/DB, artifact/cache or live activation.

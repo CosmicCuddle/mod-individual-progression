@@ -1346,3 +1346,16 @@ Focused native tests require every completeness family independently, exercise t
   Native group ownership/ABI/classifier/session packets/gameplay remain unproven.
   Source note F14_GROUP_ACCEPT_SYMMETRY_2026-11-22.md. DefaultsOFF; no live/config/
   SQL/DBC/client change. Rollback source child/rebuild module, preserve state.
+
+
+- **F14 leader-view update recovery (22 Nov 2026, development):** Child of
+  IP1929e9b97b516c516069411db3f160cee2f96792139. Shared existing leader eligibility
+  used by world refresh and owned update; ineligible current callback invalidates
+  view, failed read requeues publication after eligibility returns. Actual adapter
+  parent failure and expanded role/relog/group/mutation tests preserve earned17
+  and zero writes. Paired source uses Core70c6e3bf04; exact results in PR193/queue.
+  Engine/classification/ownership/ABI are doubles; observed callback boundary only,
+  NOT atomic invalidation for all external role edits. Native Core seams and
+  gameplay remain open. No snapshot/earned/admission/Paid/title rule rewrite.
+  Source note F14_LEADER_VIEW_RECOVERY_2026-11-22.md. DefaultsOFF; no live/config/
+  SQL/DBC/client changes. Rollback source child/rebuild matching module; no migration.
