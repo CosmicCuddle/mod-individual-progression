@@ -755,40 +755,32 @@ namespace
             Player* leader = scope.Resolve(group->GetLeaderGUID());
             if (leader && !AllowPair(Policy::Surface::GroupAccept, player, leader, false))
                 return false;
-            // 2. Every other current member, for a human who is still in
-            // Vanilla. Unresolved members are skipped: never guessed by race.
+            // 2. Every other current member, in both restricted-pair directions.
+            // Unresolved members are skipped: never guessed by race.
             return AllowGroupMembers(scope, player, group);
         }
 
     private:
-        bool AllowGroupMembers(ReadScope const& scope, Player* human, Group const* group)
+        bool AllowGroupMembers(ReadScope const& scope, Player* acceptor, Group const* group)
         {
-            Policy::Human const facts = ReadHuman(human);
-            if (!Policy::HumanStillVanilla(facts))
+            if (!scope.Contains(acceptor))
                 return true;
-            std::vector<Player*> players;
-            std::vector<Policy::Bot> bots;
+            if (!Policy::HumanStillVanilla(ReadHuman(acceptor)) &&
+                !Policy::BotIsRestrictedRandomBot(ReadBot(acceptor)))
+                return true;
             for (Group::MemberSlot const& slot : group->GetMemberSlots())
             {
-                if (slot.guid == human->GetGUID() || slot.guid == group->GetLeaderGUID())
+                if (slot.guid == acceptor->GetGUID() || slot.guid == group->GetLeaderGUID())
                     continue;
-                // Off the world thread only members on the owned map
-                // resolve; others are never touched (T1).
                 Player* member = scope.Resolve(slot.guid);
                 if (!member)
-                    continue; // offline/unresolved: no facts, never restricted
-                players.push_back(member);
-                bots.push_back(ReadBot(member));
+                    continue; // unresolved/foreign facts never imply restriction
+                // Same bidirectional rule as the leader check: a restricted
+                // bot acceptor must also see non-leader Vanilla humans.
+                if (!AllowPairIn(scope, Policy::Surface::GroupAccept, acceptor, member, false))
+                    return false;
             }
-            std::size_t const index = Policy::FirstRestrictedGroupMember(true, facts, bots);
-            if (index >= bots.size())
-                return true;
-            // Same decision and reply rule as every other surface.
-            Policy::Decision const d = Policy::Decide(true, Policy::Surface::GroupAccept,
-                Policy::Direction::HumanToBot, facts, bots[index], false);
-            if (d.reply)
-                SendInCharacterReply(players[index], human);
-            return !d.block;
+            return true;
         }
     };
 
