@@ -1,0 +1,44 @@
+name: F14 paired native GM routes and overlap
+on:
+  pull_request:
+    branches: [feature/codex-f14-role-state-fence-20261122]
+    paths:
+      - tests/run_f14_group_view_adapter_test.py
+      - .github/workflows/f14-role-route-transitions.yml
+permissions:
+  contents: read
+jobs:
+  paired-routes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: ip
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CosmicCuddle/azerothcore-wotlk
+          ref: 90f6fe51a0614b16db955f214671cfaedda36948
+          path: core
+          fetch-depth: 3
+          persist-credentials: false
+      - name: Execute actual role routes and nested quest recovery
+        working-directory: ip
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git -C ../core rev-parse HEAD)" = 90f6fe51a0614b16db955f214671cfaedda36948
+          python3 -B ../core/tests/cosmic_role_state_change/run_role_state_change_test.py --compiler '${{ matrix.compiler }}'
+          python3 -B -m unittest discover -s ../core/tests/cosmic_role_state_change -p 'test_role*.py' -v
+          python3 -B tests/run_f14_group_view_adapter_test.py --core ../core --compiler '${{ matrix.compiler }}' --std c++17 --ndebug
+          python3 -B tests/run_f14_group_view_adapter_test.py --core ../core --compiler '${{ matrix.compiler }}' --std c++20
+          python3 -B -m unittest discover -s tests -p test_f14_group_sync_view_source.py -v
+          git diff --check
+# Source composition with explicit engine/registry/classifier doubles, no live services or uploads.
