@@ -62,11 +62,21 @@ struct Session {
     AccountTypes _security = SEC_PLAYER;
     void SetSecurity(AccountTypes);
     AccountTypes GetSecurity() const { return _security; }
+    bool IsGMAccount() const { return _security != SEC_PLAYER; }
     bool headless = false, closed = false;
     bool IsHeadless() const { return headless; }
     bool IsSocketClosed() const { return closed; }
 };
 using WorldSession = Session;
+[[maybe_unused]] constexpr uint32 PLAYER_EXTRA_GM_ON = 1, FACTION_FRIENDLY = 35;
+[[maybe_unused]] constexpr uint32 PLAYER_FLAGS_GM = 1, UNIT_FLAG2_ALLOW_CHEAT_SPELLS = 1;
+[[maybe_unused]] constexpr uint32 UNIT_FIELD_BYTES_2 = 0, UNIT_BYTE2_FLAG_FFA_PVP = 1;
+[[maybe_unused]] constexpr uint32 PHASEMASK_ANYWHERE = 0xFFFF, PHASEMASK_NORMAL = 1;
+[[maybe_unused]] constexpr uint32 SERVERSIDE_VISIBILITY_GM = 0;
+struct Pet { void SetFaction(uint32) { } };
+struct FixtureWorld { bool IsFFAPvPRealm() const { return false; } };
+static FixtureWorld EngineWorld;
+[[maybe_unused]] static FixtureWorld* sWorld = &EngineWorld;
 struct Group;
 struct Player {
     ObjectGuid guid;
@@ -76,6 +86,28 @@ struct Player {
     bool inWorld = true, gm = false, verified = false, normal = true;
     mutable unsigned roleReads = 0;
     unsigned writes = 0;
+    uint32 m_ExtraFlags = 0, m_areaUpdateId = 0;
+    unsigned triggerVisibility = 0;
+    void SetGameMaster(bool);
+    void SetFaction(uint32) { }
+    void SetPlayerFlag(uint32) { }
+    void SetUnitFlag2(uint32) { }
+    Pet* GetPet() { return nullptr; }
+    bool HasByteFlag(uint32, uint32, uint32) const { return false; }
+    void RemoveByteFlag(uint32, uint32, uint32) { }
+    void SetByteFlag(uint32, uint32, uint32) { }
+    void ResetContestedPvP() { }
+    void CombatStopWithPets() { }
+    void SetPhaseMask(uint32, bool) { }
+    void SetServerSideVisibilityDetect(uint32, uint32) { }
+    uint32 GetPhaseByAuras() const { return 0; }
+    void SetFactionForRace(uint32) { }
+    void RemovePlayerFlag(uint32) { }
+    void RemoveUnitFlag2(uint32) { }
+    uint32 GetFaction() const { return 1; }
+    void UpdateArea(uint32) { }
+    void UpdateObjectVisibility() { }
+    void UpdateTriggerVisibility() { ++triggerVisibility; }
     std::unordered_set<uint32> m_RewardedQuests;
     std::map<uint32, bool> m_RewardedQuestsSave;
     bool questBacked = false;
@@ -99,8 +131,8 @@ struct Player {
     Group* GetGroup() const { return group; }
     Session const* GetSession() const { ++roleReads; return &session; }
     bool IsInWorld() const { return inWorld; }
-    bool IsGameMaster() const { return gm; }
-    uint8 getRace() const { return race; }
+    bool IsGameMaster() const { return gm || (m_ExtraFlags & PLAYER_EXTRA_GM_ON); }
+    uint8 getRace(bool = false) const { return race; }
     uint32 GetLevel() const { return 60; }
 };
 using RewardedQuestSet = std::unordered_set<uint32>;
@@ -176,6 +208,7 @@ static unsigned BeforeEvents = 0, AfterEvents = 0;
 struct ScriptMgr {
     void OnBeforeRoleStateChange();
     void OnAfterRoleStateChange();
+    void OnPlayerFfaPvpStateUpdate(Player*, bool) { }
     void OnPlayerBeforeRewardedQuestChange(Player*, uint32);
     void OnPlayerAfterRewardedQuestChange(Player*, uint32);
 };
@@ -534,6 +567,53 @@ int main()
     human.session.SetSecurity(SEC_PLAYER);
     CHECK(IP.GetEffectiveProgression(&bot) == 8); world.OnUpdate(0);
     CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+    // Actual native GM commands -> complete SetGameMaster -> IP role fence.
+    ChatHandler handler{&human};
+    roleSafe = false;
+    RoleProbe = [&](Hook hook) {
+        if (hook != WORLDHOOK_ON_BEFORE_ROLE_STATE_CHANGE) return;
+        roleSafe = IP.GetEffectiveProgression(&bot) == 8;
+        auto const reads = human.roleReads;
+        world.OnUpdate(0); sessions.OnPlayerBeforeUpdate(&human, 0);
+        roleSafe = roleSafe && human.roleReads == reads;
+    };
+    CHECK(NativeGMCommands::HandleGMOnCommand(&handler));
+    CHECK(roleSafe && human.IsGameMaster());
+    world.OnUpdate(0); CHECK(IP.GetEffectiveProgression(&bot) == 8);
+    CHECK(NativeGMCommands::HandleGMOffCommand(&handler));
+    CHECK(!human.IsGameMaster() && human.triggerVisibility == 2);
+    CHECK(IP.GetEffectiveProgression(&bot) == 8); world.OnUpdate(0);
+    CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS && QUEST_HOOKS ? 15 : 8));
+#if QUEST_HOOKS
+    // Closing a nested role pair must not close the outer native quest fence.
+    human.questBacked = true; human.SetRewardedQuest(66008);
+    bool overlapSafe = true;
+    BeforeMutationProbe = [&](Player*, uint32) {
+        NativeGMCommands::HandleGMOnCommand(&handler);
+        world.OnUpdate(0); overlapSafe = IP.GetEffectiveProgression(&bot) == 8;
+        NativeGMCommands::HandleGMOffCommand(&handler);
+        world.OnUpdate(0); sessions.OnPlayerBeforeUpdate(&human, 0);
+        overlapSafe = overlapSafe && IP.GetEffectiveProgression(&bot) == 8;
+    };
+    human.SetRewardedQuest(66016); CHECK(overlapSafe);
+    world.OnUpdate(0); CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS ? 16 : 8));
+    CHECK(bot.earned == 8 && bot.writes == 1);
+    human.RemoveRewardedQuest(66016); human.RemoveRewardedQuest(66008);
+    // Reverse nesting: quest completion cannot release an outer native GM fence.
+    NativeGMCommands::HandleGMOnCommand(&handler);
+    RoleProbe = [&](Hook hook) {
+        if (hook != WORLDHOOK_ON_BEFORE_ROLE_STATE_CHANGE) return;
+        human.SetRewardedQuest(66016);
+        world.OnUpdate(0); sessions.OnPlayerBeforeUpdate(&human, 0);
+        overlapSafe = IP.GetEffectiveProgression(&bot) == 8;
+    };
+    NativeGMCommands::HandleGMOffCommand(&handler); CHECK(overlapSafe);
+    world.OnUpdate(0); CHECK(IP.GetEffectiveProgression(&bot) == (HOOKS ? 16 : 8));
+    CHECK(bot.earned == 8 && bot.writes == 1);
+    human.RemoveRewardedQuest(66016);
+    human.questBacked = false; human.earned = 15;
+    IP.RequestF14GroupSyncView(&group); world.OnUpdate(0);
+#endif
     // Nested role pairs + config reload must not expose an intermediate view.
     world.OnBeforeRoleStateChange(); world.OnBeforeRoleStateChange();
     world.OnAfterConfigLoad(true); world.OnAfterRoleStateChange();
@@ -613,7 +693,16 @@ def main():
             paired += "\n#if ROLE_HOOKS\n" + role_guard
             paired += "\n#undef CALL_ENABLED_HOOKS\n#define CALL_ENABLED_HOOKS(type, hook, expression) do { for (auto* script : RoleScripts) if (script->Enabled(hook)) { expression; } RoleDispatchProbe(hook); } while (false)\n"
             paired += "\n".join(function(world_dispatch, "void ScriptMgr::On" + phase + "RoleStateChange(") for phase in ("Before", "After"))
-            paired += function(security, "void WorldSession::SetSecurity(") + "\n#endif\n"
+            paired += function(security, "void WorldSession::SetSecurity(")
+            player = (core / "src/server/game/Entities/Player/Player.cpp").read_text(encoding="utf-8")
+            commands = (core / "src/server/scripts/Commands/cs_gm.cpp").read_text(encoding="utf-8")
+            paired += function(player, "void Player::SetGameMaster(")
+            paired += "\nconstexpr int LANG_GM_ON=1, LANG_GM_OFF=2;\n"
+            paired += ("struct ChatHandler { Player* player; Player* GetPlayer() { return player; } "
+                       "void SendNotification(int) { } };\n")
+            paired += "struct NativeGMCommands {" + "\n".join(
+                function(commands, "static bool HandleGM" + phase + "Command(")
+                for phase in ("On", "Off")) + "};\n#endif\n"
     with tempfile.TemporaryDirectory(prefix="f14-group-view-") as tmp:
         source = Path(tmp) / "group-view.cpp"
         source.write_text(PRELUDE + '#include "IndividualProgressionF14LoginPolicy.h"\n' + adapter + reader + access + sync + command_guard + login_guard + title_guard + paired + TEST.replace("PAIRED_QUEST_TESTS", PAIRED_TEST if args.core else ""), encoding="utf-8")
